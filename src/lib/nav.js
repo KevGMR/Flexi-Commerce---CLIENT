@@ -27,7 +27,15 @@ export const navItems = [
   { label: "Customers", href: "/dashboard/customers", permission: PERMISSIONS.VIEW_USERS },
   { label: "Analytics (Reports)", href: "/dashboard/analytics", permission: PERMISSIONS.VIEW_REPORTS },
   { label: "Sales Channels", isSection: true },
-  { label: "POS", href: "/dashboard/sales-channels/pos", permission: PERMISSIONS.CREATE_SALE },
+  {
+    label: "Point of Sale",
+    href: "/dashboard/sales-channels/pos",
+    permission: PERMISSIONS.CREATE_SALE,
+    children: [
+      { label: "POS Terminal", href: "/dashboard/sales-channels/pos", permission: PERMISSIONS.CREATE_SALE },
+      { label: "Sales Reports", href: "/dashboard/sales-channels/pos/reports", permission: PERMISSIONS.VIEW_REPORTS },
+    ],
+  },
   {
     label: "Settings",
     href: "/dashboard/settings",

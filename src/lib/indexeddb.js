@@ -169,6 +169,18 @@ function calculateFuzzyScore(query, text) {
   return 1 - (distance / maxLen);
 }
 
+// Check if query is a prefix of any word in the text (for multi-word product names)
+function hasWordPrefixMatch(query, text) {
+  const lowerQuery = query.toLowerCase();
+  const lowerText = text.toLowerCase();
+  
+  // Split on whitespace and common delimiters
+  const words = lowerText.split(/[\s-_,]+/);
+  
+  // Check if any word starts with the query
+  return words.some(word => word.startsWith(lowerQuery));
+}
+
 // Set Shopify products in cache (clears old data)
 export async function setShopifyProducts(products) {
   if (!db) await initDB();
@@ -246,11 +258,17 @@ export async function searchShopifyProducts(query = "", limit = 50) {
         let matchScore = 0;
         let matchType = null;
 
-        // Check title fuzzy match
+        // Check word prefix match (e.g., "flann" matches "Flannel Shirt")
+        if (hasWordPrefixMatch(lowerQuery, product.title)) {
+          matchScore = 0.85;
+          matchType = "word-prefix";
+        }
+
+        // Check title fuzzy match (fallback for typos)
         const titleScore = calculateFuzzyScore(lowerQuery, product.title.toLowerCase());
         if (titleScore > 0.3) {
-          matchScore = titleScore;
-          matchType = "title";
+          matchScore = Math.max(matchScore, titleScore);
+          matchType = matchType || "title";
         }
 
         // Check SKU exact/partial match (higher priority)

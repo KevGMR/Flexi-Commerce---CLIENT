@@ -1255,8 +1255,6 @@ export default function PosPage() {
       }
 
 
-      console.log({ payload });
-
       const res = await apiFetch("/sales", { method: "POST", body: payload });
       const receiptData = res?.data || res;
       const receiptNumber =
