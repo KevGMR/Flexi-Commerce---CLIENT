@@ -1,17 +1,19 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useSessionStore } from "@/store/session";
 import { apiFetch } from "@/lib/api-client";
+import { buildLoginRedirect, sanitizeNextPath } from "@/lib/auth-redirect";
 import { OrgAvatar } from "@/components/ui/Avatar";
 import { X } from "@/components/icons/Icon";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:9200";
 
-export default function SelectOrganizationPage() {
+function SelectOrganizationPageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const {
     organizations,
     activeOrganization,
@@ -33,16 +35,18 @@ export default function SelectOrganizationPage() {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [formData, setFormData] = useState({ name: "" });
   const [creating, setCreating] = useState(false);
+  const nextParam = searchParams.get("next");
+  const nextPath = sanitizeNextPath(nextParam);
 
   useEffect(() => {
     if (hydrated) {
       const { tempAuthCredentials } = useSessionStore.getState();
       // Redirect to login if no temp credentials and no existing session
       if (!accessToken && !tempAuthCredentials) {
-        router.push("/auth/login");
+        router.push(buildLoginRedirect(nextPath));
       }
     }
-  }, [hydrated, accessToken, router]);
+  }, [hydrated, accessToken, router, nextPath]);
 
   const handleSelectOrganization = async (orgId) => {
     setLoading(true);
@@ -55,6 +59,7 @@ export default function SelectOrganizationPage() {
       if (tempAuthCredentials) {
         const loginRes = await fetch(`${API_BASE_URL}/users/login`, {
           method: "POST",
+          credentials: "include",
           headers: {
             "Content-Type": "application/json",
             "X-Device-ID": deviceId || "",
@@ -78,7 +83,7 @@ export default function SelectOrganizationPage() {
         // Set all login state
         setTokens({
           accessToken: data.accessToken,
-          refreshToken: data.refreshToken,
+          refreshToken: null,
         });
 
         if (data.user) {
@@ -98,6 +103,7 @@ export default function SelectOrganizationPage() {
         let locationsMeta = [];
         try {
           const locsRes = await fetch(`${API_BASE_URL}/locations?limit=100`, {
+            credentials: "include",
             headers: {
               "Content-Type": "application/json",
               Authorization: `Bearer ${data.accessToken}`,
@@ -129,11 +135,12 @@ export default function SelectOrganizationPage() {
 
         // Clear temp credentials
         useSessionStore.getState().setAuthTempCredentials(null);
-        router.push("/dashboard/home");
+        router.push(nextPath);
       } else {
         // Existing user switching org - use switch endpoint
         const res = await fetch(`${API_BASE_URL}/users/switch-organization`, {
           method: "POST",
+          credentials: "include",
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${accessToken}`,
@@ -153,7 +160,7 @@ export default function SelectOrganizationPage() {
         if (data.accessToken) {
           setTokens({
             accessToken: data.accessToken,
-            refreshToken: data.refreshToken,
+            refreshToken: null,
           });
         }
 
@@ -166,6 +173,7 @@ export default function SelectOrganizationPage() {
         let locationsMeta = [];
         try {
           const locsRes = await fetch(`${API_BASE_URL}/locations?limit=100`, {
+            credentials: "include",
             headers: {
               "Content-Type": "application/json",
               Authorization: `Bearer ${data.accessToken || accessToken}`,
@@ -195,7 +203,7 @@ export default function SelectOrganizationPage() {
         }
         setLocationsMeta(locationsMeta);
 
-        router.push("/dashboard/home");
+        router.push(nextPath);
       }
     } catch (err) {
       setError(err.message || "Failed to select organization");
@@ -377,5 +385,13 @@ export default function SelectOrganizationPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function SelectOrganizationPage() {
+  return (
+    <Suspense fallback={null}>
+      <SelectOrganizationPageContent />
+    </Suspense>
   );
 }

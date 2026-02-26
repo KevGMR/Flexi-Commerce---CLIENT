@@ -20,6 +20,9 @@ export default function OrdersPage() {
     shopifySyncStatus: "",
     paymentStatus: "",
     locationId: "",
+    deliveryCategory: "",
+    categoryStatus: "",
+    requiresDelivery: "",
   });
   const [pagination, setPagination] = useState({
     page: 1,
@@ -44,12 +47,24 @@ export default function OrdersPage() {
           page: pagination.page,
         });
 
-        if (filters.startDate) params.append("startDate", filters.startDate);
-        if (filters.endDate) params.append("endDate", filters.endDate);
+        // Handle dates with proper timezone conversion
+        if (filters.startDate) {
+          const [year, month, day] = filters.startDate.split('-').map(Number);
+          const startOfDay = new Date(year, month - 1, day);
+          params.append("startDate", startOfDay.toISOString());
+        }
+        if (filters.endDate) {
+          const [year, month, day] = filters.endDate.split('-').map(Number);
+          const endOfDay = new Date(year, month - 1, day + 1);
+          params.append("endDate", endOfDay.toISOString());
+        }
         if (filters.paymentMethod) params.append("paymentMethod", filters.paymentMethod);
         if (filters.shopifySyncStatus) params.append("shopifySyncStatus", filters.shopifySyncStatus);
         if (filters.paymentStatus) params.append("paymentStatus", filters.paymentStatus);
         if (filters.locationId) params.append("locationId", filters.locationId);
+        if (filters.deliveryCategory) params.append("deliveryCategory", filters.deliveryCategory);
+        if (filters.categoryStatus) params.append("categoryStatus", filters.categoryStatus);
+        if (filters.requiresDelivery) params.append("requiresDelivery", filters.requiresDelivery);
 
         const response = await apiFetch(`/sales?${params.toString()}`);
 
@@ -90,10 +105,24 @@ export default function OrdersPage() {
   }, [canViewSalesHistory, filters, pagination.page]);
 
   const handleFilterChange = (key, value) => {
-    setFilters((prev) => ({
-      ...prev,
-      [key]: value,
-    }));
+    setFilters((prev) => {
+      const updated = {
+        ...prev,
+        [key]: value,
+      };
+      
+      // If startDate is changed and is greater than endDate, update endDate to match
+      if (key === 'startDate' && value && updated.endDate && value > updated.endDate) {
+        updated.endDate = value;
+      }
+      
+      // If endDate is changed and is less than startDate, update startDate to match
+      if (key === 'endDate' && value && updated.startDate && value < updated.startDate) {
+        updated.startDate = value;
+      }
+      
+      return updated;
+    });
     setPagination((prev) => ({
       ...prev,
       page: 1,
@@ -155,6 +184,7 @@ export default function OrdersPage() {
             >
               <option value="">All</option>
               <option value="completed">Paid</option>
+              <option value="partial">Partial</option>
               <option value="pending">Pending</option>
               <option value="failed">Failed</option>
             </select>
@@ -222,6 +252,46 @@ export default function OrdersPage() {
               className="mt-1 block w-full rounded border border-zinc-300 px-3 py-2 text-sm"
             />
           </div>
+          <div>
+            <label className="block text-xs font-medium text-zinc-700">Delivery Category</label>
+            <select
+              value={filters.deliveryCategory}
+              onChange={(e) => handleFilterChange("deliveryCategory", e.target.value)}
+              className="mt-1 block w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+            >
+              <option value="">All Categories</option>
+              <option value="Local Delivery">Local Delivery</option>
+              <option value="Courier">Courier</option>
+              <option value="Pickup">Pickup</option>
+              <option value="Shipping">Shipping</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-zinc-700">Delivery Status</label>
+            <select
+              value={filters.categoryStatus}
+              onChange={(e) => handleFilterChange("categoryStatus", e.target.value)}
+              className="mt-1 block w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+            >
+              <option value="">All Statuses</option>
+              <option value="pending">Pending</option>
+              <option value="in-transit">In Transit</option>
+              <option value="delivered">Delivered</option>
+              <option value="failed">Failed</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-zinc-700">Delivery Type</label>
+            <select
+              value={filters.requiresDelivery}
+              onChange={(e) => handleFilterChange("requiresDelivery", e.target.value)}
+              className="mt-1 block w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+            >
+              <option value="">All Types</option>
+              <option value="true">Requires Delivery</option>
+              <option value="false">No Delivery</option>
+            </select>
+          </div>
         </div>
       </div>
 
@@ -253,6 +323,8 @@ export default function OrdersPage() {
                   <th className="px-6 py-3 text-left text-xs font-semibold text-zinc-900">Customer</th>
                   <th className="px-6 py-3 text-right text-xs font-semibold text-zinc-900">Amount</th>
                   <th className="px-6 py-3 text-left text-xs font-semibold text-zinc-900">Status</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-zinc-900">Delivery</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-zinc-900">Delivery Status</th>
                   <th className="px-6 py-3 text-left text-xs font-semibold text-zinc-900">Sync</th>
                 </tr>
               </thead>
@@ -286,6 +358,34 @@ export default function OrdersPage() {
                       >
                         {sale.status}
                       </span>
+                    </td>
+                    <td className="px-6 py-4 text-sm text-zinc-600">
+                      {sale.deliveryCategory ? (
+                        <span className="font-medium text-zinc-900">{sale.deliveryCategory}</span>
+                      ) : (
+                        <span className="text-zinc-400">—</span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4">
+                      {sale.categoryStatus || sale.deliveryStatus ? (
+                        <span
+                          className={`inline-block rounded px-2 py-1 text-xs font-medium capitalize ${
+                            (sale.categoryStatus || sale.deliveryStatus) === "delivered"
+                              ? "bg-green-100 text-green-800"
+                              : (sale.categoryStatus || sale.deliveryStatus) === "pending"
+                                ? "bg-yellow-100 text-yellow-800"
+                                : (sale.categoryStatus || sale.deliveryStatus) === "in-transit"
+                                  ? "bg-blue-100 text-blue-800"
+                                  : (sale.categoryStatus || sale.deliveryStatus) === "failed"
+                                    ? "bg-red-100 text-red-800"
+                                    : "bg-gray-100 text-gray-800"
+                          }`}
+                        >
+                          {sale.categoryStatus || sale.deliveryStatus || "—"}
+                        </span>
+                      ) : (
+                        <span className="text-zinc-400 text-xs">N/A</span>
+                      )}
                     </td>
                     <td className="px-6 py-4">
                       <span

@@ -26,6 +26,17 @@ export const navItems = [
   },
   { label: "Customers", href: "/dashboard/customers", permission: PERMISSIONS.VIEW_USERS },
   { label: "Analytics (Reports)", href: "/dashboard/analytics", permission: PERMISSIONS.VIEW_REPORTS },
+  {
+    label: "Deliveries",
+    href: "/dashboard/deliveries",
+    permission: PERMISSIONS.DELIVERY_FEES_READ,
+    children: [
+      { label: "All Deliveries", href: "/dashboard/deliveries", permission: PERMISSIONS.DELIVERY_FEES_READ },
+      { label: "Create Delivery", href: "/dashboard/deliveries/create", permission: PERMISSIONS.DELIVERY_FEES_CREATE },
+      { label: "Drivers", href: "/dashboard/deliveries/drivers", permission: PERMISSIONS.DELIVERY_FEES_ASSIGN_DRIVER },
+      { label: "Reports", href: "/dashboard/deliveries/reports", permission: PERMISSIONS.DELIVERY_FEES_READ },
+    ],
+  },
   { label: "Sales Channels", isSection: true },
   {
     label: "Point of Sale",
@@ -44,6 +55,7 @@ export const navItems = [
       { label: "User Info", href: "/dashboard/settings/user-info", permission: PERMISSIONS.VIEW_SETTINGS },
       { label: "Invitations", href: "/dashboard/settings/invitations", permission: PERMISSIONS.VIEW_USERS },
       { label: "Locations", href: "/dashboard/settings/locations", permission: PERMISSIONS.VIEW_INVENTORY },
+      { label: "Delivery Categories", href: "/dashboard/settings/delivery-categories", permission: PERMISSIONS.MANAGE_INVENTORY },
       { label: "Permissions", href: "/dashboard/settings/permissions", permission: PERMISSIONS.VIEW_ROLES },
       { label: "Shopify", href: "/dashboard/settings/shopify", permission: PERMISSIONS.VIEW_SETTINGS },
       { label: "Team & Orgs", href: "/dashboard/settings/team", permission: PERMISSIONS.VIEW_USERS },

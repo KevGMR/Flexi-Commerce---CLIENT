@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api-client";
 import { buildSaleIdempotencyKey } from "@/lib/idempotency";
+import { PERMISSIONS } from "@/lib/permissions";
 import {
   savePendingSale,
   getPendingSales,
@@ -14,6 +15,13 @@ import {
 } from "@/lib/indexeddb";
 import { useSyncManager } from "@/hooks/useSyncManager";
 import { useSessionStore } from "@/store/session";
+import DeliveryCheckoutModal from "@/components/pos/DeliveryCheckoutModal";
+import CompleteCheckoutModal from "@/components/pos/CompleteCheckoutModal";
+import { printReceiptInBrowser } from "@/lib/receipt/browserPrint";
+import {
+  hasPartialPaymentSignal,
+  toNonNegativeAmount,
+} from "@/lib/receipt/receiptPrintTemplate";
 
 // Mock product catalog - replace with real product fetch
 const mockProducts = [
@@ -38,6 +46,12 @@ const returnReasons = [
   { value: "price-adjustment", label: "Price Adjustment" },
   { value: "damaged", label: "Item Damaged" },
 ];
+
+const normalizeSplitPaymentAmounts = (payments = []) =>
+  (Array.isArray(payments) ? payments : []).map((payment) => ({
+    ...payment,
+    amount: toNonNegativeAmount(payment?.amount),
+  }));
 
 export default function PosPage() {
   const router = useRouter();
@@ -95,6 +109,8 @@ export default function PosPage() {
   const [searchDebounceTimer, setSearchDebounceTimer] = useState(null);
   const [lastSyncTimestamp, setLastSyncTimestamp] = useState(null);
   const [refreshDebounceTimer, setRefreshDebounceTimer] = useState(null);
+  const [shopifyLocationScope, setShopifyLocationScope] = useState(null);
+  const shopifyFetchRequestIdRef = useRef(0);
 
   // Returns mode state
   const [returnMode, setReturnMode] = useState(false);
@@ -116,11 +132,29 @@ export default function PosPage() {
   const [exchangeSplitPayments, setExchangeSplitPayments] = useState([
     { method: "cash", amount: 0 },
   ]);
+
+  // Checkout modal state
+  const [showCompleteCheckoutModal, setShowCompleteCheckoutModal] =
+    useState(false);
+  const [pendingCheckoutData, setPendingCheckoutData] = useState(null);
+
   const [exchangeEditingPriceIndex, setExchangeEditingPriceIndex] =
     useState(null);
   const [exchangeEditingPriceValue, setExchangeEditingPriceValue] =
     useState("");
   const [processingExchange, setProcessingExchange] = useState(false);
+
+  // Discount state
+  const [editingDiscountIndex, setEditingDiscountIndex] = useState(null);
+  const [discountType, setDiscountType] = useState("fixed"); // 'fixed' or 'percentage'
+  const [discountValue, setDiscountValue] = useState("");
+  const [transactionDiscount, setTransactionDiscount] = useState(0);
+  const [transactionDiscountType, setTransactionDiscountType] = useState("fixed");
+  const [discountReason, setDiscountReason] = useState("");
+  const [showTransactionDiscount, setShowTransactionDiscount] = useState(false);
+  const [exchangeEditingDiscountIndex, setExchangeEditingDiscountIndex] = useState(null);
+  const [exchangeDiscountType, setExchangeDiscountType] = useState("fixed");
+  const [exchangeDiscountValue, setExchangeDiscountValue] = useState("");
 
   const getLocationLabel = (id) => {
     if (!id) return "";
@@ -276,22 +310,41 @@ export default function PosPage() {
   // Load Shopify products and cache them - memoized to fix exhaustive-deps warning
   const loadShopifyProductsData = useCallback(async () => {
     if (!shopifyConnection?.status) return;
+    const requestId = ++shopifyFetchRequestIdRef.current;
     setShopifyLoading(true);
     try {
       const res = await apiFetch("/shopify/products");
+      if (requestId !== shopifyFetchRequestIdRef.current) {
+        return;
+      }
+
+      const locationScope = res?.data?.locationScope || null;
+      setShopifyLocationScope(locationScope);
+
+      if (locationScope?.scoped && locationScope?.hasMapping === false) {
+        await clearShopifyProducts();
+        setShopifyProductsState([]);
+        setSearchResults([]);
+        setLastSyncTimestamp(res?.data?.lastFetchedAt || new Date().toISOString());
+        return;
+      }
+
       if (res?.data?.products) {
         await setShopifyProducts(res.data.products);
         const cached = await searchShopifyProducts("");
+        if (requestId !== shopifyFetchRequestIdRef.current) {
+          return;
+        }
         setShopifyProductsState(cached);
         setSearchResults(cached);
-        setLastSyncTimestamp(
-          res.data.data?.lastFetchedAt || new Date().toISOString(),
-        );
+        setLastSyncTimestamp(res?.data?.lastFetchedAt || new Date().toISOString());
       }
     } catch (err) {
       console.error("Failed to load Shopify products:", err);
     } finally {
-      setShopifyLoading(false);
+      if (requestId === shopifyFetchRequestIdRef.current) {
+        setShopifyLoading(false);
+      }
     }
   }, [shopifyConnection?.status]);
 
@@ -323,14 +376,14 @@ export default function PosPage() {
         }
       }
     });
-  }, [activeOrganization]);
+  }, [activeOrganization, loadShopifyProductsData]);
 
-  // Load products when connection is active
+  // Load products when connection/location context is active
   useEffect(() => {
-    if (shopifyConnection?.status === "active") {
+    if (shopifyConnection?.status === "active" && locationId) {
       loadShopifyProductsData();
     }
-  }, [shopifyConnection?.status, loadShopifyProductsData]);
+  }, [shopifyConnection?.status, locationId, loadShopifyProductsData]);
 
   // Cart operations
 
@@ -356,6 +409,7 @@ export default function PosPage() {
       name: product.name,
       price: product.price,
       quantity: 1,
+      discount: 0,
     };
 
     if (exchangeMode) {
@@ -379,6 +433,18 @@ export default function PosPage() {
     const newCart = [...cart];
     newCart[index].price = parseFloat(newPrice) || 0;
     setCart(newCart);
+  };
+
+  const updateDiscount = (index, discountAmount) => {
+    const newCart = [...cart];
+    newCart[index].discount = parseFloat(discountAmount) || 0;
+    setCart(newCart);
+  };
+
+  const updateExchangeDiscount = (index, discountAmount) => {
+    const newCart = [...exchangeCart];
+    newCart[index].discount = parseFloat(discountAmount) || 0;
+    setExchangeCart(newCart);
   };
 
   const updateExchangeQuantity = (index, newQty) => {
@@ -421,6 +487,60 @@ export default function PosPage() {
     setEditingPriceValue("");
   };
 
+  const handleDiscountEdit = (index) => {
+    const item = cart[index];
+    setEditingDiscountIndex(index);
+    setDiscountValue(item.discount > 0 ? item.discount.toString() : "");
+    setDiscountType("fixed");
+  };
+
+  const handleExchangeDiscountEdit = (index) => {
+    const item = exchangeCart[index];
+    setExchangeEditingDiscountIndex(index);
+    setExchangeDiscountValue(item.discount > 0 ? item.discount.toString() : "");
+    setExchangeDiscountType("fixed");
+  };
+
+  const saveDiscountEdit = (index) => {
+    const item = cart[index];
+    const inputValue = parseFloat(discountValue) || 0;
+    const itemTotal = item.price * item.quantity;
+    
+    let finalDiscount = 0;
+    if (discountType === "percentage") {
+      // Convert percentage to dollar amount
+      finalDiscount = (inputValue / 100) * itemTotal;
+    } else {
+      finalDiscount = inputValue;
+    }
+    
+    // Ensure discount doesn't exceed item total
+    finalDiscount = Math.min(finalDiscount, itemTotal);
+    
+    updateDiscount(index, finalDiscount);
+    setEditingDiscountIndex(null);
+    setDiscountValue("");
+  };
+
+  const saveExchangeDiscountEdit = (index) => {
+    const item = exchangeCart[index];
+    const inputValue = parseFloat(exchangeDiscountValue) || 0;
+    const itemTotal = item.price * item.quantity;
+    
+    let finalDiscount = 0;
+    if (exchangeDiscountType === "percentage") {
+      finalDiscount = (inputValue / 100) * itemTotal;
+    } else {
+      finalDiscount = inputValue;
+    }
+    
+    finalDiscount = Math.min(finalDiscount, itemTotal);
+    
+    updateExchangeDiscount(index, finalDiscount);
+    setExchangeEditingDiscountIndex(null);
+    setExchangeDiscountValue("");
+  };
+
   const saveExchangePriceEdit = (index) => {
     updateExchangePrice(index, exchangeEditingPriceValue);
     setExchangeEditingPriceIndex(null);
@@ -430,18 +550,24 @@ export default function PosPage() {
   const handleLocationSwitch = (newLocationId) => {
     setLocationId(newLocationId);
     setSelectedLocationId(newLocationId);
+    setSearchQuery("");
+    setShopifyProductsState([]);
+    setSearchResults([]);
+    setShopifyLocationScope(null);
     setShowLocationDropdown(false);
   };
 
   const updateSplitPayment = (index, field, value) => {
     const newPayments = [...splitPayments];
-    newPayments[index][field] = value;
+    newPayments[index][field] =
+      field === "amount" ? toNonNegativeAmount(value) : value;
     setSplitPayments(newPayments);
   };
 
   const updateExchangeSplitPayment = (index, field, value) => {
     const newPayments = [...exchangeSplitPayments];
-    newPayments[index][field] = value;
+    newPayments[index][field] =
+      field === "amount" ? toNonNegativeAmount(value) : value;
     setExchangeSplitPayments(newPayments);
   };
 
@@ -482,16 +608,26 @@ export default function PosPage() {
     }
   };
 
-  const cartTotal = cart.reduce(
+  const cartSubtotal = cart.reduce(
     (sum, item) => sum + item.price * item.quantity,
     0,
   );
+  const cartLineItemDiscounts = cart.reduce(
+    (sum, item) => sum + (item.discount || 0),
+    0,
+  );
+  const cartTotal = Math.max(0, cartSubtotal - cartLineItemDiscounts - transactionDiscount);
   const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
 
-  const exchangeCartTotal = exchangeCart.reduce(
+  const exchangeCartSubtotal = exchangeCart.reduce(
     (sum, item) => sum + item.price * item.quantity,
     0,
   );
+  const exchangeCartLineItemDiscounts = exchangeCart.reduce(
+    (sum, item) => sum + (item.discount || 0),
+    0,
+  );
+  const exchangeCartTotal = Math.max(0, exchangeCartSubtotal - exchangeCartLineItemDiscounts);
   const exchangeCartCount = exchangeCart.reduce(
     (sum, item) => sum + item.quantity,
     0,
@@ -515,177 +651,19 @@ export default function PosPage() {
     setSelectedPaymentMethod("cash");
     setUseSplitPayment(false);
     setSplitPayments([{ method: "cash", amount: 0 }]);
+    setTransactionDiscount(0);
+    setTransactionDiscountType("fixed");
+    setDiscountReason("");
+    setShowTransactionDiscount(false);
   };
 
   const handlePrintReceipt = () => {
     if (!receipt) return;
-    const printWindow = window.open("", "_blank");
-
-    const isReturn = receipt.isReturn || false;
-    const isExchange = receipt.isExchange || false;
-    const borderColor = isExchange
-      ? "#4f46e5"
-      : isReturn
-        ? "#f97316"
-        : "#000";
-    const headerBg = isExchange
-      ? "#e0e7ff"
-      : isReturn
-        ? "#fed7aa"
-        : "transparent";
-    const titleText = isExchange
-      ? "EXCHANGE SLIP"
-      : isReturn
-        ? "RETURN RECEIPT"
-        : "RECEIPT";
-
-    const paymentLines = receipt.payments
-      ? receipt.payments
-          .map(
-            (p) =>
-              `<div style="display: flex; justify-content: space-between; margin: 3px 0; font-size: 12px;">
-          <span style="text-transform: capitalize;">${p.method}</span>
-          <span>$${p.amount.toFixed(2)}</span>
-        </div>`,
-          )
-          .join("")
-      : "";
-
-    const returnItemLines = isExchange
-      ? receipt.returnItems
-          .map(
-            (item) =>
-              `<div style="margin-bottom: 8px; font-size: 12px;">
-        <div style="display: flex; justify-content: space-between;">
-          <span>${item.name}</span>
-          <span style="color: #f97316;">$${(item.price * item.quantity).toFixed(2)}</span>
-        </div>
-        <div style="font-size: 11px; color: #666;">Qty: ${item.quantity} × $${item.price.toFixed(2)}</div>
-      </div>`,
-          )
-          .join("")
-      : "";
-
-    const exchangeItemLines = isExchange
-      ? receipt.exchangeItems
-          .map(
-            (item) =>
-              `<div style="margin-bottom: 8px; font-size: 12px;">
-        <div style="display: flex; justify-content: space-between;">
-          <span>${item.name}</span>
-          <span style="color: #4f46e5;">$${(item.price * item.quantity).toFixed(2)}</span>
-        </div>
-        <div style="font-size: 11px; color: #666;">Qty: ${item.quantity} × $${item.price.toFixed(2)}</div>
-      </div>`,
-          )
-          .join("")
-      : "";
-
-    const itemLines = isExchange
-      ? ""
-      : receipt.items
-          .map(
-            (item) =>
-              `<div style="margin-bottom: 8px; font-size: 12px;">
-        <div style="display: flex; justify-content: space-between;">
-          <span>${item.name}</span>
-          <span ${isReturn ? 'style="color: #f97316;"' : ""}>$${(item.price * item.quantity).toFixed(2)}</span>
-        </div>
-        <div style="font-size: 11px; color: #666;">Qty: ${item.quantity} × $${item.price.toFixed(2)}</div>
-      </div>`,
-          )
-          .join("");
-
-    const exchangeTotals = isExchange
-      ? `<div style="margin-top: 10px; font-size: 12px;">
-            <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
-              <span>Return Total:</span>
-              <span style="color: #f97316;">$${receipt.returnTotal.toFixed(2)}</span>
-            </div>
-            <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
-              <span>Exchange Total:</span>
-              <span style="color: #4f46e5;">$${receipt.exchangeTotal.toFixed(2)}</span>
-            </div>
-            <div style="display: flex; justify-content: space-between; font-weight: bold; font-size: 14px;">
-              <span>${
-                receipt.netBalance > 0
-                  ? "CUSTOMER PAYS:"
-                  : receipt.netBalance < 0
-                    ? "REFUND DUE:"
-                    : "BALANCED:"
-              }</span>
-              <span>$${Math.abs(receipt.netBalance).toFixed(2)}</span>
-            </div>
-          </div>`
-      : "";
-
-    const html = `
-      <html>
-        <head>
-          <title>${titleText} #${receipt.receiptNumber}</title>
-          <style>
-            body { font-family: monospace; max-width: 400px; margin: auto; padding: 20px; background: white; }
-            .receipt { border: 1px solid #ddd; padding: 20px; }
-            .header { text-align: center; border-bottom: 2px dashed ${borderColor}; padding-bottom: 10px; margin-bottom: 10px; background: ${headerBg}; padding: 10px; }
-            .section { margin: 15px 0; border-bottom: 1px dashed #ccc; padding-bottom: 10px; }
-            .section:last-child { border-bottom: none; }
-            .total { display: flex; justify-content: space-between; font-weight: bold; font-size: 14px; margin-top: 10px; ${isReturn ? "color: #f97316;" : ""} }
-            .footer { text-align: center; font-size: 11px; color: #666; margin-top: 15px; }
-          </style>
-        </head>
-        <body>
-          <div class="receipt">
-            <div class="header">
-              <h3 style="margin: 0; ${isReturn ? "color: #f97316;" : ""}">${titleText}</h3>
-              <h3 style="margin: 0;">${activeOrganization?.name || "RECEIPT"}</h3>
-              <p style="margin: 5px 0; font-size: 12px;">Location: ${getLocationLabel(locationId)}</p>
-              <p style="margin: 5px 0; font-size: 12px;">Receipt #${receipt.receiptNumber}</p>
-              ${(isReturn || isExchange) && receipt.originalReceiptNumber ? `<p style="margin: 5px 0; font-size: 12px;">Original: ${receipt.originalReceiptNumber}</p>` : ""}
-              <p style="margin: 5px 0; font-size: 11px;">${new Date(receipt.timestamp).toLocaleString()}</p>
-            </div>
-            ${
-              isExchange
-                ? `<div class="section">
-              <div style="font-weight: bold; margin-bottom: 8px; font-size: 12px;">RETURNED ITEMS</div>
-              ${returnItemLines}
-            </div>
-            <div class="section">
-              <div style="font-weight: bold; margin-bottom: 8px; font-size: 12px;">EXCHANGE ITEMS</div>
-              ${exchangeItemLines}
-            </div>`
-                : `<div class="section">
-              <div style="font-weight: bold; margin-bottom: 8px; font-size: 12px;">${isReturn ? "RETURNED ITEMS" : "ITEMS"}</div>
-              ${itemLines}
-            </div>`
-            }
-            ${
-              (!isReturn || isExchange) && paymentLines
-                ? `<div class="section">
-              <div style="font-weight: bold; margin-bottom: 8px; font-size: 12px;">PAYMENT</div>
-              ${paymentLines}
-            </div>`
-                : ""
-            }
-            ${(isReturn || isExchange) && receipt.returnReason ? `<div class="section" style="font-size: 11px;"><strong>Return Reason:</strong> ${receipt.returnReason.replace(/-/g, " ").toUpperCase()}</div>` : ""}
-            ${
-              isExchange
-                ? exchangeTotals
-                : `<div class="total">
-              <span>${isReturn ? "REFUND TOTAL:" : "TOTAL:"}</span>
-              <span>$${receipt.subtotal.toFixed(2)}</span>
-            </div>`
-            }
-            ${receipt.notes ? `<div class="section" style="font-size: 11px;"><strong>Notes:</strong> ${receipt.notes}</div>` : ""}
-            <div class="footer">
-              <p>${isReturn ? "Thank you!" : "Thank you for your purchase!"}</p>
-            </div>
-          </div>
-        </body>
-      </html>
-    `;
-    printWindow.document.write(html);
-    printWindow.document.close();
-    setTimeout(() => printWindow.print(), 250);
+    printReceiptInBrowser({
+      receipt,
+      organizationName: activeOrganization?.name,
+      locationLabel: getLocationLabel(locationId),
+    });
   };
 
   const handleSendEmail = async () => {
@@ -1026,8 +1004,7 @@ export default function PosPage() {
           type: item.type,
           quantity: item.quantity,
           unitPrice: item.price,
-          discount: 0,
-          taxAmount: 0,
+          discount: item.discount || 0,
         };
 
         if (item.type === "shopify") {
@@ -1182,7 +1159,6 @@ export default function PosPage() {
 
     if (!locationId) {
       setError("Please select a location before completing the sale.");
-      // Show appropriate modal based on whether locations exist
       if (!locations || locations.length === 0) {
         setShowNoLocationsModal(true);
       } else if (locations.length > 1) {
@@ -1196,6 +1172,290 @@ export default function PosPage() {
       return;
     }
 
+    // Show Complete Checkout Modal
+    setError("");
+    setShowCompleteCheckoutModal(true);
+  };
+
+  const handleCompleteCheckout = async (checkoutData) => {
+    const {
+      notes: checkoutNotes,
+      paymentMethod,
+      splitPayments: cbSplitPayments,
+      useSplitPayment: isSplitPayment,
+      deliveryInfo,
+      deliveryFee,
+      isReservation,
+    } = checkoutData;
+    const normalizedSplitPayments = normalizeSplitPaymentAmounts(cbSplitPayments);
+    const positiveSplitPayments = normalizedSplitPayments.filter(
+      (payment) => payment.amount > 0,
+    );
+
+    setStatus("Processing...");
+    setError("");
+
+    try {
+      if (isSplitPayment) {
+        const totalAmount = positiveSplitPayments.reduce(
+          (sum, payment) => sum + payment.amount,
+          0,
+        );
+        if (totalAmount <= 0 || totalAmount > cartTotal + deliveryFee) {
+          setError("Split payment total must be between 0 and cart total.");
+          return;
+        }
+      }
+
+      const formattedItems = cart.map((item) => {
+        const baseItem = {
+          type: item.type,
+          quantity: item.quantity,
+          unitPrice: item.price,
+          discount: item.discount || 0,
+        };
+        if (item.type === "shopify") {
+          return {
+            ...baseItem,
+            shopifyVariantId: item.variant,
+            sku: item.sku || undefined,
+            productName: item.name,
+          };
+        }
+        return {
+          ...baseItem,
+          productId: item.variant,
+        };
+      });
+
+      const payload = {
+        locationId,
+        items: formattedItems,
+        notes: checkoutNotes || undefined,
+        idempotencyKey: buildSaleIdempotencyKey({
+          organizationId:
+            activeOrganization?._id || activeOrganization?.organizationId,
+          locationId,
+        }),
+      };
+
+      const paidAmount = isSplitPayment
+        ? positiveSplitPayments.reduce(
+            (sum, payment) => sum + payment.amount,
+            0,
+          )
+        : cartTotal + deliveryFee;
+      const balanceDue = Math.max(0, cartTotal + deliveryFee - paidAmount);
+      const isReservationSale = Boolean(isReservation || balanceDue > 0.01);
+
+      payload.paymentStatus = isReservationSale ? "partial" : "completed";
+      payload.tags = [
+        "pos",
+        ...(isSplitPayment ? ["split-payment"] : []),
+        ...(isReservationSale ? ["reservation", "partial-payment"] : []),
+      ];
+
+      if (deliveryInfo) {
+        payload.requiresDelivery = true;
+        payload.deliveryInfo = {
+          requiresDelivery: true,
+          recipientName: deliveryInfo.recipientName,
+          recipientPhone: deliveryInfo.recipientPhone,
+          deliveryAddress: deliveryInfo.deliveryAddress,
+          deliveryCategory: deliveryInfo.deliveryCategory,
+          deliveryOption: deliveryInfo.deliveryOption,
+          deliveryFee,
+        };
+      }
+
+      if (isSplitPayment) {
+        payload.payments = positiveSplitPayments.map((payment) => ({
+            method: payment.method,
+            amount: payment.amount,
+            status: "completed",
+          }));
+      } else {
+        payload.paymentMethod = paymentMethod;
+      }
+
+      const res = await apiFetch("/sales", { method: "POST", body: payload });
+      const receiptData = res?.data || res;
+      const receiptNumber = receiptData?.receiptNumber || "RECEIPT-" + Date.now();
+      const receiptInfo = {
+        receiptNumber,
+        items: cart.map((item) => ({
+          name: item.name,
+          quantity: item.quantity,
+          price: item.price,
+          type: item.type,
+          discount: item.discount || 0,
+        })),
+        payments: isSplitPayment
+          ? positiveSplitPayments
+          : [{ method: paymentMethod, amount: cartTotal + deliveryFee }],
+        subtotal: cartTotal,
+        deliveryFee: deliveryFee || 0,
+        deliveryInfo: deliveryInfo || undefined,
+        deliveryFeeId: receiptData?.deliveryFeeId,
+        trackingNumber: receiptData?.trackingNumber,
+        totalDiscount: cartLineItemDiscounts + transactionDiscount,
+        discountReason: discountReason || undefined,
+        notes: checkoutNotes,
+        amountPaid: paidAmount,
+        balanceDue,
+        isReservation: isReservationSale,
+        paymentStatus: receiptData?.paymentStatus || payload.paymentStatus,
+        tags: Array.isArray(receiptData?.tags) ? receiptData.tags : payload.tags,
+        timestamp: new Date().toISOString(),
+      };
+
+      setReceipt(receiptInfo);
+      setShowReceipt(true);
+      setStatus(
+        isReservationSale
+          ? `✓ Reservation created: ${receiptNumber}`
+          : `✓ Sale completed: ${receiptNumber}`,
+      );
+      clearCart();
+      setShowCompleteCheckoutModal(false);
+      scheduleProductRefresh();
+      setTimeout(() => setStatus(""), 3000);
+    } catch (err) {
+      const errCode = err?.details?.code || err?.code || err?.response?.data?.code;
+      if (err.status === 403 && errCode === "LOCATION_ACCESS_DENIED") {
+        setError("Access denied: You don't have permission to transact at this location.");
+        setShowLocationPicker(true);
+        setLocationId("");
+        setSelectedLocationId(null);
+        return;
+      }
+
+      try {
+        const formattedItems = cart.map((item) => {
+          const baseItem = {
+            type: item.type,
+            quantity: item.quantity,
+            unitPrice: item.price,
+            discount: item.discount || 0,
+          };
+          if (item.type === "shopify") {
+            return {
+              ...baseItem,
+              shopifyVariantId: item.variant,
+              sku: item.sku || undefined,
+              productName: item.name,
+            };
+          }
+          return {
+            ...baseItem,
+            productId: item.variant,
+          };
+        });
+
+        const offlinePayload = {
+          locationId,
+          items: formattedItems,
+          notes: checkoutNotes || undefined,
+        };
+
+        const offlinePaidAmount = isSplitPayment
+          ? positiveSplitPayments.reduce(
+              (sum, payment) => sum + payment.amount,
+              0,
+            )
+          : cartTotal + deliveryFee;
+        const offlineBalanceDue = Math.max(
+          0,
+          cartTotal + deliveryFee - offlinePaidAmount,
+        );
+        const isOfflineReservation = offlineBalanceDue > 0.01;
+
+        offlinePayload.paymentStatus = isOfflineReservation
+          ? "partial"
+          : "completed";
+        offlinePayload.tags = [
+          "pos",
+          ...(isSplitPayment ? ["split-payment"] : []),
+          ...(isOfflineReservation ? ["reservation", "partial-payment"] : []),
+        ];
+
+        if (deliveryInfo) {
+          offlinePayload.requiresDelivery = true;
+          offlinePayload.deliveryInfo = {
+            recipientName: deliveryInfo.recipientName,
+            recipientPhone: deliveryInfo.recipientPhone,
+            deliveryAddress: {
+              street: deliveryInfo.deliveryStreet,
+              city: deliveryInfo.deliveryCity,
+              country: deliveryInfo.deliveryCountry,
+            },
+            deliveryCategory: deliveryInfo.category,
+            deliveryOption: deliveryInfo.option,
+            deliveryFee,
+          };
+        }
+
+        if (isSplitPayment) {
+          offlinePayload.payments = positiveSplitPayments
+            .map((payment) => ({
+              method: payment.method,
+              amount: payment.amount,
+              status: "completed",
+            }));
+        } else {
+          offlinePayload.paymentMethod = paymentMethod;
+        }
+
+        const idempotencyKey = buildSaleIdempotencyKey({
+          organizationId: activeOrganization?.id,
+          locationId,
+        });
+        offlinePayload.idempotencyKey = idempotencyKey;
+        await savePendingSale(offlinePayload);
+        await updatePendingCount();
+
+        const offlineReceipt = {
+          receiptNumber: idempotencyKey,
+          timestamp: new Date().toISOString(),
+          items: cart.map((item) => ({
+            name: item.name,
+            quantity: item.quantity,
+            price: item.customPrice ?? item.price,
+          })),
+          subtotal: cartTotal,
+          deliveryFee: deliveryFee || 0,
+          payments: isSplitPayment
+            ? positiveSplitPayments
+                .map((payment) => ({
+                  method: payment.method,
+                  amount: payment.amount,
+                }))
+            : [{ method: paymentMethod, amount: cartTotal + deliveryFee }],
+          notes: checkoutNotes,
+          amountPaid: offlinePaidAmount,
+          balanceDue: offlineBalanceDue,
+          isReservation: isOfflineReservation,
+          paymentStatus: offlinePayload.paymentStatus,
+          tags: offlinePayload.tags,
+          isOffline: true,
+        };
+
+        setReceipt(offlineReceipt);
+        setShowReceipt(true);
+        setStatus("⚠ Sale saved offline. Will sync when online.");
+        clearCart();
+        setShowCompleteCheckoutModal(false);
+        scheduleProductRefresh();
+        setTimeout(() => setStatus(""), 3000);
+      } catch (saveErr) {
+        setError("Failed to save sale: " + saveErr.message);
+      }
+      setStatus("");
+    }
+  };
+
+  // Unused - moved to handleCompleteCheckout
+  const submitSaleWithDelivery = async (deliveryData, fee) => {
     setStatus("Processing...");
     setError("");
 
@@ -1210,8 +1470,216 @@ export default function PosPage() {
           type: item.type,
           quantity: item.quantity,
           unitPrice: item.price,
-          discount: 0,
-          taxAmount: 0,
+          discount: item.discount || 0,
+        };
+
+        if (item.type === "shopify") {
+          return {
+            ...baseItem,
+            shopifyVariantId: item.variant,
+            sku: item.sku || undefined,
+            productName: item.name,
+          };
+        } else {
+          return {
+            ...baseItem,
+            productId: item.variant,
+          };
+        }
+      });
+
+      const payload = {
+        locationId,
+        items: formattedItems,
+        paymentStatus: "completed",
+        tags: useSplitPayment ? ["pos", "split-payment"] : ["pos"],
+        notes: notes || undefined,
+        idempotencyKey: buildSaleIdempotencyKey({
+          organizationId:
+            activeOrganization?._id || activeOrganization?.organizationId,
+          locationId,
+        }),
+        requiresDelivery: true,
+        deliveryInfo: {
+          recipientName: deliveryData.recipientName,
+          recipientPhone: deliveryData.recipientPhone,
+          deliveryAddress: {
+            street: deliveryData.deliveryStreet,
+            city: deliveryData.deliveryCity,
+            country: deliveryData.deliveryCountry,
+          },
+          deliveryCategory: deliveryData.category,
+          deliveryOption: deliveryData.option,
+          deliveryFee: fee,
+        },
+      };
+
+      if (useSplitPayment) {
+        payload.payments = splitPayments
+          .filter((p) => parseFloat(p.amount) > 0)
+          .map((p) => ({
+            method: p.method,
+            amount: parseFloat(p.amount),
+            status: "completed",
+          }));
+      } else {
+        payload.paymentMethod = selectedPaymentMethod;
+      }
+
+      const res = await apiFetch("/sales", { method: "POST", body: payload });
+      const receiptData = res?.data || res;
+      const receiptNumber =
+        receiptData?.receiptNumber || "RECEIPT-" + Date.now();
+
+      const receiptInfo = {
+        receiptNumber,
+        items: cart.map((item) => ({
+          name: item.name,
+          quantity: item.quantity,
+          price: item.price,
+          type: item.type,
+          discount: item.discount || 0,
+        })),
+        payments: useSplitPayment
+          ? splitPayments.filter((p) => parseFloat(p.amount) > 0)
+          : [{ method: selectedPaymentMethod, amount: cartTotal + fee }],
+        subtotal: cartTotal,
+        deliveryFee: fee,
+        totalDiscount: cartLineItemDiscounts + transactionDiscount,
+        discountReason: discountReason || undefined,
+        notes,
+        paymentStatus: payload.paymentStatus,
+        tags: payload.tags,
+        timestamp: new Date().toISOString(),
+      };
+
+      setReceipt(receiptInfo);
+      setShowReceipt(true);
+      setStatus(`✓ Sale completed: ${receiptNumber}`);
+      clearCart();
+
+      scheduleProductRefresh();
+
+      setTimeout(() => setStatus(""), 3000);
+    } catch (err) {
+      const errMessage = err?.message || err?.response?.data?.message || "";
+
+      if (
+        errMessage.includes("Delivery") ||
+        errMessage.includes("delivery") ||
+        errMessage.includes("address") ||
+        errMessage.includes("deliveryCategory")
+      ) {
+        setError(
+          "Delivery validation failed: " +
+            (errMessage || "Please check your delivery information"),
+        );
+        setStatus("");
+        return;
+      }
+
+      try {
+        const offlinePayload = {
+          locationId,
+          items: formattedItems,
+          paymentStatus: "completed",
+          tags: useSplitPayment ? ["pos", "split-payment"] : ["pos"],
+          notes: notes || undefined,
+          requiresDelivery: true,
+          deliveryInfo: {
+            recipientName: deliveryData.recipientName,
+            recipientPhone: deliveryData.recipientPhone,
+            deliveryAddress: {
+              street: deliveryData.deliveryStreet,
+              city: deliveryData.deliveryCity,
+              country: deliveryData.deliveryCountry,
+            },
+            deliveryCategory: deliveryData.category,
+            deliveryOption: deliveryData.option,
+            deliveryFee: fee,
+          },
+        };
+
+        if (useSplitPayment) {
+          offlinePayload.payments = splitPayments
+            .filter((p) => parseFloat(p.amount) > 0)
+            .map((p) => ({
+              method: p.method,
+              amount: parseFloat(p.amount),
+              status: "completed",
+            }));
+        } else {
+          offlinePayload.paymentMethod = selectedPaymentMethod;
+        }
+
+        const idempotencyKey = buildSaleIdempotencyKey({
+          organizationId: activeOrganization?.id,
+          locationId,
+        });
+
+        offlinePayload.idempotencyKey = idempotencyKey;
+
+        await savePendingSale(offlinePayload);
+
+        await updatePendingCount();
+
+        const offlineReceipt = {
+          receiptNumber: idempotencyKey,
+          timestamp: new Date().toISOString(),
+          items: cart.map((item) => ({
+            name: item.name,
+            quantity: item.quantity,
+            price: item.customPrice ?? item.price,
+          })),
+          subtotal: cartTotal,
+          deliveryFee: fee,
+          payments: useSplitPayment
+            ? splitPayments
+                .filter((p) => parseFloat(p.amount) > 0)
+                .map((p) => ({
+                  method: p.method,
+                  amount: parseFloat(p.amount),
+                }))
+            : [{ method: selectedPaymentMethod, amount: cartTotal + fee }],
+          notes,
+          paymentStatus: offlinePayload.paymentStatus,
+          tags: offlinePayload.tags,
+          isOffline: true,
+        };
+
+        setReceipt(offlineReceipt);
+        setShowReceipt(true);
+        setStatus("⚠ Sale saved offline. Will sync when online.");
+        clearCart();
+
+        scheduleProductRefresh();
+
+        setTimeout(() => setStatus(""), 3000);
+      } catch (saveErr) {
+        setError("Failed to save sale: " + saveErr.message);
+      }
+    }
+
+    setStatus("");
+  };
+
+  // Unused - moved to handleCompleteCheckout
+  const submitSaleWithoutDelivery = async () => {
+    setStatus("Processing...");
+    setError("");
+
+    try {
+      if (useSplitPayment && !splitPaymentValidation) {
+        setError("Split payment total must be between 0 and cart total.");
+        return;
+      }
+
+      const formattedItems = cart.map((item) => {
+        const baseItem = {
+          type: item.type,
+          quantity: item.quantity,
+          unitPrice: item.price,
+          discount: item.discount || 0,
         };
 
         if (item.type === "shopify") {
@@ -1254,13 +1722,11 @@ export default function PosPage() {
         payload.paymentMethod = selectedPaymentMethod;
       }
 
-
       const res = await apiFetch("/sales", { method: "POST", body: payload });
       const receiptData = res?.data || res;
       const receiptNumber =
         receiptData?.receiptNumber || "RECEIPT-" + Date.now();
 
-      // Build receipt object with all transaction details
       const receiptInfo = {
         receiptNumber,
         items: cart.map((item) => ({
@@ -1268,12 +1734,17 @@ export default function PosPage() {
           quantity: item.quantity,
           price: item.price,
           type: item.type,
+          discount: item.discount || 0,
         })),
         payments: useSplitPayment
           ? splitPayments.filter((p) => parseFloat(p.amount) > 0)
           : [{ method: selectedPaymentMethod, amount: cartTotal }],
         subtotal: cartTotal,
+        totalDiscount: cartLineItemDiscounts + transactionDiscount,
+        discountReason: discountReason || undefined,
         notes,
+        paymentStatus: payload.paymentStatus,
+        tags: payload.tags,
         timestamp: new Date().toISOString(),
       };
 
@@ -1282,7 +1753,6 @@ export default function PosPage() {
       setStatus(`✓ Sale completed: ${receiptNumber}`);
       clearCart();
 
-      // Schedule background product refresh
       scheduleProductRefresh();
 
       setTimeout(() => setStatus(""), 3000);
@@ -1299,99 +1769,95 @@ export default function PosPage() {
         return;
       }
 
-      // Save to IndexedDB for any error
       try {
         const formattedItems = cart.map((item) => {
-            const baseItem = {
-              type: item.type,
-              quantity: item.quantity,
-              unitPrice: item.price,
-              discount: 0,
-              taxAmount: 0,
+          const baseItem = {
+            type: item.type,
+            quantity: item.quantity,
+            unitPrice: item.price,
+            discount: item.discount || 0,
+          };
+
+          if (item.type === "shopify") {
+            return {
+              ...baseItem,
+              shopifyVariantId: item.variant,
+              sku: item.sku || undefined,
+              productName: item.name,
             };
-
-            if (item.type === "shopify") {
-              return {
-                ...baseItem,
-                shopifyVariantId: item.variant,
-                sku: item.sku || undefined,
-                productName: item.name,
-              };
-            } else {
-              return {
-                ...baseItem,
-                productId: item.variant,
-              };
-            }
-          });
-
-          const offlinePayload = {
-            locationId,
-            items: formattedItems,
-            paymentStatus: "completed",
-            tags: useSplitPayment ? ["pos", "split-payment"] : ["pos"],
-            notes: notes || undefined,
-          };
-
-          if (useSplitPayment) {
-            offlinePayload.payments = splitPayments
-              .filter((p) => parseFloat(p.amount) > 0)
-              .map((p) => ({
-                method: p.method,
-                amount: parseFloat(p.amount),
-                status: "completed",
-              }));
           } else {
-            offlinePayload.paymentMethod = selectedPaymentMethod;
+            return {
+              ...baseItem,
+              productId: item.variant,
+            };
           }
+        });
 
-          const idempotencyKey = buildSaleIdempotencyKey({
-            organizationId: activeOrganization?.id,
-            locationId,
-          });
+        const offlinePayload = {
+          locationId,
+          items: formattedItems,
+          paymentStatus: "completed",
+          tags: useSplitPayment ? ["pos", "split-payment"] : ["pos"],
+          notes: notes || undefined,
+        };
 
-          offlinePayload.idempotencyKey = idempotencyKey;
-
-          await savePendingSale(offlinePayload);
-        
-          console.log({ offlinePayload });
-          
-          await updatePendingCount();
-
-          // Generate receipt for offline sale
-          const offlineReceipt = {
-            receiptNumber: idempotencyKey,
-            timestamp: new Date().toISOString(),
-            items: cart.map((item) => ({
-              name: item.name,
-              quantity: item.quantity,
-              price: item.customPrice ?? item.price,
-            })),
-            subtotal: cartTotal,
-            payments: useSplitPayment
-              ? splitPayments
-                  .filter((p) => parseFloat(p.amount) > 0)
-                  .map((p) => ({
-                    method: p.method,
-                    amount: parseFloat(p.amount),
-                  }))
-              : [{ method: selectedPaymentMethod, amount: cartTotal }],
-            notes,
-            isOffline: true,
-          };
-
-          setReceipt(offlineReceipt);
-          setShowReceipt(true);
-          setStatus("⚠ Sale saved offline. Will sync when online.");
-          clearCart();
-
-          // Schedule background product refresh (will execute when online)
-          scheduleProductRefresh();
-
-          setTimeout(() => setStatus(""), 3000);
-        } catch (saveErr) {
-          setError("Failed to save sale: " + saveErr.message);
+        if (useSplitPayment) {
+          offlinePayload.payments = splitPayments
+            .filter((p) => parseFloat(p.amount) > 0)
+            .map((p) => ({
+              method: p.method,
+              amount: parseFloat(p.amount),
+              status: "completed",
+            }));
+        } else {
+          offlinePayload.paymentMethod = selectedPaymentMethod;
         }
+
+        const idempotencyKey = buildSaleIdempotencyKey({
+          organizationId: activeOrganization?.id,
+          locationId,
+        });
+
+        offlinePayload.idempotencyKey = idempotencyKey;
+
+        await savePendingSale(offlinePayload);
+
+        await updatePendingCount();
+
+        const offlineReceipt = {
+          receiptNumber: idempotencyKey,
+          timestamp: new Date().toISOString(),
+          items: cart.map((item) => ({
+            name: item.name,
+            quantity: item.quantity,
+            price: item.customPrice ?? item.price,
+          })),
+          subtotal: cartTotal,
+          payments: useSplitPayment
+            ? splitPayments
+                .filter((p) => parseFloat(p.amount) > 0)
+                .map((p) => ({
+                  method: p.method,
+                  amount: parseFloat(p.amount),
+                }))
+            : [{ method: selectedPaymentMethod, amount: cartTotal }],
+          notes,
+          paymentStatus: offlinePayload.paymentStatus,
+          tags: offlinePayload.tags,
+          isOffline: true,
+        };
+
+        setReceipt(offlineReceipt);
+        setShowReceipt(true);
+        setStatus("⚠ Sale saved offline. Will sync when online.");
+        clearCart();
+
+        scheduleProductRefresh();
+
+        setTimeout(() => setStatus(""), 3000);
+      } catch (saveErr) {
+        setError("Failed to save sale: " + saveErr.message);
+      }
 
       setStatus("");
     }
@@ -1430,6 +1896,7 @@ export default function PosPage() {
         price: parseFloat(variant?.price) || 0,
         quantity: 1,
         sku: variant?.sku,
+        discount: 0,
       };
       if (exchangeMode) {
         upsertCartItem(exchangeCart, setExchangeCart, cartItem);
@@ -1453,6 +1920,7 @@ export default function PosPage() {
       price: parseFloat(variant.price) || 0,
       quantity: 1,
       sku: variant.sku,
+      discount: 0,
     };
     if (exchangeMode) {
       upsertCartItem(exchangeCart, setExchangeCart, cartItem);
@@ -1526,6 +1994,9 @@ export default function PosPage() {
     const matchesTab = productTab === "all" || p.type === productTab;
     return matchesSearch && matchesTab;
   });
+  const isPartialReceipt = hasPartialPaymentSignal(receipt);
+  const receiptAmountPaid = toNonNegativeAmount(receipt?.amountPaid);
+  const receiptBalanceDue = toNonNegativeAmount(receipt?.balanceDue);
 
   return (
     <div className="flex flex-col bg-gray-50 min-h-0 h-full md:h-[calc(100vh-8rem)]">
@@ -1634,6 +2105,10 @@ export default function PosPage() {
                   onClick={() => {
                     setLocationId(loc);
                     setSelectedLocationId(loc);
+                    setSearchQuery("");
+                    setShopifyProductsState([]);
+                    setSearchResults([]);
+                    setShopifyLocationScope(null);
                     setShowLocationPicker(false);
                   }}
                   className="px-4 py-3 text-left bg-blue-50 hover:bg-blue-100 rounded-lg text-blue-900 font-medium"
@@ -1688,6 +2163,42 @@ export default function PosPage() {
           </div>
         </div>
       )}
+
+      {/* Complete Checkout Modal */}
+      <CompleteCheckoutModal
+        isOpen={showCompleteCheckoutModal}
+        cart={cart}
+        cartTotal={cartTotal}
+        cartDiscount={cartLineItemDiscounts + transactionDiscount}
+        notes={notes}
+        selectedPaymentMethod={selectedPaymentMethod}
+        splitPayments={splitPayments}
+        useSplitPayment={useSplitPayment}
+        locationId={locationId}
+        paymentMethods={paymentMethods}
+        onNoteChange={setNotes}
+        onPaymentMethodChange={setSelectedPaymentMethod}
+        onSplitPaymentChange={(index, field, value) => {
+          const updated = [...splitPayments];
+          updated[index][field] =
+            field === "amount" ? toNonNegativeAmount(value) : value;
+          setSplitPayments(updated);
+        }}
+        onRemoveSplitPayment={(index) => {
+          setSplitPayments(splitPayments.filter((_, i) => i !== index));
+        }}
+        onAddSplitPayment={() => {
+          setSplitPayments([...splitPayments, { method: "cash", amount: 0 }]);
+        }}
+        onUseSplitPaymentChange={(checked) => {
+          setUseSplitPayment(checked);
+          if (checked) {
+            setSplitPayments([{ method: "cash", amount: 0 }]);
+          }
+        }}
+        onComplete={handleCompleteCheckout}
+        onClose={() => setShowCompleteCheckoutModal(false)}
+      />
 
       {/* Main Content */}
       <div className="flex-1 flex overflow-hidden min-h-0">
@@ -1774,12 +2285,18 @@ export default function PosPage() {
                     </svg>
                   </div>
                   <h3 className="text-lg font-medium text-gray-900 mb-2">
-                    No Cached Products
+                    {shopifyLocationScope?.scoped &&
+                    shopifyLocationScope?.hasMapping === false
+                      ? "No Shopify Mapping for This Location"
+                      : "No Cached Products"}
                   </h3>
                   <p className="text-sm text-gray-500 mb-4 max-w-sm">
-                    {navigator.onLine
-                      ? "Load products from your Shopify store to start selling."
-                      : "Sync when online to cache products for offline use."}
+                    {shopifyLocationScope?.scoped &&
+                    shopifyLocationScope?.hasMapping === false
+                      ? "Map this FLEXI location to a Shopify location in Settings to load products."
+                      : navigator.onLine
+                        ? "Load products from your Shopify store to start selling."
+                        : "Sync when online to cache products for offline use."}
                   </p>
                   {lastSyncTimestamp && (
                     <p className="text-xs text-gray-400 mb-4">
@@ -1788,6 +2305,8 @@ export default function PosPage() {
                     </p>
                   )}
                   {navigator.onLine &&
+                    !(shopifyLocationScope?.scoped &&
+                      shopifyLocationScope?.hasMapping === false) &&
                     shopifyConnection?.status === "active" && (
                       <button
                         onClick={handleLoadProducts}
@@ -1842,9 +2361,11 @@ export default function PosPage() {
                       <div className="w-full aspect-square bg-gray-100 rounded-lg flex items-center justify-center overflow-hidden relative">
                         {product.images && product.images.length > 0 ? (
                           <Image
-                            src={product.images[0].url}
+                            src={`${product.images[0].url}?w=640&crop=center`}
                             alt={product.images[0].altText || product.title}
                             fill
+                            unoptimized
+                            sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
                             className="object-cover"
                           />
                         ) : (
@@ -1881,7 +2402,7 @@ export default function PosPage() {
         </div>
 
         {/* Cart Section */}
-        <div className="w-96 bg-white border-l border-gray-200 flex flex-col min-h-0">
+        <div className="w-96 bg-white border-l border-gray-200 flex flex-col min-h-0 overflow-auto">
           {exchangeMode ? (
             <>
               {/* Exchange Header */}
@@ -1910,7 +2431,7 @@ export default function PosPage() {
 
               {/* Return Items (only if originalSale exists) */}
               {originalSale && (
-                <div className="border-b border-gray-200 p-4 space-y-2 max-h-[40vh] overflow-auto">
+                <div className="border-b border-gray-200 p-4 space-y-2">
                   <h3 className="text-sm font-semibold text-gray-900 mb-2">
                     Return Items
                   </h3>
@@ -1990,7 +2511,7 @@ export default function PosPage() {
               )}
 
               {/* Exchange Items */}
-              <div className="flex-1 flex flex-col min-h-0">
+              <div className="flex-1 flex flex-col">
                 <div className="p-4 border-b border-gray-200">
                   <div className="flex items-center justify-between">
                     <h3 className="text-sm font-semibold text-gray-900">
@@ -2007,7 +2528,7 @@ export default function PosPage() {
                   </div>
                 </div>
                 
-                <div className="flex-1 overflow-auto p-4">
+                <div className="flex-1 p-4  space-y-2">
                   {exchangeCart.length === 0 ? (
                     <div className="text-center text-gray-400 text-sm py-8">
                       <p className="text-3xl mb-2">🔄</p>
@@ -2054,6 +2575,62 @@ export default function PosPage() {
                                   </button>
                                 )}
                               </div>
+                              {/* Exchange Discount UI */}
+                              {useSessionStore.getState().can(PERMISSIONS.POS_APPLY_DISCOUNT) && (
+                                <div className="mt-1">
+                                  {exchangeEditingDiscountIndex === index ? (
+                                    <div className="flex items-center gap-2">
+                                      <select
+                                        value={exchangeDiscountType}
+                                        onChange={(e) => setExchangeDiscountType(e.target.value)}
+                                        className="px-2 py-1 border border-green-300 rounded text-xs"
+                                      >
+                                        <option value="fixed">$</option>
+                                        <option value="percentage">%</option>
+                                      </select>
+                                      <input
+                                        autoFocus
+                                        type="number"
+                                        step="0.01"
+                                        placeholder="0"
+                                        value={exchangeDiscountValue}
+                                        onChange={(e) => setExchangeDiscountValue(e.target.value)}
+                                        onBlur={() => saveExchangeDiscountEdit(index)}
+                                        onKeyDown={(e) => e.key === "Enter" && saveExchangeDiscountEdit(index)}
+                                        className="w-20 px-2 py-1 border border-green-300 rounded text-xs"
+                                      />
+                                      <button
+                                        onClick={() => {
+                                          setExchangeEditingDiscountIndex(null);
+                                          setExchangeDiscountValue("");
+                                        }}
+                                        className="text-xs text-gray-500"
+                                      >
+                                        ✕
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <button
+                                      onClick={() => handleExchangeDiscountEdit(index)}
+                                      className="text-xs text-green-600 hover:text-green-700 flex items-center gap-1"
+                                      title="Click to apply discount"
+                                    >
+                                      {item.discount > 0 ? (
+                                        <>
+                                          <span className="line-through text-gray-400">
+                                            ${(item.price * item.quantity).toFixed(2)}
+                                          </span>
+                                          <span className="font-medium">
+                                            -${item.discount.toFixed(2)} 🏷️
+                                          </span>
+                                        </>
+                                      ) : (
+                                        <span>+ Add Discount</span>
+                                      )}
+                                    </button>
+                                  )}
+                                </div>
+                              )}
                             </div>
                             <button
                               onClick={() => removeFromExchangeCart(index)}
@@ -2084,9 +2661,16 @@ export default function PosPage() {
                                 +
                               </button>
                             </div>
-                            <p className="font-bold text-indigo-600">
-                              ${(item.price * item.quantity).toFixed(2)}
-                            </p>
+                            <div className="text-right">
+                              <p className="font-bold text-indigo-600">
+                                ${((item.price * item.quantity) - (item.discount || 0)).toFixed(2)}
+                              </p>
+                              {item.discount > 0 && (
+                                <p className="text-xs text-green-600">
+                                  Saved ${item.discount.toFixed(2)}
+                                </p>
+                              )}
+                            </div>
                           </div>
                         </div>
                       ))}
@@ -2348,7 +2932,7 @@ export default function PosPage() {
               </div>
 
               {/* Cart Items */}
-              <div className="flex-1 overflow-auto p-4 space-y-2">
+              <div className="flex-1 p-4 space-y-2 ">
                 {cart.length === 0 ? (
                   <div className="text-center text-gray-400 mt-12">
                     <p className="text-4xl mb-2">🛒</p>
@@ -2389,6 +2973,62 @@ export default function PosPage() {
                               </button>
                             )}
                           </div>
+                          {/* Discount UI */}
+                          {useSessionStore.getState().can(PERMISSIONS.POS_APPLY_DISCOUNT) && (
+                            <div className="mt-1">
+                              {editingDiscountIndex === index ? (
+                                <div className="flex items-center gap-2">
+                                  <select
+                                    value={discountType}
+                                    onChange={(e) => setDiscountType(e.target.value)}
+                                    className="px-2 py-1 border border-green-300 rounded text-xs"
+                                  >
+                                    <option value="fixed">$</option>
+                                    <option value="percentage">%</option>
+                                  </select>
+                                  <input
+                                    autoFocus
+                                    type="number"
+                                    step="0.01"
+                                    placeholder="0"
+                                    value={discountValue}
+                                    onChange={(e) => setDiscountValue(e.target.value)}
+                                    onBlur={() => saveDiscountEdit(index)}
+                                    onKeyDown={(e) => e.key === "Enter" && saveDiscountEdit(index)}
+                                    className="w-20 px-2 py-1 border border-green-300 rounded text-xs"
+                                  />
+                                  <button
+                                    onClick={() => {
+                                      setEditingDiscountIndex(null);
+                                      setDiscountValue("");
+                                    }}
+                                    className="text-xs text-gray-500"
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  onClick={() => handleDiscountEdit(index)}
+                                  className="text-xs text-green-600 hover:text-green-700 flex items-center gap-1"
+                                  title="Click to apply discount"
+                                >
+                                  {item.discount > 0 ? (
+                                    <>
+                                      <span className="line-through text-gray-400">
+                                        ${(item.price * item.quantity).toFixed(2)}
+                                      </span>
+                                      <span className="font-medium">
+                                        -${item.discount.toFixed(2)} 🏷️
+                                      </span>
+                                    </>
+                                  ) : (
+                                    <span>+ Add Discount</span>
+                                  )}
+                                </button>
+                              )}
+                            </div>
+                          )}
                         </div>
                         <button
                           onClick={() => removeFromCart(index)}
@@ -2419,9 +3059,16 @@ export default function PosPage() {
                             +
                           </button>
                         </div>
-                        <p className="font-bold text-gray-900">
-                          ${(item.price * item.quantity).toFixed(2)}
-                        </p>
+                        <div className="text-right">
+                          <p className="font-bold text-gray-900">
+                            ${((item.price * item.quantity) - (item.discount || 0)).toFixed(2)}
+                          </p>
+                          {item.discount > 0 && (
+                            <p className="text-xs text-green-600">
+                              Saved ${item.discount.toFixed(2)}
+                            </p>
+                          )}
+                        </div>
                       </div>
                     </div>
                   ))
@@ -2431,13 +3078,100 @@ export default function PosPage() {
               {/* Cart Footer */}
               {cart.length > 0 && (
                 <div className="border-t border-gray-200 p-4 space-y-4">
+                  {/* Subtotal & Discounts */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-sm text-gray-600">
+                      <span>Subtotal</span>
+                      <span>${cartSubtotal.toFixed(2)}</span>
+                    </div>
+                    {cartLineItemDiscounts > 0 && (
+                      <div className="flex items-center justify-between text-sm text-green-600">
+                        <span>Item Discounts</span>
+                        <span>-${cartLineItemDiscounts.toFixed(2)}</span>
+                      </div>
+                    )}
+                    {transactionDiscount > 0 && (
+                      <div className="flex items-center justify-between text-sm text-green-600">
+                        <span>Transaction Discount</span>
+                        <span>-${transactionDiscount.toFixed(2)}</span>
+                      </div>
+                    )}
+                    {(cartLineItemDiscounts > 0 || transactionDiscount > 0) && (
+                      <div className="flex items-center justify-between text-sm font-medium text-green-700 bg-green-50 px-2 py-1 rounded">
+                        <span>💰 Total Savings</span>
+                        <span>${(cartLineItemDiscounts + transactionDiscount).toFixed(2)}</span>
+                      </div>
+                    )}
+                  </div>
+
                   {/* Total */}
-                  <div className="flex items-center justify-between text-xl font-bold">
+                  <div className="flex items-center justify-between text-xl font-bold border-t pt-2">
                     <span>Total</span>
                     <span className="text-blue-600">
                       ${cartTotal.toFixed(2)}
                     </span>
                   </div>
+
+                  {/* Transaction Discount */}
+                  {useSessionStore.getState().can(PERMISSIONS.POS_APPLY_DISCOUNT) && (
+                    <div className="border-t pt-2">
+                      {!showTransactionDiscount ? (
+                        <button
+                          onClick={() => setShowTransactionDiscount(true)}
+                          className="text-sm text-green-600 hover:text-green-700 font-medium"
+                        >
+                          + Apply Transaction Discount
+                        </button>
+                      ) : (
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2">
+                            <select
+                              value={transactionDiscountType}
+                              onChange={(e) => setTransactionDiscountType(e.target.value)}
+                              className="px-2 py-1 border border-green-300 rounded text-sm"
+                            >
+                              <option value="fixed">$ Fixed Amount</option>
+                              <option value="percentage">% Percentage</option>
+                            </select>
+                            <input
+                              type="number"
+                              placeholder="0"
+                              value={transactionDiscount > 0 ? (transactionDiscountType === "percentage" ? ((transactionDiscount / (cartSubtotal - cartLineItemDiscounts)) * 100) : transactionDiscount) : ""}
+                              onChange={(e) => {
+                                const inputValue = parseFloat(e.target.value) || 0;
+                                const availableAmount = cartSubtotal - cartLineItemDiscounts;
+                                let finalDiscount = 0;
+                                if (transactionDiscountType === "percentage") {
+                                  finalDiscount = Math.min((inputValue / 100) * availableAmount, availableAmount);
+                                } else {
+                                  finalDiscount = Math.min(inputValue, availableAmount);
+                                }
+                                setTransactionDiscount(Math.max(0, finalDiscount));
+                              }}
+                              className="flex-1 px-2 py-1 border border-green-300 rounded text-sm"
+                            />
+                            <button
+                              onClick={() => {
+                                setTransactionDiscount(0);
+                                setShowTransactionDiscount(false);
+                                setDiscountReason("");
+                              }}
+                              className="text-sm text-gray-500 hover:text-gray-700"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                          <input
+                            type="text"
+                            placeholder="Discount reason (optional)"
+                            value={discountReason}
+                            onChange={(e) => setDiscountReason(e.target.value)}
+                            className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* Payment Method */}
                   <div>
@@ -2618,7 +3352,7 @@ export default function PosPage() {
               </div>
 
               {/* Return Items */}
-              <div className="flex-1 overflow-auto p-4 space-y-2">
+              <div className="flex-1 p-4 space-y-2 ">
                 {originalSale.items.map((item, idx) => {
                   const returnItem = returnItems[idx];
                   if (!returnItem) return null;
@@ -2914,13 +3648,20 @@ export default function PosPage() {
           <div className="bg-white rounded-lg max-w-md w-full max-h-[90vh] overflow-auto">
             {/* Receipt Header */}
             <div className="p-6 border-b border-gray-200 sticky top-0 bg-white">
-              <h2 className="text-2xl font-bold text-gray-900">
-                {receipt.isExchange
-                  ? "Exchange Slip"
-                  : receipt.isReturn
-                    ? "Return Receipt"
-                    : "Receipt"}
-              </h2>
+              <div className="flex items-center gap-2">
+                <h2 className="text-2xl font-bold text-gray-900">
+                  {receipt.isExchange
+                    ? "Exchange Slip"
+                    : receipt.isReturn
+                      ? "Return Receipt"
+                      : "Receipt"}
+                </h2>
+                {isPartialReceipt && (
+                  <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-xs font-semibold">
+                    Partial
+                  </span>
+                )}
+              </div>
               <p className="text-sm text-gray-600 font-mono">
                 #{receipt.receiptNumber}
               </p>
@@ -3032,10 +3773,68 @@ export default function PosPage() {
                           {payment.method}
                         </p>
                         <p className="text-sm font-semibold text-gray-900">
-                          ${payment.amount.toFixed(2)}
+                          ${toNonNegativeAmount(payment.amount).toFixed(2)}
                         </p>
                       </div>
                     ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Delivery Information */}
+              {receipt.deliveryInfo && (
+                <div className="border-b pb-4">
+                  <h3 className="text-sm font-semibold text-gray-900 mb-3">
+                    Delivery Information
+                  </h3>
+                  <div className="space-y-2">
+                    {receipt.trackingNumber && (
+                      <div className="flex justify-between">
+                        <p className="text-xs text-gray-600">Tracking #</p>
+                        <p className="text-sm font-mono font-semibold text-blue-600">
+                          {receipt.trackingNumber}
+                        </p>
+                      </div>
+                    )}
+                    <div className="flex justify-between">
+                      <p className="text-xs text-gray-600">Recipient</p>
+                      <p className="text-sm font-medium text-gray-900">
+                        {receipt.deliveryInfo.recipientName}
+                      </p>
+                    </div>
+                    <div className="flex justify-between">
+                      <p className="text-xs text-gray-600">Phone</p>
+                      <p className="text-sm font-medium text-gray-900">
+                        {receipt.deliveryInfo.recipientPhone}
+                      </p>
+                    </div>
+                    {receipt.deliveryInfo.deliveryAddress && (
+                      <div className="flex justify-between">
+                        <p className="text-xs text-gray-600">Address</p>
+                        <p className="text-sm font-medium text-gray-900 text-right">
+                          {receipt.deliveryInfo.deliveryAddress.street}<br />
+                          {receipt.deliveryInfo.deliveryAddress.city}
+                          {receipt.deliveryInfo.deliveryAddress.country && 
+                            `, ${receipt.deliveryInfo.deliveryAddress.country}`}
+                        </p>
+                      </div>
+                    )}
+                    {receipt.deliveryInfo.deliveryCategory && (
+                      <div className="flex justify-between">
+                        <p className="text-xs text-gray-600">Delivery Type</p>
+                        <p className="text-sm font-medium text-gray-900">
+                          {receipt.deliveryInfo.deliveryCategory} - {receipt.deliveryInfo.deliveryOption}
+                        </p>
+                      </div>
+                    )}
+                    {receipt.deliveryFee > 0 && (
+                      <div className="flex justify-between">
+                        <p className="text-xs text-gray-600">Delivery Fee</p>
+                        <p className="text-sm font-semibold text-gray-900">
+                          ${receipt.deliveryFee.toFixed(2)}
+                        </p>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -3093,9 +3892,25 @@ export default function PosPage() {
                     <p
                       className={`text-2xl font-bold ${receipt.isReturn ? "text-orange-600" : "text-blue-600"}`}
                     >
-                      ${receipt.subtotal.toFixed(2)}
+                      ${(receipt.subtotal + (receipt.deliveryFee || 0)).toFixed(2)}
                     </p>
                   </div>
+                  {isPartialReceipt && !receipt.isReturn && !receipt.isExchange && (
+                    <div className="mt-3 pt-3 border-t border-blue-100 space-y-1">
+                      <div className="flex justify-between items-center text-sm">
+                        <p className="text-gray-700">Amount Paid</p>
+                        <p className="font-semibold text-gray-900">
+                          ${receiptAmountPaid.toFixed(2)}
+                        </p>
+                      </div>
+                      <div className="flex justify-between items-center text-sm">
+                        <p className="text-gray-700">Balance Due</p>
+                        <p className="font-semibold text-amber-700">
+                          ${receiptBalanceDue.toFixed(2)}
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 

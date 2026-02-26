@@ -42,7 +42,7 @@ Page: `/dashboard/sales-channels/pos`
 - Submit posts to `/sales`; shows success or API error.
 
 ## Helpers
-- API client: `src/lib/api-client.js` attaches bearer token, device headers, refresh on 401 via `/auth/refresh`.
+- API client: `src/lib/api-client.js` attaches bearer token, device headers, sends credentials, and refreshes on 401 via `/users/refresh` using httpOnly refresh cookie + `X-Device-ID`.
 - Session store: `src/store/session.js` (tokens, org, permissions, device headers, can(permission)).
 - Idempotency helper: `src/lib/idempotency.js`.
 

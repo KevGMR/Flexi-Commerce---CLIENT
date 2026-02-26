@@ -59,6 +59,7 @@ export function Avatar({ user, size = "md", showName = false }) {
           src={user.avatarUrl}
           alt={user.fullname || "User avatar"}
           fill
+          sizes="(max-width: 640px) 24px, (max-width: 1024px) 32px, 48px"
           className="object-cover"
         />
       </div>

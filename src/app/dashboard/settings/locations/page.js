@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api-client";
 import { useSessionStore } from "@/store/session";
 import { PERMISSIONS } from "@/lib/permissions";
+import AddressAutocompleteInput from "@/components/locations/AddressAutocompleteInput";
 
 export default function LocationsPage() {
   const can = useSessionStore((s) => s.can);
@@ -48,6 +49,18 @@ export default function LocationsPage() {
     setForm((prev) => ({
       ...prev,
       [name]: type === "checkbox" ? checked : value,
+    }));
+  };
+
+  const handleAddressSelect = (address) => {
+    setForm((prev) => ({
+      ...prev,
+      name: address.label || prev.name,
+      street: address.street || prev.street,
+      city: address.city || "",
+      state: address.state || "",
+      postalCode: address.postalCode || "",
+      country: address.country || "",
     }));
   };
 
@@ -157,13 +170,13 @@ export default function LocationsPage() {
 
         <form onSubmit={handleCreate} className="space-y-3">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <input
+            <AddressAutocompleteInput
               name="name"
               value={form.name}
               onChange={handleChange}
-              placeholder="Location name"
-              required
+              onSelectSuggestion={handleAddressSelect}
               disabled={!canManage}
+              placeholder="Location name (type to search)"
               className="w-full rounded border border-zinc-300 px-3 py-2 text-sm"
             />
             <select

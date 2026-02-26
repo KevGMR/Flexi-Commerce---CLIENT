@@ -1,18 +1,22 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { Suspense, useState, useEffect } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useSessionStore } from "@/store/session";
+import { sanitizeNextPath } from "@/lib/auth-redirect";
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:9200";
 
-export default function LoginPage() {
+function LoginPageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { setOrganizations, deviceId, deviceName, hydrate } = useSessionStore();
   const accessToken = useSessionStore((s) => s.accessToken);
   const hydrated = useSessionStore((s) => s.hydrated);
+  const nextParam = searchParams.get("next");
+  const nextPath = sanitizeNextPath(nextParam);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -27,9 +31,9 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (hydrated && accessToken) {
-      router.push("/dashboard/home");
+      router.push(nextPath);
     }
-  }, [hydrated, accessToken, router]);
+  }, [hydrated, accessToken, router, nextPath]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -39,6 +43,7 @@ export default function LoginPage() {
     try {
       const res = await fetch(`${API_BASE_URL}/users/login`, {
         method: "POST",
+        credentials: "include",
         headers: {
           "Content-Type": "application/json",
           "X-Device-ID": deviceId || "",
@@ -57,7 +62,8 @@ export default function LoginPage() {
         setOrganizations(data.organizations);
         // Store credentials temporarily for org selection
         useSessionStore.getState().setAuthTempCredentials({ email, password });
-        router.push("/auth/select-organization");
+        const selectOrgPath = `/auth/select-organization?next=${encodeURIComponent(nextPath)}`;
+        router.push(selectOrgPath);
       } else {
         throw new Error("No organizations found for this user");
       }
@@ -177,5 +183,13 @@ export default function LoginPage() {
         </form>
       </div>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginPageContent />
+    </Suspense>
   );
 }

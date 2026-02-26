@@ -24,6 +24,12 @@ const cards = [
     permission: PERMISSIONS.VIEW_INVENTORY,
   },
   {
+    title: "Delivery Categories",
+    description: "Manage delivery methods and pricing.",
+    href: "/dashboard/settings/delivery-categories",
+    permission: PERMISSIONS.MANAGE_INVENTORY,
+  },
+  {
     title: "Permissions",
     description: "Review roles and permission sets.",
     href: "/dashboard/settings/permissions",

@@ -61,10 +61,12 @@ export default function HomePage() {
         const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate());
         const endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
 
+
         const response = await apiFetch(
           `/sales/reports/summary?startDate=${startOfDay.toISOString()}&endDate=${endOfDay.toISOString()}`
         );
 
+      
         if (response) {
           setSalesData(response.data);
         }

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/Sidebar";
 import { TopbarNew } from "@/components/topbar/TopbarNew";
 import { useSessionStore } from "@/store/session";
+import { buildLoginRedirect } from "@/lib/auth-redirect";
 
 export default function DashboardLayout({ children }) {
   const router = useRouter();
@@ -25,7 +26,8 @@ export default function DashboardLayout({ children }) {
 
   useEffect(() => {
     if (hydrated && !accessToken) {
-      router.push("/auth/login");
+      const nextPath = `${window.location.pathname}${window.location.search}`;
+      router.push(buildLoginRedirect(nextPath));
     }
   }, [hydrated, accessToken, router]);
 

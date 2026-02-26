@@ -34,9 +34,17 @@ export default function SalesReportsPage() {
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState("overview");
 
+  const getLocalDateString = () => {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
   const [filters, setFilters] = useState({
-    startDate: new Date(new Date().setDate(new Date().getDate() - 30)).toISOString().split("T")[0],
-    endDate: new Date().toISOString().split("T")[0],
+    startDate: getLocalDateString(),
+    endDate: getLocalDateString(),
     status: "",
     paymentMethod: "",
     shopifySyncStatus: "",
@@ -62,10 +70,17 @@ export default function SalesReportsPage() {
       try {
         setLoading(true);
 
+        // Prepare dates with proper time boundaries using local timezone
+        const [startYear, startMonth, startDay] = filters.startDate.split('-').map(Number);
+        const [endYear, endMonth, endDay] = filters.endDate.split('-').map(Number);
+        
+        const startOfDay = new Date(startYear, startMonth - 1, startDay);
+        const endOfDay = new Date(endYear, endMonth - 1, endDay + 1);
+
         // Fetch summary report
         const params = new URLSearchParams({
-          startDate: filters.startDate,
-          endDate: filters.endDate,
+          startDate: startOfDay.toISOString(),
+          endDate: endOfDay.toISOString(),
           status: filters.status,
         });
 
@@ -83,8 +98,8 @@ export default function SalesReportsPage() {
 
         // Fetch detailed sales
         const detailParams = new URLSearchParams({
-          startDate: filters.startDate,
-          endDate: filters.endDate,
+          startDate: startOfDay.toISOString(),
+          endDate: endOfDay.toISOString(),
           status: filters.status,
           limit: pagination.limit,
           page: pagination.page,
@@ -135,10 +150,24 @@ export default function SalesReportsPage() {
   }, [canViewReports, filters, pagination.page]);
 
   const handleFilterChange = (key, value) => {
-    setFilters((prev) => ({
-      ...prev,
-      [key]: value,
-    }));
+    setFilters((prev) => {
+      const updated = {
+        ...prev,
+        [key]: value,
+      };
+      
+      // If startDate is changed and is greater than endDate, update endDate to match
+      if (key === 'startDate' && value && updated.endDate && value > updated.endDate) {
+        updated.endDate = value;
+      }
+      
+      // If endDate is changed and is less than startDate, update startDate to match
+      if (key === 'endDate' && value && updated.startDate && value < updated.startDate) {
+        updated.startDate = value;
+      }
+      
+      return updated;
+    });
     setPagination((prev) => ({
       ...prev,
       page: 1,
@@ -206,6 +235,7 @@ export default function SalesReportsPage() {
             >
               <option value="">All</option>
               <option value="completed">Paid</option>
+              <option value="partial">Partial</option>
               <option value="pending">Pending</option>
               <option value="failed">Failed</option>
             </select>
@@ -529,7 +559,7 @@ export default function SalesReportsPage() {
                           {formatDateTime(sale.createdAt)}
                         </td>
                         <td className="px-6 py-4 text-sm text-zinc-600 capitalize">
-                          {sale.payments?.[0]?.method || "N/A"}
+                          {sale.payments?.length > 1 ? "Split Payments" : sale.payments?.[0]?.method || "N/A"}
                         </td>
                         <td className="px-6 py-4 text-sm text-zinc-600">
                           {sale.items?.length || 0} item{sale.items?.length !== 1 ? "s" : ""}

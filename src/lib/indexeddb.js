@@ -1,8 +1,11 @@
-// IndexedDB utility for storing pending sales when offline
+// IndexedDB utility for storing pending sales and deliveries when offline
 const DB_NAME = "FLEXI_POS";
-const DB_VERSION = 2;
+const DB_VERSION = 3; // Incremented for new delivery stores
 const STORE_NAME = "pending_sales";
 const SHOPIFY_STORE_NAME = "shopify_products";
+const PENDING_DELIVERIES_STORE = "pending_deliveries";
+const PENDING_DELIVERY_UPDATES_STORE = "pending_delivery_updates";
+const CACHED_CATEGORIES_STORE = "cached_delivery_categories";
 
 let db = null;
 
@@ -19,12 +22,42 @@ export async function initDB() {
 
     request.onupgradeneeded = (event) => {
       const database = event.target.result;
+      
+      // Existing stores
       if (!database.objectStoreNames.contains(STORE_NAME)) {
         database.createObjectStore(STORE_NAME, { keyPath: "id", autoIncrement: true });
       }
       if (!database.objectStoreNames.contains(SHOPIFY_STORE_NAME)) {
         const store = database.createObjectStore(SHOPIFY_STORE_NAME, { keyPath: "id" });
         store.createIndex("title", "title", { unique: false });
+      }
+
+      // New delivery-related stores
+      if (!database.objectStoreNames.contains(PENDING_DELIVERIES_STORE)) {
+        const store = database.createObjectStore(PENDING_DELIVERIES_STORE, {
+          keyPath: "id",
+          autoIncrement: true,
+        });
+        store.createIndex("locationId", "locationId", { unique: false });
+        store.createIndex("status", "status", { unique: false });
+        store.createIndex("savedAt", "savedAt", { unique: false });
+      }
+
+      if (!database.objectStoreNames.contains(PENDING_DELIVERY_UPDATES_STORE)) {
+        const store = database.createObjectStore(PENDING_DELIVERY_UPDATES_STORE, {
+          keyPath: "id",
+          autoIncrement: true,
+        });
+        store.createIndex("deliveryId", "deliveryId", { unique: false });
+        store.createIndex("type", "type", { unique: false });
+      }
+
+      if (!database.objectStoreNames.contains(CACHED_CATEGORIES_STORE)) {
+        const store = database.createObjectStore(CACHED_CATEGORIES_STORE, {
+          keyPath: "id",
+          autoIncrement: true,
+        });
+        store.createIndex("locationId", "locationId", { unique: true });
       }
     };
   });
@@ -141,6 +174,335 @@ export async function getPendingSalesCount() {
 
     request.onerror = () => reject(request.error);
     request.onsuccess = () => resolve(request.result);
+  });
+}
+
+// ===== DELIVERY FUNCTIONS =====
+
+// Save pending delivery to IndexedDB
+export async function savePendingDelivery(deliveryData) {
+  if (!db) await initDB();
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([PENDING_DELIVERIES_STORE], "readwrite");
+    const store = transaction.objectStore(PENDING_DELIVERIES_STORE);
+    const request = store.add({
+      ...deliveryData,
+      savedAt: new Date().toISOString(),
+      syncedAt: null,
+      retryCount: 0,
+      lastError: null,
+    });
+
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => resolve(request.result);
+  });
+}
+
+// Get all pending deliveries
+export async function getPendingDeliveries(locationId = null) {
+  if (!db) await initDB();
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([PENDING_DELIVERIES_STORE], "readonly");
+    const store = transaction.objectStore(PENDING_DELIVERIES_STORE);
+    const index = store.index("locationId");
+
+    let request;
+    if (locationId) {
+      request = index.getAll(locationId);
+    } else {
+      request = store.getAll();
+    }
+
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const results = request.result || [];
+      // Filter to unsync edigered only
+      resolve(results.filter((d) => !d.syncedAt));
+    };
+  });
+}
+
+// Get pending delivery by ID
+export async function getPendingDeliveryById(id) {
+  if (!db) await initDB();
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([PENDING_DELIVERIES_STORE], "readonly");
+    const store = transaction.objectStore(PENDING_DELIVERIES_STORE);
+    const request = store.get(id);
+
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => resolve(request.result);
+  });
+}
+
+// Update pending delivery
+export async function updatePendingDelivery(id, updates) {
+  if (!db) await initDB();
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([PENDING_DELIVERIES_STORE], "readwrite");
+    const store = transaction.objectStore(PENDING_DELIVERIES_STORE);
+    const getRequest = store.get(id);
+
+    getRequest.onsuccess = () => {
+      const delivery = getRequest.result;
+      if (!delivery) return reject(new Error("Delivery not found"));
+
+      const updateRequest = store.put({
+        ...delivery,
+        ...updates,
+        retryCount: (delivery.retryCount || 0) + 1,
+      });
+
+      updateRequest.onerror = () => reject(updateRequest.error);
+      updateRequest.onsuccess = () => resolve(updateRequest.result);
+    };
+
+    getRequest.onerror = () => reject(getRequest.error);
+  });
+}
+
+// Mark delivery as synced (keeps it in DB for reference)
+export async function markDeliveryAsSynced(id, serverId) {
+  if (!db) await initDB();
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([PENDING_DELIVERIES_STORE], "readwrite");
+    const store = transaction.objectStore(PENDING_DELIVERIES_STORE);
+    const getRequest = store.get(id);
+
+    getRequest.onsuccess = () => {
+      const delivery = getRequest.result;
+      const updateRequest = store.put({
+        ...delivery,
+        syncedAt: new Date().toISOString(),
+        serverId,
+        retryCount: 0,
+        lastError: null,
+      });
+
+      updateRequest.onerror = () => reject(updateRequest.error);
+      updateRequest.onsuccess = () => resolve(updateRequest.result);
+    };
+
+    getRequest.onerror = () => reject(getRequest.error);
+  });
+}
+
+// Delete pending delivery
+export async function deletePendingDelivery(id) {
+  if (!db) await initDB();
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([PENDING_DELIVERIES_STORE], "readwrite");
+    const store = transaction.objectStore(PENDING_DELIVERIES_STORE);
+    const request = store.delete(id);
+
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => resolve();
+  });
+}
+
+// Get count of pending deliveries
+export async function getPendingDeliveriesCount(locationId = null) {
+  if (!db) await initDB();
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([PENDING_DELIVERIES_STORE], "readonly");
+    const store = transaction.objectStore(PENDING_DELIVERIES_STORE);
+
+    let request;
+    if (locationId) {
+      const index = store.index("locationId");
+      request = index.count(locationId);
+    } else {
+      request = store.count();
+    }
+
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      // Count only unsynced deliveries
+      resolve(request.result);
+    };
+  });
+}
+
+// ===== DELIVERY UPDATES (STATUS CHANGES) =====
+
+// Save pending delivery update (status change, etc.)
+export async function savePendingDeliveryUpdate(deliveryId, updateData) {
+  if (!db) await initDB();
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([PENDING_DELIVERY_UPDATES_STORE], "readwrite");
+    const store = transaction.objectStore(PENDING_DELIVERY_UPDATES_STORE);
+    const request = store.add({
+      deliveryId,
+      ...updateData,
+      savedAt: new Date().toISOString(),
+      syncedAt: null,
+      retryCount: 0,
+      lastError: null,
+    });
+
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => resolve(request.result);
+  });
+}
+
+// Get pending delivery updates for a specific delivery
+export async function getPendingDeliveryUpdates(deliveryId) {
+  if (!db) await initDB();
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([PENDING_DELIVERY_UPDATES_STORE], "readonly");
+    const store = transaction.objectStore(PENDING_DELIVERY_UPDATES_STORE);
+    const index = store.index("deliveryId");
+    const request = index.getAll(deliveryId);
+
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const results = request.result || [];
+      // Filter to unsynced only
+      resolve(results.filter((u) => !u.syncedAt));
+    };
+  });
+}
+
+// Get all un synced delivery updates
+export async function getAllPendingDeliveryUpdates() {
+  if (!db) await initDB();
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([PENDING_DELIVERY_UPDATES_STORE], "readonly");
+    const store = transaction.objectStore(PENDING_DELIVERY_UPDATES_STORE);
+    const request = store.getAll();
+
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const results = request.result || [];
+      // Filter to unsynced only
+      resolve(results.filter((u) => !u.syncedAt));
+    };
+  });
+}
+
+// Mark delivery update as synced
+export async function markDeliveryUpdateAsSynced(id) {
+  if (!db) await initDB();
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([PENDING_DELIVERY_UPDATES_STORE], "readwrite");
+    const store = transaction.objectStore(PENDING_DELIVERY_UPDATES_STORE);
+    const getRequest = store.get(id);
+
+    getRequest.onsuccess = () => {
+      const update = getRequest.result;
+      const updateRequest = store.put({
+        ...update,
+        syncedAt: new Date().toISOString(),
+        retryCount: 0,
+        lastError: null,
+      });
+
+      updateRequest.onerror = () => reject(updateRequest.error);
+      updateRequest.onsuccess = () => resolve(updateRequest.result);
+    };
+
+    getRequest.onerror = () => reject(getRequest.error);
+  });
+}
+
+// Delete pending delivery update
+export async function deletePendingDeliveryUpdate(id) {
+  if (!db) await initDB();
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([PENDING_DELIVERY_UPDATES_STORE], "readwrite");
+    const store = transaction.objectStore(PENDING_DELIVERY_UPDATES_STORE);
+    const request = store.delete(id);
+
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => resolve();
+  });
+}
+
+// ===== CACHED CATEGORIES =====
+
+// Cache delivery categories for a location (offline access)
+export async function cacheDeliveryCategories(locationId, categories) {
+  if (!db) await initDB();
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([CACHED_CATEGORIES_STORE], "readwrite");
+    const store = transaction.objectStore(CACHED_CATEGORIES_STORE);
+    const index = store.index("locationId");
+    const getRequest = index.get(locationId);
+
+    getRequest.onsuccess = () => {
+      const existing = getRequest.result;
+      const request = store.put({
+        ...(existing || {}),
+        locationId,
+        categories,
+        cachedAt: new Date().toISOString(),
+      });
+
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve(request.result);
+    };
+
+    getRequest.onerror = () => reject(getRequest.error);
+  });
+}
+
+// Get cached categories for a location
+export async function getCachedCategories(locationId) {
+  if (!db) await initDB();
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([CACHED_CATEGORIES_STORE], "readonly");
+    const store = transaction.objectStore(CACHED_CATEGORIES_STORE);
+    const index = store.index("locationId");
+    const request = index.get(locationId);
+
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const result = request.result;
+      resolve(result?.categories || []);
+    };
+  });
+}
+
+// Clear cached categories
+export async function clearCachedCategories(locationId = null) {
+  if (!db) await initDB();
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([CACHED_CATEGORIES_STORE], "readwrite");
+    const store = transaction.objectStore(CACHED_CATEGORIES_STORE);
+
+    if (locationId) {
+      const index = store.index("locationId");
+      const request = index.openCursor(locationId);
+      request.onsuccess = (event) => {
+        const cursor = event.target.result;
+        if (cursor) {
+          cursor.delete();
+          cursor.continue();
+        } else {
+          resolve();
+        }
+      };
+      request.onerror = () => reject(request.error);
+    } else {
+      const request = store.clear();
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve();
+    }
   });
 }
 

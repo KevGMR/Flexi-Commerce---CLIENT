@@ -1,24 +1,52 @@
 import { getSessionState, useSessionStore } from "@/store/session";
+import { buildLoginRedirect, sanitizeNextPath } from "@/lib/auth-redirect";
 
 const BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:9200";
 const JSON_HEADERS = { "Content-Type": "application/json" };
 
+let redirectingToLogin = false;
+
+function handleUnauthorizedSession() {
+  useSessionStore.getState().clearSession();
+
+  if (typeof window === "undefined" || redirectingToLogin) return;
+
+  const currentPath = window.location.pathname || "";
+  const currentSearch = window.location.search || "";
+  const currentHash = window.location.hash || "";
+  const isAuthRoute = currentPath.startsWith("/auth/");
+
+  if (!isAuthRoute) {
+    redirectingToLogin = true;
+    const candidateNextPath = `${currentPath}${currentSearch}${currentHash}`;
+    const nextPath = sanitizeNextPath(candidateNextPath);
+    const loginUrl = buildLoginRedirect(nextPath);
+    window.location.assign(loginUrl);
+  }
+}
+
 async function refreshAccessToken() {
-  const { refreshToken } = getSessionState();
-  if (!refreshToken) return null;
+  const { deviceId, deviceName, refreshToken } = getSessionState();
+
+  const refreshHeaders = {
+    ...JSON_HEADERS,
+  };
+  if (deviceId) refreshHeaders["X-Device-ID"] = deviceId;
+  if (deviceName) refreshHeaders["X-Device-Name"] = deviceName;
+
   try {
-    const res = await fetch(`${BASE_URL}/auth/refresh`, {
+    const res = await fetch(`${BASE_URL}/users/refresh`, {
       method: "POST",
-      headers: JSON_HEADERS,
-      body: JSON.stringify({ refreshToken }),
+      headers: refreshHeaders,
+      credentials: "include",
     });
     if (!res.ok) return null;
     const data = await res.json();
     if (data?.accessToken) {
       useSessionStore.getState().setTokens({
         accessToken: data.accessToken,
-        refreshToken,
+        refreshToken: refreshToken || null,
       });
       return data.accessToken;
     }
@@ -60,6 +88,7 @@ export async function apiFetch(
   const options = {
     method,
     headers: finalHeaders,
+    credentials: "include",
   };
 
   if (body)
@@ -72,6 +101,11 @@ export async function apiFetch(
     if (newToken) {
       finalHeaders.Authorization = `Bearer ${newToken}`;
       response = await fetch(`${BASE_URL}${path}`, options);
+      if (response.status === 401) {
+        handleUnauthorizedSession();
+      }
+    } else {
+      handleUnauthorizedSession();
     }
   }
 
