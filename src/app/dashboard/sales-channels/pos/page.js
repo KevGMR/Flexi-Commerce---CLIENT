@@ -3174,7 +3174,7 @@ export default function PosPage() {
                   )}
 
                   {/* Payment Method */}
-                  <div>
+                  {/* <div>
                     <div className="flex items-center justify-between mb-2">
                       <label className="block text-sm font-medium text-gray-700">
                         Payment Method
@@ -3305,16 +3305,16 @@ export default function PosPage() {
                         )}
                       </div>
                     )}
-                  </div>
+                  </div> */}
 
                   {/* Notes */}
-                  <input
+                  {/* <input
                     type="text"
                     placeholder="Add note (optional)"
                     value={notes}
                     onChange={(e) => setNotes(e.target.value)}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                  />
+                  /> */}
 
                   {/* Status/Error */}
                   {status && (
@@ -3328,13 +3328,13 @@ export default function PosPage() {
                     </div>
                   )}
 
-                  {/* Checkout Button */}
+                  {/* Payments and Delivery Modals Button */}
                   <button
                     onClick={handleCheckout}
                     disabled={cart.length === 0}
                     className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 text-white font-bold py-4 rounded-lg text-lg transition-colors"
                   >
-                    Complete Sale
+                    Add Payments
                   </button>
                 </div>
               )}

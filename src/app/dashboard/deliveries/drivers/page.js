@@ -37,7 +37,7 @@ export default function DriverManagementPage() {
         setLoading(true);
 
         // Fetch unassigned deliveries
-        const deliveriesResponse = await apiFetch("/delivery-fees?status=pending&limit=100");
+        const deliveriesResponse = await apiFetch("/delivery-fees?categoryStatus=pending&limit=100");
         let deliveriesData = [];
         if (deliveriesResponse?.data?.deliveries && Array.isArray(deliveriesResponse.data.deliveries)) {
           deliveriesData = deliveriesResponse.data.deliveries;
@@ -93,7 +93,7 @@ export default function DriverManagementPage() {
 
       // Refresh data
       refetchDrivers();
-      const deliveriesResponse = await apiFetch("/delivery-fees?status=pending&limit=100");
+      const deliveriesResponse = await apiFetch("/delivery-fees?categoryStatus=pending&limit=100");
       let deliveriesData = [];
       if (deliveriesResponse?.data?.deliveries) {
         deliveriesData = deliveriesResponse.data.deliveries;
@@ -123,7 +123,7 @@ export default function DriverManagementPage() {
 
       // Refresh data
       refetchDrivers();
-      const deliveriesResponse = await apiFetch("/delivery-fees?status=pending&limit=100");
+      const deliveriesResponse = await apiFetch("/delivery-fees?categoryStatus=pending&limit=100");
       let deliveriesData = [];
       if (deliveriesResponse?.data?.deliveries) {
         deliveriesData = deliveriesResponse.data.deliveries;
