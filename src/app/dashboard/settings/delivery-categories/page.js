@@ -121,6 +121,27 @@ export default function deliveryCategoriesPage() {
     }));
   };
 
+  const normalizeOptionPayload = (option) => ({
+    optionName: option.optionName?.trim() || "",
+    price: Number(option.price),
+    estimatedDays: Number.isFinite(Number(option.estimatedDays))
+      ? Number(option.estimatedDays)
+      : 1,
+    isActive: option.isActive !== false,
+    description: option.description || "",
+  });
+
+  const hasOptionChanged = (originalOption, nextPayload) => {
+    const currentPayload = normalizeOptionPayload(originalOption);
+    return (
+      currentPayload.optionName !== nextPayload.optionName ||
+      currentPayload.price !== nextPayload.price ||
+      currentPayload.estimatedDays !== nextPayload.estimatedDays ||
+      currentPayload.isActive !== nextPayload.isActive ||
+      currentPayload.description !== nextPayload.description
+    );
+  };
+
   const handleCreateCategory = async (e) => {
     e.preventDefault();
     setStatus("");
@@ -132,8 +153,26 @@ export default function deliveryCategoriesPage() {
       return;
     }
 
-    if (categoryForm.childOptions.length === 0 || !categoryForm.childOptions[0].optionName) {
+    if (categoryForm.childOptions.length === 0) {
       setError("At least one delivery option is required");
+      return;
+    }
+
+    const invalidOptionNameIndex = categoryForm.childOptions.findIndex(
+      (option) => !option.optionName || option.optionName.trim() === ""
+    );
+
+    if (invalidOptionNameIndex !== -1) {
+      setError(`Option name is required for option #${invalidOptionNameIndex + 1}`);
+      return;
+    }
+
+    const invalidOptionPriceIndex = categoryForm.childOptions.findIndex(
+      (option) => !Number.isFinite(Number(option.price)) || Number(option.price) < 0
+    );
+
+    if (invalidOptionPriceIndex !== -1) {
+      setError(`Price must be a non-negative number for option #${invalidOptionPriceIndex + 1}`);
       return;
     }
 
@@ -148,6 +187,57 @@ export default function deliveryCategoriesPage() {
             statusWorkflow: categoryForm.statusWorkflow,
           },
         });
+
+        const originalOptions = editingCategory.childOptions || [];
+        const currentOptions = categoryForm.childOptions || [];
+        const originalOptionsById = new Map(
+          originalOptions
+            .filter((option) => option._id)
+            .map((option) => [String(option._id), option])
+        );
+        const retainedOptionIds = new Set();
+
+        for (const option of currentOptions) {
+          const payload = normalizeOptionPayload(option);
+
+          if (option._id) {
+            const optionId = String(option._id);
+            retainedOptionIds.add(optionId);
+            const originalOption = originalOptionsById.get(optionId);
+
+            if (!originalOption || hasOptionChanged(originalOption, payload)) {
+              await apiFetch(
+                `/locations/${selectedLocation}/delivery-categories/${editingCategory._id}/options/${optionId}`,
+                {
+                  method: "PATCH",
+                  body: payload,
+                }
+              );
+            }
+          } else {
+            await apiFetch(
+              `/locations/${selectedLocation}/delivery-categories/${editingCategory._id}/options`,
+              {
+                method: "POST",
+                body: payload,
+              }
+            );
+          }
+        }
+
+        for (const option of originalOptions) {
+          if (!option?._id) continue;
+          const optionId = String(option._id);
+          if (retainedOptionIds.has(optionId)) continue;
+
+          await apiFetch(
+            `/locations/${selectedLocation}/delivery-categories/${editingCategory._id}/options/${optionId}`,
+            {
+              method: "DELETE",
+            }
+          );
+        }
+
         setStatus("Category updated successfully.");
       } else {
         // Create new category
