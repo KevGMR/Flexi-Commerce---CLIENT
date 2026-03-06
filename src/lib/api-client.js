@@ -7,6 +7,24 @@ const JSON_HEADERS = { "Content-Type": "application/json" };
 
 let redirectingToLogin = false;
 
+function isSessionEndedResponse(status, code) {
+  return (
+    status === 401 &&
+    [
+      "TOKEN_EXPIRED",
+      "REFRESH_TOKEN_MISSING",
+      "REFRESH_TOKEN_INVALID",
+      "REFRESH_TOKEN_EXPIRED",
+      "DEVICE_ID_REQUIRED",
+      "DEVICE_ID_INVALID_FORMAT",
+      "DEVICE_ID_MISMATCH",
+      "USER_NOT_FOUND",
+      "ORG_ACCESS_REVOKED",
+      "REFRESH_TOKEN_INVALID_RESPONSE",
+    ].includes(code)
+  );
+}
+
 function isDefinitiveAuthFailure(status) {
   return status === 400 || status === 401 || status === 403;
 }
@@ -89,6 +107,8 @@ export async function apiFetch(
   path,
   { method = "GET", headers = {}, body, retryOn401 = true } = {},
 ) {
+  let shouldRouteToLogin = false;
+
   const {
     accessToken,
     deviceId,
@@ -131,11 +151,11 @@ export async function apiFetch(
       finalHeaders.Authorization = `Bearer ${refreshResult.accessToken}`;
       response = await fetch(`${BASE_URL}${path}`, options);
       if (response.status === 401) {
-        handleUnauthorizedSession();
+        shouldRouteToLogin = true;
       }
     } else if (refreshResult?.status === "auth-failed") {
       console.warn("Forced logout after definitive refresh auth failure", refreshResult);
-      handleUnauthorizedSession();
+      shouldRouteToLogin = true;
     } else {
       console.warn("Skipping forced logout after transient refresh failure", refreshResult);
     }
@@ -144,6 +164,15 @@ export async function apiFetch(
   const contentType = response.headers.get("content-type") || "";
   const isJson = contentType.includes("application/json");
   const data = isJson ? await response.json().catch(() => null) : null;
+
+  if (
+    response.status === 401 &&
+    (shouldRouteToLogin ||
+      isSessionEndedResponse(response.status, data?.code) ||
+      !getSessionState().accessToken)
+  ) {
+    handleUnauthorizedSession();
+  }
 
   if (!response.ok) {
     const error = new Error(
