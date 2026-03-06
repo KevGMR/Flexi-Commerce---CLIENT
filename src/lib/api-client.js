@@ -7,6 +7,10 @@ const JSON_HEADERS = { "Content-Type": "application/json" };
 
 let redirectingToLogin = false;
 
+function isDefinitiveAuthFailure(status) {
+  return status === 400 || status === 401 || status === 403;
+}
+
 function handleUnauthorizedSession() {
   useSessionStore.getState().clearSession();
 
@@ -41,19 +45,44 @@ async function refreshAccessToken() {
       headers: refreshHeaders,
       credentials: "include",
     });
-    if (!res.ok) return null;
-    const data = await res.json();
+    const contentType = res.headers.get("content-type") || "";
+    const isJson = contentType.includes("application/json");
+    const data = isJson ? await res.json().catch(() => null) : null;
+
+    if (!res.ok) {
+      return {
+        status: isDefinitiveAuthFailure(res.status) ? "auth-failed" : "transient-failure",
+        statusCode: res.status,
+        code: data?.code || null,
+        error: data?.error || data?.message || "Refresh failed",
+      };
+    }
+
     if (data?.accessToken) {
       useSessionStore.getState().setTokens({
         accessToken: data.accessToken,
         refreshToken: refreshToken || null,
       });
-      return data.accessToken;
+      return {
+        status: "success",
+        accessToken: data.accessToken,
+      };
     }
   } catch (err) {
     console.warn("refresh token failed", err);
+    return {
+      status: "transient-failure",
+      statusCode: 0,
+      code: "NETWORK_ERROR",
+      error: err?.message || "Network error while refreshing token",
+    };
   }
-  return null;
+  return {
+    status: "auth-failed",
+    statusCode: 401,
+    code: "REFRESH_TOKEN_INVALID_RESPONSE",
+    error: "Refresh response did not include access token",
+  };
 }
 
 export async function apiFetch(
@@ -97,15 +126,18 @@ export async function apiFetch(
   let response = await fetch(`${BASE_URL}${path}`, options);
 
   if (response.status === 401 && retryOn401) {
-    const newToken = await refreshAccessToken();
-    if (newToken) {
-      finalHeaders.Authorization = `Bearer ${newToken}`;
+    const refreshResult = await refreshAccessToken();
+    if (refreshResult?.status === "success") {
+      finalHeaders.Authorization = `Bearer ${refreshResult.accessToken}`;
       response = await fetch(`${BASE_URL}${path}`, options);
       if (response.status === 401) {
         handleUnauthorizedSession();
       }
-    } else {
+    } else if (refreshResult?.status === "auth-failed") {
+      console.warn("Forced logout after definitive refresh auth failure", refreshResult);
       handleUnauthorizedSession();
+    } else {
+      console.warn("Skipping forced logout after transient refresh failure", refreshResult);
     }
   }
 
