@@ -3341,7 +3341,7 @@ export default function PosPage() {
             </>
           ) : (
             <>
-              {/* Returns Header */}
+              {/* Returns Head*/}
               <div className="p-4 border-b border-gray-200 bg-orange-50">
                 <h2 className="text-lg font-bold text-orange-900">
                   Process Return
