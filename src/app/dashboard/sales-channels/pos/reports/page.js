@@ -446,11 +446,23 @@ export default function SalesReportsPage() {
                     <div className="flex items-center justify-between">
                       <span className="text-zinc-600">Subtotal</span>
                       <span className="font-semibold text-zinc-900">
-                        {formatCurrency(reportData.totalRevenue - (reportData.totalDiscount || 0) + (reportData.totalTax || 0))}
+                        {formatCurrency(
+                          reportData.preDiscountSales ||
+                            ((reportData.totalRevenue || 0) -
+                              (reportData.deliveryAmountCollected || 0) -
+                              (reportData.totalTax || 0) +
+                              (reportData.totalDiscount || 0)),
+                        )}
                       </span>
                     </div>
                     <div className="flex items-center justify-between">
-                      <span className="text-zinc-600">Total Tax</span>
+                      <span className="text-zinc-600">
+                        {reportData.taxDisplayMode === "exclusive"
+                          ? "Tax (Exclusive)"
+                          : reportData.taxDisplayMode === "mixed"
+                            ? "Tax (Mixed Modes)"
+                            : "Tax (Inclusive)"}
+                      </span>
                       <span className="font-semibold text-zinc-900">
                         {formatCurrency(reportData.totalTax || 0)}
                       </span>

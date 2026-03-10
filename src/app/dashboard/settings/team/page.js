@@ -13,6 +13,7 @@ export default function TeamPage() {
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [orgName, setOrgName] = useState("");
+  const [orgTaxMode, setOrgTaxMode] = useState("inclusive");
 
   const orgId =
     activeOrganization?._id ||
@@ -32,6 +33,7 @@ export default function TeamPage() {
       setOrg(orgRes?.organization || null);
       setMembers(membersRes?.members || []);
       setOrgName(orgRes?.organization?.name || "");
+      setOrgTaxMode(orgRes?.organization?.settings?.taxMode || "inclusive");
     } catch (err) {
       setError(err?.message || "Failed to load organization data.");
     } finally {
@@ -67,7 +69,13 @@ export default function TeamPage() {
     try {
       await apiFetch(`/organizations/${orgId}`, {
         method: "PUT",
-        body: { name: orgName },
+        body: {
+          name: orgName,
+          settings: {
+            ...(org?.settings || {}),
+            taxMode: orgTaxMode,
+          },
+        },
       });
       setStatus("Organization updated.");
       await loadOrg();
@@ -102,21 +110,36 @@ export default function TeamPage() {
                 <div className="text-xs text-zinc-500">Slug: {org.slug}</div>
                 <form
                   onSubmit={handleOrgUpdate}
-                  className="flex flex-col md:flex-row gap-3"
+                  className="space-y-3"
                 >
-                  <input
-                    value={orgName}
-                    onChange={(e) => setOrgName(e.target.value)}
-                    className="w-full rounded border border-zinc-300 px-3 py-2 text-sm"
-                    disabled={!canManageSettings}
-                  />
-                  <button
-                    type="submit"
-                    disabled={!canManageSettings}
-                    className="px-4 py-2 rounded bg-zinc-900 text-white text-sm disabled:opacity-50"
-                  >
-                    Save
-                  </button>
+                  <div className="flex flex-col md:flex-row gap-3">
+                    <input
+                      value={orgName}
+                      onChange={(e) => setOrgName(e.target.value)}
+                      className="w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                      disabled={!canManageSettings}
+                    />
+                    <button
+                      type="submit"
+                      disabled={!canManageSettings}
+                      className="px-4 py-2 rounded bg-zinc-900 text-white text-sm disabled:opacity-50"
+                    >
+                      Save
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <label className="text-xs text-zinc-700">Default Tax Mode</label>
+                    <select
+                      value={orgTaxMode}
+                      onChange={(e) => setOrgTaxMode(e.target.value)}
+                      className="w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                      disabled={!canManageSettings}
+                    >
+                      <option value="inclusive">Inclusive (tax included in price)</option>
+                      <option value="exclusive">Exclusive (tax added on top)</option>
+                    </select>
+                  </div>
                 </form>
                 {!canManageSettings && (
                   <p className="text-xs text-zinc-500">

@@ -24,6 +24,7 @@ export default function LocationsPage() {
     phone: "",
     email: "",
     taxRate: "",
+    taxMode: "",
     currency: "USD",
     isDefault: false,
   });
@@ -84,6 +85,7 @@ export default function LocationsPage() {
           phone: form.phone,
           email: form.email,
           taxRate: form.taxRate ? Number(form.taxRate) : 0,
+          taxMode: form.taxMode || undefined,
           currency: form.currency,
           isDefault: form.isDefault,
         },
@@ -100,6 +102,7 @@ export default function LocationsPage() {
         phone: "",
         email: "",
         taxRate: "",
+        taxMode: "",
         currency: "USD",
         isDefault: false,
       });
@@ -146,6 +149,9 @@ export default function LocationsPage() {
                     Shopify: {loc.shopifyLocationName}
                   </div>
                 )}
+                <div className="mt-1 text-xs text-zinc-600">
+                  Tax mode: {loc.taxMode || "Inherit org default"}
+                </div>
               </div>
             ))}
             {locations.length === 0 && (
@@ -277,6 +283,20 @@ export default function LocationsPage() {
               disabled={!canManage}
               className="w-full rounded border border-zinc-300 px-3 py-2 text-sm"
             />
+            <select
+              name="taxMode"
+              value={form.taxMode}
+              onChange={handleChange}
+              disabled={!canManage}
+              className="w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+            >
+              <option value="">Tax mode: Inherit organization default</option>
+              <option value="inclusive">Inclusive (tax included in price)</option>
+              <option value="exclusive">Exclusive (tax added on top)</option>
+            </select>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <label className="flex items-center gap-2 text-xs text-zinc-700">
               <input
                 type="checkbox"
