@@ -1273,6 +1273,7 @@ export default function PosPage() {
             method: payment.method,
             amount: payment.amount,
             status: "completed",
+            paidAt: new Date().toISOString(),
           }));
       } else {
         payload.paymentMethod = paymentMethod;
@@ -1401,6 +1402,7 @@ export default function PosPage() {
               method: payment.method,
               amount: payment.amount,
               status: "completed",
+              paidAt: new Date().toISOString(),
             }));
         } else {
           offlinePayload.paymentMethod = paymentMethod;

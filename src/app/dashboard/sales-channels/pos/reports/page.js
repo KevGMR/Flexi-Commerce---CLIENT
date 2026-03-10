@@ -82,6 +82,7 @@ export default function SalesReportsPage() {
           startDate: startOfDay.toISOString(),
           endDate: endOfDay.toISOString(),
           status: filters.status,
+          timeBasis: "payment",
         });
 
         if (filters.paymentMethod) params.append("paymentMethod", filters.paymentMethod);
@@ -101,6 +102,7 @@ export default function SalesReportsPage() {
           startDate: startOfDay.toISOString(),
           endDate: endOfDay.toISOString(),
           status: filters.status,
+          timeBasis: "payment",
           limit: pagination.limit,
           page: pagination.page,
         });
@@ -359,11 +361,16 @@ export default function SalesReportsPage() {
           {reportData ? (
             <>
               {/* Summary Stats */}
-              <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-5">
+              <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-6">
                 <StatCard
                   label="Total Revenue"
                   value={formatCurrency(reportData.totalRevenue)}
                   icon="💰"
+                />
+                <StatCard
+                  label="Delivery Collected"
+                  value={formatCurrency(reportData.deliveryAmountCollected)}
+                  icon="🚚"
                 />
                 <StatCard
                   label="Transactions"
@@ -454,6 +461,12 @@ export default function SalesReportsPage() {
                         -{formatCurrency(reportData.totalDiscount || 0)}
                       </span>
                     </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-zinc-600">Delivery Collected</span>
+                      <span className="font-semibold text-zinc-900">
+                        {formatCurrency(reportData.deliveryAmountCollected || 0)}
+                      </span>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -538,7 +551,7 @@ export default function SalesReportsPage() {
                         Items
                       </th>
                       <th className="px-6 py-3 text-right text-xs font-semibold text-zinc-900">
-                        Amount
+                        Amount Paid
                       </th>
                       <th className="px-6 py-3 text-left text-xs font-semibold text-zinc-900">
                         Status
@@ -556,16 +569,26 @@ export default function SalesReportsPage() {
                           {sale.receiptNumber}
                         </td>
                         <td className="px-6 py-4 text-sm text-zinc-600">
-                          {formatDateTime(sale.createdAt)}
+                          {formatDateTime(sale.lastPaymentAtInRange || sale.createdAt)}
                         </td>
                         <td className="px-6 py-4 text-sm text-zinc-600 capitalize">
-                          {sale.payments?.length > 1 ? "Split Payments" : sale.payments?.[0]?.method || "N/A"}
+                          {Array.isArray(sale.paymentMethodsInRange) && sale.paymentMethodsInRange.length > 0
+                            ? sale.paymentMethodsInRange.length > 1
+                              ? "Split Payments"
+                              : sale.paymentMethodsInRange[0]
+                            : sale.payments?.length > 1
+                              ? "Split Payments"
+                              : sale.payments?.[0]?.method || "N/A"}
                         </td>
                         <td className="px-6 py-4 text-sm text-zinc-600">
                           {sale.items?.length || 0} item{sale.items?.length !== 1 ? "s" : ""}
                         </td>
                         <td className="px-6 py-4 text-right text-sm font-semibold text-zinc-900">
-                          {formatCurrency(sale.totalAmount)}
+                          {formatCurrency(
+                            typeof sale.amountPaidInRange === "number"
+                              ? sale.amountPaidInRange
+                              : sale.totalAmount,
+                          )}
                         </td>
                         <td className="px-6 py-4">
                           <span

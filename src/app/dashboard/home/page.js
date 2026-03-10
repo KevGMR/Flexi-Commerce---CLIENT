@@ -63,7 +63,7 @@ export default function HomePage() {
 
 
         const response = await apiFetch(
-          `/sales/reports/summary?startDate=${startOfDay.toISOString()}&endDate=${endOfDay.toISOString()}`
+          `/sales/reports/summary?startDate=${startOfDay.toISOString()}&endDate=${endOfDay.toISOString()}&timeBasis=payment`
         );
 
       
