@@ -55,7 +55,7 @@ export const mapSaleToReceipt = ({ sale, receivable }) => {
     receiptNumber: sale.receiptNumber || sale.transactionId || `RECEIPT-${Date.now()}`,
     items: normalizeItems(sale.items),
     payments: normalizePayments(
-      sale.payments,
+      sale.effectivePayments || sale.payments,
       sale.paymentMethod,
       toNonNegativeAmount(sale.totalAmount),
     ),

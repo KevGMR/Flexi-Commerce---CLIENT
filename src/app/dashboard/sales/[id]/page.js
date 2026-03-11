@@ -25,6 +25,15 @@ export default function SaleDetailPage() {
   const [showCollectPaymentModal, setShowCollectPaymentModal] = useState(false);
   const [submittingPayment, setSubmittingPayment] = useState(false);
   const [paymentFormError, setPaymentFormError] = useState("");
+  const [showReallocatePaymentModal, setShowReallocatePaymentModal] = useState(false);
+  const [submittingReallocation, setSubmittingReallocation] = useState(false);
+  const [reallocationFormError, setReallocationFormError] = useState("");
+  const [reallocationForm, setReallocationForm] = useState({
+    fromAllocations: [{ paymentIndex: "", amount: "" }],
+    toAllocations: [{ method: "mpesa", amount: "", reference: "", cardLast4: "", cardBrand: "" }],
+    reason: "",
+    notes: "",
+  });
   const [paymentForm, setPaymentForm] = useState({
     method: "cash",
     amount: "",
@@ -37,6 +46,7 @@ export default function SaleDetailPage() {
   const canViewSalesHistory = permissions?.includes(PERMISSIONS.VIEW_SALE_HISTORY);
   const canCreateDeliveryFees = permissions?.includes(PERMISSIONS.DELIVERY_FEES_CREATE);
   const canCollectPayment = permissions?.includes(PERMISSIONS.CREATE_SALE);
+  const canEditSale = permissions?.includes(PERMISSIONS.EDIT_SALE);
 
   const fetchSaleById = async () => {
     try {
@@ -342,6 +352,194 @@ export default function SaleDetailPage() {
     }
   };
 
+  const getCorrectablePayments = () => {
+    if (!sale?.payments?.length) return [];
+
+    const remainingByIndex = new Map();
+
+    sale.payments.forEach((payment, index) => {
+      if ((payment?.status || "completed") === "completed" && Number(payment?.amount || 0) > 0) {
+        remainingByIndex.set(index, Number(payment.amount) || 0);
+      }
+    });
+
+    (sale.paymentCorrections || []).forEach((correction) => {
+      (correction?.fromAllocations || []).forEach((allocation) => {
+        const idx = Number(allocation?.paymentIndex);
+        const amount = Number(allocation?.amount || 0);
+        if (!Number.isInteger(idx) || idx < 0 || amount <= 0) return;
+        const current = Number(remainingByIndex.get(idx) || 0);
+        remainingByIndex.set(idx, Math.max(0, current - amount));
+      });
+    });
+
+    return Array.from(remainingByIndex.entries())
+      .map(([index, remainingAmount]) => ({
+        index,
+        method: sale.payments[index]?.method,
+        remainingAmount,
+      }))
+      .filter((entry) => entry.remainingAmount > 0.01);
+  };
+
+  const handleOpenReallocation = () => {
+    const correctablePayments = getCorrectablePayments();
+    if (correctablePayments.length === 0) {
+      setReallocationFormError("No completed payment allocation is available for reallocation");
+      return;
+    }
+
+    const firstSource = correctablePayments[0];
+    setReallocationForm({
+      fromAllocations: [
+        {
+          paymentIndex: String(firstSource.index),
+          amount: firstSource.remainingAmount.toFixed(2),
+        },
+      ],
+      toAllocations: [
+        {
+          method: "mpesa",
+          amount: firstSource.remainingAmount.toFixed(2),
+          reference: "",
+          cardLast4: "",
+          cardBrand: "",
+        },
+      ],
+      reason: "Incorrect payment method selected at checkout",
+      notes: "",
+    });
+    setReallocationFormError("");
+    setShowReallocatePaymentModal(true);
+  };
+
+  const updateReallocationField = (section, index, field, value) => {
+    setReallocationForm((prev) => {
+      const nextItems = [...prev[section]];
+      nextItems[index] = {
+        ...nextItems[index],
+        [field]: value,
+      };
+
+      return {
+        ...prev,
+        [section]: nextItems,
+      };
+    });
+  };
+
+  const addReallocationRow = (section) => {
+    setReallocationForm((prev) => ({
+      ...prev,
+      [section]: [
+        ...prev[section],
+        section === "fromAllocations"
+          ? { paymentIndex: "", amount: "" }
+          : { method: "mpesa", amount: "", reference: "", cardLast4: "", cardBrand: "" },
+      ],
+    }));
+  };
+
+  const removeReallocationRow = (section, index) => {
+    setReallocationForm((prev) => ({
+      ...prev,
+      [section]: prev[section].filter((_, itemIndex) => itemIndex !== index),
+    }));
+  };
+
+  const handleSubmitReallocation = async (e) => {
+    e.preventDefault();
+    setReallocationFormError("");
+
+    const correctablePayments = getCorrectablePayments();
+    const remainingByIndex = new Map(
+      correctablePayments.map((entry) => [entry.index, Number(entry.remainingAmount || 0)]),
+    );
+
+    const fromAllocations = reallocationForm.fromAllocations
+      .map((allocation) => ({
+        paymentIndex: Number(allocation.paymentIndex),
+        amount: Number(allocation.amount || 0),
+      }))
+      .filter((allocation) => Number.isFinite(allocation.amount) && allocation.amount > 0);
+
+    const toAllocations = reallocationForm.toAllocations
+      .map((allocation) => ({
+        method: allocation.method,
+        amount: Number(allocation.amount || 0),
+        reference: allocation.reference || undefined,
+        cardLast4: allocation.cardLast4 || undefined,
+        cardBrand: allocation.cardBrand || undefined,
+      }))
+      .filter((allocation) => Number.isFinite(allocation.amount) && allocation.amount > 0);
+
+    if (!reallocationForm.reason?.trim()) {
+      setReallocationFormError("Reason is required");
+      return;
+    }
+
+    if (fromAllocations.length === 0) {
+      setReallocationFormError("At least one source allocation is required");
+      return;
+    }
+
+    if (toAllocations.length === 0) {
+      setReallocationFormError("At least one target allocation is required");
+      return;
+    }
+
+    const requestedFromByIndex = fromAllocations.reduce((acc, allocation) => {
+      const current = Number(acc.get(allocation.paymentIndex) || 0);
+      acc.set(allocation.paymentIndex, current + allocation.amount);
+      return acc;
+    }, new Map());
+
+    for (const [paymentIndex, amount] of requestedFromByIndex.entries()) {
+      if (!remainingByIndex.has(paymentIndex)) {
+        setReallocationFormError(`Payment index ${paymentIndex} is not available for correction`);
+        return;
+      }
+
+      const available = Number(remainingByIndex.get(paymentIndex) || 0);
+      if (amount - available > 0.01) {
+        setReallocationFormError(
+          `Source allocation for payment index ${paymentIndex} exceeds available amount`,
+        );
+        return;
+      }
+    }
+
+    const fromTotal = fromAllocations.reduce((sum, item) => sum + item.amount, 0);
+    const toTotal = toAllocations.reduce((sum, item) => sum + item.amount, 0);
+
+    if (Math.abs(fromTotal - toTotal) > 0.01) {
+      setReallocationFormError("Total source amount must match total target amount");
+      return;
+    }
+
+    try {
+      setSubmittingReallocation(true);
+
+      await apiFetch(`/sales/${sale._id}/payments/reallocate`, {
+        method: "PATCH",
+        body: {
+          fromAllocations,
+          toAllocations,
+          reason: reallocationForm.reason.trim(),
+          notes: reallocationForm.notes?.trim() || undefined,
+        },
+      });
+
+      setShowReallocatePaymentModal(false);
+      await Promise.all([fetchSaleById(), fetchReceivable()]);
+    } catch (err) {
+      console.error("Failed to reallocate payment:", err);
+      setReallocationFormError(err.message || "Failed to reallocate payment");
+    } finally {
+      setSubmittingReallocation(false);
+    }
+  };
+
 
   if (!canViewSalesHistory) {
     return (
@@ -391,6 +589,9 @@ export default function SaleDetailPage() {
   }
 
   const timeline = buildTimeline();
+  const displayedPayments =
+    sale?.effectivePayments?.length > 0 ? sale.effectivePayments : sale?.payments || [];
+  const correctablePayments = getCorrectablePayments();
 
   return (
     <div className="space-y-6">
@@ -677,22 +878,33 @@ export default function SaleDetailPage() {
                   <span className="inline-block rounded px-2 py-1 text-xs font-medium capitalize bg-zinc-100 text-zinc-700">
                     {receivable.status || "open"}
                   </span>
-                  {canCollectPayment && Number(receivable.balanceDue || 0) > 0.01 && (
-                    <button
-                      onClick={handleOpenCollectPayment}
-                      disabled={loadingReceivable || submittingPayment}
-                      className="rounded bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-                    >
-                      Collect Payment
-                    </button>
-                  )}
+                  <div className="flex items-center gap-2">
+                    {canEditSale && correctablePayments.length > 0 && (
+                      <button
+                        onClick={handleOpenReallocation}
+                        disabled={loadingReceivable || submittingReallocation}
+                        className="rounded bg-indigo-600 px-3 py-1 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+                      >
+                        Reallocate
+                      </button>
+                    )}
+                    {canCollectPayment && Number(receivable.balanceDue || 0) > 0.01 && (
+                      <button
+                        onClick={handleOpenCollectPayment}
+                        disabled={loadingReceivable || submittingPayment}
+                        className="rounded bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                      >
+                        Collect Payment
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
 
             <div className="space-y-3">
-              {sale.payments?.length > 0 ? (
-                sale.payments.map((payment, idx) => (
+              {displayedPayments?.length > 0 ? (
+                displayedPayments.map((payment, idx) => (
                   <div key={idx} className="border-b border-zinc-200 pb-3 last:border-b-0">
                     <div className="flex items-center justify-between mb-1">
                       <p className="font-medium capitalize text-zinc-900">{payment.method}</p>
@@ -717,6 +929,20 @@ export default function SaleDetailPage() {
                 <p className="text-sm text-zinc-600">{sale.paymentMethod || "No payment info"}</p>
               )}
             </div>
+
+            {sale.paymentCorrections?.length > 0 && (
+              <div className="mt-4 rounded border border-indigo-200 bg-indigo-50 p-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-indigo-800">Corrections</p>
+                <div className="mt-2 space-y-2">
+                  {sale.paymentCorrections.map((correction, idx) => (
+                    <div key={correction.correctionId || idx} className="text-xs text-indigo-900">
+                      <p className="font-medium">{formatDate(correction.correctedAt)}</p>
+                      <p>{correction.reason || "Payment allocation corrected"}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Location & Staff Section */}
@@ -1079,6 +1305,194 @@ export default function SaleDetailPage() {
                   className="flex-1 rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
                 >
                   {submittingPayment ? "Collecting..." : "Collect Payment"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showReallocatePaymentModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+          <div className="w-full max-w-2xl rounded-lg bg-white p-8 shadow-xl">
+            <div className="mb-6">
+              <h2 className="text-2xl font-bold text-zinc-900">Reallocate Payment</h2>
+              <p className="mt-1 text-sm text-zinc-600">Manager override for incorrect payment allocation</p>
+            </div>
+
+            {reallocationFormError && (
+              <div className="mb-4 rounded border border-red-200 bg-red-50 p-4">
+                <p className="text-sm text-red-700">{reallocationFormError}</p>
+              </div>
+            )}
+
+            <form onSubmit={handleSubmitReallocation} className="space-y-6">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-semibold text-zinc-900">Source Allocations</h3>
+                  <button
+                    type="button"
+                    onClick={() => addReallocationRow("fromAllocations")}
+                    className="rounded border border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-50"
+                  >
+                    + Add Source
+                  </button>
+                </div>
+
+                {reallocationForm.fromAllocations.map((allocation, idx) => (
+                  <div key={`from-${idx}`} className="grid gap-3 md:grid-cols-12">
+                    <div className="md:col-span-6">
+                      <label className="block text-sm font-medium text-zinc-700">Payment Entry</label>
+                      <select
+                        value={allocation.paymentIndex}
+                        onChange={(e) =>
+                          updateReallocationField("fromAllocations", idx, "paymentIndex", e.target.value)
+                        }
+                        className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                      >
+                        <option value="">Select payment</option>
+                        {correctablePayments.map((entry) => (
+                          <option key={entry.index} value={entry.index}>
+                            #{entry.index + 1} {entry.method} (remaining {formatCurrency(entry.remainingAmount)})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="md:col-span-4">
+                      <label className="block text-sm font-medium text-zinc-700">Amount</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={allocation.amount}
+                        onChange={(e) =>
+                          updateReallocationField("fromAllocations", idx, "amount", e.target.value)
+                        }
+                        className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div className="md:col-span-2 flex items-end">
+                      <button
+                        type="button"
+                        disabled={reallocationForm.fromAllocations.length === 1}
+                        onClick={() => removeReallocationRow("fromAllocations", idx)}
+                        className="w-full rounded border border-zinc-300 px-2 py-2 text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-semibold text-zinc-900">Target Allocations</h3>
+                  <button
+                    type="button"
+                    onClick={() => addReallocationRow("toAllocations")}
+                    className="rounded border border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-50"
+                  >
+                    + Add Target
+                  </button>
+                </div>
+
+                {reallocationForm.toAllocations.map((allocation, idx) => (
+                  <div key={`to-${idx}`} className="grid gap-3 md:grid-cols-12">
+                    <div className="md:col-span-4">
+                      <label className="block text-sm font-medium text-zinc-700">Method</label>
+                      <select
+                        value={allocation.method}
+                        onChange={(e) =>
+                          updateReallocationField("toAllocations", idx, "method", e.target.value)
+                        }
+                        className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                      >
+                        <option value="cash">Cash</option>
+                        <option value="card">Card</option>
+                        <option value="mobile">Mobile</option>
+                        <option value="check">Check</option>
+                        <option value="credit">Credit</option>
+                        <option value="mpesa">M-Pesa</option>
+                      </select>
+                    </div>
+                    <div className="md:col-span-3">
+                      <label className="block text-sm font-medium text-zinc-700">Amount</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={allocation.amount}
+                        onChange={(e) =>
+                          updateReallocationField("toAllocations", idx, "amount", e.target.value)
+                        }
+                        className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div className="md:col-span-3">
+                      <label className="block text-sm font-medium text-zinc-700">Reference</label>
+                      <input
+                        type="text"
+                        value={allocation.reference}
+                        onChange={(e) =>
+                          updateReallocationField("toAllocations", idx, "reference", e.target.value)
+                        }
+                        className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div className="md:col-span-2 flex items-end">
+                      <button
+                        type="button"
+                        disabled={reallocationForm.toAllocations.length === 1}
+                        onClick={() => removeReallocationRow("toAllocations", idx)}
+                        className="w-full rounded border border-zinc-300 px-2 py-2 text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-zinc-700">Reason</label>
+                <input
+                  type="text"
+                  value={reallocationForm.reason}
+                  onChange={(e) =>
+                    setReallocationForm((prev) => ({ ...prev, reason: e.target.value }))
+                  }
+                  className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-zinc-700">Notes (optional)</label>
+                <textarea
+                  rows={3}
+                  value={reallocationForm.notes}
+                  onChange={(e) =>
+                    setReallocationForm((prev) => ({ ...prev, notes: e.target.value }))
+                  }
+                  className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                />
+              </div>
+
+              <div className="flex gap-3 border-t border-zinc-200 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setShowReallocatePaymentModal(false)}
+                  disabled={submittingReallocation}
+                  className="flex-1 rounded border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={submittingReallocation}
+                  className="flex-1 rounded bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+                >
+                  {submittingReallocation ? "Saving..." : "Apply Reallocation"}
                 </button>
               </div>
             </form>

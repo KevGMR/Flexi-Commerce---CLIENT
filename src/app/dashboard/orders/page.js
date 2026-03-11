@@ -23,7 +23,9 @@ export default function OrdersPage() {
     deliveryCategory: "",
     categoryStatus: "",
     requiresDelivery: "",
+    search: "",
   });
+  const [searchInput, setSearchInput] = useState("");
   const [pagination, setPagination] = useState({
     page: 1,
     limit: 20,
@@ -65,6 +67,7 @@ export default function OrdersPage() {
         if (filters.deliveryCategory) params.append("deliveryCategory", filters.deliveryCategory);
         if (filters.categoryStatus) params.append("categoryStatus", filters.categoryStatus);
         if (filters.requiresDelivery) params.append("requiresDelivery", filters.requiresDelivery);
+        if (filters.search) params.append("search", filters.search);
 
         const response = await apiFetch(`/sales?${params.toString()}`);
 
@@ -140,6 +143,22 @@ export default function OrdersPage() {
     return new Date(dateString).toLocaleDateString();
   };
 
+  const handleSearchSubmit = () => {
+    handleFilterChange("search", searchInput.trim());
+  };
+
+  const handleSearchKeyDown = (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      handleSearchSubmit();
+    }
+  };
+
+  const clearSearch = () => {
+    setSearchInput("");
+    handleFilterChange("search", "");
+  };
+
   if (!canViewSalesHistory) {
     return (
       <div className="space-y-4 rounded-lg border border-zinc-200 bg-white p-6 shadow-sm">
@@ -161,6 +180,35 @@ export default function OrdersPage() {
       {/* Filters */}
       <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <div className="lg:col-span-2">
+            <label className="block text-xs font-medium text-zinc-700">Receipt # / Idempotency Key</label>
+            <div className="mt-1 flex gap-2">
+              <input
+                type="text"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                onKeyDown={handleSearchKeyDown}
+                placeholder="Enter exact receipt number or idempotency key"
+                className="block w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+              />
+              <button
+                type="button"
+                onClick={handleSearchSubmit}
+                className="rounded border border-zinc-300 px-3 py-2 text-sm font-medium hover:bg-zinc-50"
+              >
+                Search
+              </button>
+              {filters.search && (
+                <button
+                  type="button"
+                  onClick={clearSearch}
+                  className="rounded border border-zinc-300 px-3 py-2 text-sm font-medium hover:bg-zinc-50"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          </div>
           <div>
             <label className="block text-xs font-medium text-zinc-700">Status</label>
             <select
@@ -299,6 +347,12 @@ export default function OrdersPage() {
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-4">
           <p className="text-sm text-red-700">{error}</p>
+        </div>
+      )}
+
+      {filters.search && (
+        <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-700">
+          Searching exact match for: <span className="font-medium">{filters.search}</span>
         </div>
       )}
 

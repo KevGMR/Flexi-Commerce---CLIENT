@@ -50,7 +50,9 @@ export default function SalesReportsPage() {
     shopifySyncStatus: "",
     paymentStatus: "",
     locationId: "",
+    search: "",
   });
+  const [searchInput, setSearchInput] = useState("");
 
   const [pagination, setPagination] = useState({
     page: 1,
@@ -111,6 +113,7 @@ export default function SalesReportsPage() {
         if (filters.shopifySyncStatus) detailParams.append("shopifySyncStatus", filters.shopifySyncStatus);
         if (filters.paymentStatus) detailParams.append("paymentStatus", filters.paymentStatus);
         if (filters.locationId) detailParams.append("locationId", filters.locationId);
+        if (filters.search) detailParams.append("search", filters.search);
 
         const detailRes = await apiFetch(`/sales?${detailParams.toString()}`);
 
@@ -191,6 +194,22 @@ export default function SalesReportsPage() {
     return new Date(dateString).toLocaleString();
   };
 
+  const handleDetailedSearch = () => {
+    handleFilterChange("search", searchInput.trim());
+  };
+
+  const handleDetailedSearchKeyDown = (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      handleDetailedSearch();
+    }
+  };
+
+  const clearDetailedSearch = () => {
+    setSearchInput("");
+    handleFilterChange("search", "");
+  };
+
   if (!canViewReports) {
     return (
       <div className="space-y-4 rounded-lg border border-zinc-200 bg-white p-6 shadow-sm">
@@ -213,6 +232,35 @@ export default function SalesReportsPage() {
       <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
         <h3 className="mb-4 font-semibold text-zinc-900">Report Filters</h3>
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <div className="lg:col-span-2">
+            <label className="block text-xs font-medium text-zinc-700">Receipt # / Idempotency Key</label>
+            <div className="mt-1 flex gap-2">
+              <input
+                type="text"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                onKeyDown={handleDetailedSearchKeyDown}
+                placeholder="Enter exact receipt number or idempotency key"
+                className="block w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+              />
+              <button
+                type="button"
+                onClick={handleDetailedSearch}
+                className="rounded border border-zinc-300 px-3 py-2 text-sm font-medium hover:bg-zinc-50"
+              >
+                Search
+              </button>
+              {filters.search && (
+                <button
+                  type="button"
+                  onClick={clearDetailedSearch}
+                  className="rounded border border-zinc-300 px-3 py-2 text-sm font-medium hover:bg-zinc-50"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          </div>
           <div>
             <label className="block text-xs font-medium text-zinc-700">Status</label>
             <select
@@ -350,6 +398,12 @@ export default function SalesReportsPage() {
           </button>
         </div>
       </div>
+
+      {activeTab === "detailed" && filters.search && (
+        <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-700">
+          Detailed sales exact-match search: <span className="font-medium">{filters.search}</span>
+        </div>
+      )}
 
       {/* Content Tabs */}
       {loading ? (
