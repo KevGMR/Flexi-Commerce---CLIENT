@@ -210,6 +210,23 @@ export default function SalesReportsPage() {
     handleFilterChange("search", "");
   };
 
+  const getSubtotalExcludingExchangeCredit = () => {
+    if (!reportData) {
+      return 0;
+    }
+
+    const exchangeCreditApplied = Number(reportData.exchangeCreditApplied) || 0;
+    const grossPreDiscountSales = Number.isFinite(Number(reportData.preDiscountSales))
+      ? Number(reportData.preDiscountSales)
+      : (Number(reportData.totalRevenue) || 0) -
+        (Number(reportData.deliveryAmountCollected) || 0) -
+        (Number(reportData.totalTax) || 0) +
+        (Number(reportData.totalDiscount) || 0) +
+        exchangeCreditApplied;
+
+    return Math.max(0, grossPreDiscountSales - exchangeCreditApplied);
+  };
+
   if (!canViewReports) {
     return (
       <div className="space-y-4 rounded-lg border border-zinc-200 bg-white p-6 shadow-sm">
@@ -417,19 +434,19 @@ export default function SalesReportsPage() {
               {/* Summary Stats */}
               <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-6">
                 <StatCard
-                  label="Total Revenue"
+                  label="Net Collected"
                   value={formatCurrency(reportData.totalRevenue)}
                   icon="💰"
                 />
                 <StatCard
-                  label="Delivery Collected"
-                  value={formatCurrency(reportData.deliveryAmountCollected)}
-                  icon="🚚"
+                  label="Gross Sales"
+                  value={formatCurrency(reportData.grossRevenue || reportData.totalRevenue || 0)}
+                  icon="🧾"
                 />
                 <StatCard
                   label="Transactions"
                   value={reportData.totalSales || 0}
-                  icon="🧾"
+                  icon="📋"
                 />
                 <StatCard
                   label="Items Sold"
@@ -442,9 +459,9 @@ export default function SalesReportsPage() {
                   icon="📊"
                 />
                 <StatCard
-                  label="Discount Given"
-                  value={formatCurrency(reportData.totalDiscount || 0)}
-                  icon="🏷️"
+                  label="Exchange Credit"
+                  value={formatCurrency(reportData.exchangeCreditApplied || 0)}
+                  icon="🔁"
                 />
               </div>
 
@@ -498,15 +515,9 @@ export default function SalesReportsPage() {
                   <h3 className="mb-4 font-semibold text-zinc-900">Tax & Discounts</h3>
                   <div className="space-y-3 text-sm">
                     <div className="flex items-center justify-between">
-                      <span className="text-zinc-600">Subtotal</span>
+                      <span className="text-zinc-600">Subtotal (Excl. Exchange Credit)</span>
                       <span className="font-semibold text-zinc-900">
-                        {formatCurrency(
-                          reportData.preDiscountSales ||
-                            ((reportData.totalRevenue || 0) -
-                              (reportData.deliveryAmountCollected || 0) -
-                              (reportData.totalTax || 0) +
-                              (reportData.totalDiscount || 0)),
-                        )}
+                        {formatCurrency(getSubtotalExcludingExchangeCredit())}
                       </span>
                     </div>
                     <div className="flex items-center justify-between">
@@ -525,6 +536,12 @@ export default function SalesReportsPage() {
                       <span className="text-zinc-600">Total Discount</span>
                       <span className="font-semibold text-red-600">
                         -{formatCurrency(reportData.totalDiscount || 0)}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-zinc-600">Exchange Credit Applied</span>
+                      <span className="font-semibold text-indigo-600">
+                        {formatCurrency(reportData.exchangeCreditApplied || 0)}
                       </span>
                     </div>
                     <div className="flex items-center justify-between">
@@ -548,9 +565,13 @@ export default function SalesReportsPage() {
           {reportData?.paymentMethodBreakdown && Object.keys(reportData.paymentMethodBreakdown).length > 0 ? (
             <div className="rounded-lg border border-zinc-200 bg-white p-6 shadow-sm">
               <h3 className="mb-6 text-lg font-semibold text-zinc-900">Payment Methods Breakdown</h3>
+              <p className="mb-4 text-xs text-zinc-500">
+                Percentages are based on gross sales value.
+              </p>
               <div className="space-y-4">
                 {Object.entries(reportData.paymentMethodBreakdown).map(([method, data]) => {
-                  const percentage = reportData.totalRevenue > 0 ? (data.total / reportData.totalRevenue) * 100 : 0;
+                  const grossRevenueBase = reportData.grossRevenue || reportData.totalRevenue || 0;
+                  const percentage = grossRevenueBase > 0 ? (data.total / grossRevenueBase) * 100 : 0;
                   return (
                     <div key={method}>
                       <div className="mb-1 flex items-center justify-between text-sm">

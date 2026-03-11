@@ -28,6 +28,7 @@ export default function SaleDetailPage() {
   const [showReallocatePaymentModal, setShowReallocatePaymentModal] = useState(false);
   const [submittingReallocation, setSubmittingReallocation] = useState(false);
   const [reallocationFormError, setReallocationFormError] = useState("");
+  const [copyReceiptStatus, setCopyReceiptStatus] = useState("");
   const [reallocationForm, setReallocationForm] = useState({
     fromAllocations: [{ paymentIndex: "", amount: "" }],
     toAllocations: [{ method: "mpesa", amount: "", reference: "", cardLast4: "", cardBrand: "" }],
@@ -237,6 +238,20 @@ export default function SaleDetailPage() {
       organizationName: activeOrganization?.name,
       locationLabel: getLocationName(sale?.locationId),
     });
+  };
+
+  const handleCopyReceiptNumber = async () => {
+    if (!sale?.receiptNumber) return;
+
+    try {
+      await navigator.clipboard.writeText(sale.receiptNumber);
+      setCopyReceiptStatus("Copied!");
+      setTimeout(() => setCopyReceiptStatus(""), 2000);
+    } catch (err) {
+      console.error("Failed to copy receipt number:", err);
+      setCopyReceiptStatus("Copy failed");
+      setTimeout(() => setCopyReceiptStatus(""), 2000);
+    }
   };
 
   const handleCreateDelivery = async (e) => {
@@ -632,7 +647,22 @@ export default function SaleDetailPage() {
             <div className="mb-6 flex items-start justify-between">
               <div>
                 <p className="text-xs font-medium text-zinc-500">RECEIPT NUMBER</p>
-                <h1 className="text-3xl font-bold text-zinc-900">{sale.receiptNumber}</h1>
+                <div className="mt-1 flex items-center gap-2">
+                  <h1 className="text-2xl font-bold text-zinc-900">{sale.receiptNumber || "N/A"}</h1>
+                  <button
+                    type="button"
+                    onClick={handleCopyReceiptNumber}
+                    disabled={!sale?.receiptNumber}
+                    className="rounded border border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Copy
+                  </button>
+                  {copyReceiptStatus && (
+                    <span className={`text-xs font-medium ${copyReceiptStatus === "Copied!" ? "text-green-600" : "text-red-600"}`}>
+                      {copyReceiptStatus}
+                    </span>
+                  )}
+                </div>
                 <p className="mt-2 text-sm text-zinc-600">{formatDate(sale.createdAt)}</p>
               </div>
               <div className="flex flex-col gap-2">

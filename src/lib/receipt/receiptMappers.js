@@ -60,6 +60,11 @@ export const mapSaleToReceipt = ({ sale, receivable }) => {
       toNonNegativeAmount(sale.totalAmount),
     ),
     subtotal: toNonNegativeAmount(sale.totalAmount),
+    grossAmount: toNonNegativeAmount(sale.totalAmount),
+    exchangeCreditApplied: toNonNegativeAmount(sale.exchangeCreditApplied),
+    netCollected: toNonNegativeAmount(
+      sale.netCollected ?? toNonNegativeAmount(sale.totalAmount) - toNonNegativeAmount(sale.exchangeCreditApplied),
+    ),
     amountPaid,
     balanceDue,
     paymentStatus: sale.paymentStatus,

@@ -151,10 +151,10 @@ export default function HomePage() {
         ) : salesData ? (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
             <KPICard
-              title="Total Revenue"
+              title="Net Collected"
               value={formatCurrency(salesData.totalRevenue)}
               icon="💰"
-              subtitle={`${salesData.totalSales || 0} transactions`}
+              subtitle={`Gross ${formatCurrency(salesData.grossRevenue || salesData.totalRevenue)} • ${salesData.totalSales || 0} transactions`}
             />
             <KPICard
               title="Transactions"
@@ -186,6 +186,9 @@ export default function HomePage() {
       {salesData?.paymentMethodBreakdown && Object.keys(salesData.paymentMethodBreakdown).length > 0 && (
         <div className="rounded-lg border border-zinc-200 bg-white p-6 shadow-sm">
           <h3 className="text-lg font-semibold text-zinc-900">Payment Methods</h3>
+          <p className="mt-1 text-xs text-zinc-500">
+            Exchange credit applied: {formatCurrency(salesData.exchangeCreditApplied || 0)}
+          </p>
           <div className="mt-4 space-y-2">
             {Object.entries(salesData.paymentMethodBreakdown).map(([method, data]) => (
               <div key={method} className="flex items-center justify-between">
