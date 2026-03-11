@@ -1,12 +1,15 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { fetchMyOrganizations, switchOrganization } from "@/lib/orgs";
+import { logoutUser } from "@/lib/logout";
 import { useSessionStore } from "@/store/session";
 import { useSyncManager } from "@/hooks/useSyncManager";
 import { apiFetch } from "@/lib/api-client";
 
 export function Topbar() {
+  const router = useRouter();
   const {
     activeOrganization,
     organizations,
@@ -14,7 +17,6 @@ export function Topbar() {
     setActiveOrganization,
     user,
     accessToken,
-    clearSession,
     hydrated,
   } = useSessionStore();
   const { isOnline, pendingSalesCount } = useSyncManager();
@@ -93,6 +95,11 @@ export function Topbar() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleLogout = async () => {
+    await logoutUser();
+    router.replace("/auth/login");
   };
 
   return (
@@ -204,7 +211,7 @@ export function Topbar() {
         </div>
         {accessToken ? (
           <button
-            onClick={clearSession}
+            onClick={handleLogout}
             className="rounded-md border border-zinc-300 px-3 py-1 text-sm text-zinc-700 hover:bg-zinc-100"
           >
             Logout

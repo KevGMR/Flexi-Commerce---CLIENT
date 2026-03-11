@@ -2,13 +2,14 @@
 
 import { create } from "zustand";
 import {
+  clearClientPersistence,
   clearSessionStorage,
   loadSessionFromStorage,
   saveSessionToStorage,
 } from "@/lib/storage";
 import { getDeviceId, getDeviceName } from "@/lib/device";
 
-const defaults = {
+const createDefaults = ({ persistDeviceId = true } = {}) => ({
   accessToken: null,
   refreshToken: null,
   user: null,
@@ -19,9 +20,9 @@ const defaults = {
   locationsMeta: [],
   selectedLocationId: null,
   tempAuthCredentials: null,
-  deviceId: getDeviceId(),
+  deviceId: getDeviceId({ persist: persistDeviceId }),
   deviceName: getDeviceName(),
-};
+});
 
 function persistState(state) {
   saveSessionToStorage({
@@ -40,15 +41,15 @@ function persistState(state) {
 }
 
 export const useSessionStore = create((set, get) => ({
-  ...defaults,
+  ...createDefaults(),
   hydrated: false,
   hydrate() {
     if (get().hydrated) return;
     const stored = loadSessionFromStorage();
     if (stored) {
-      set({ ...defaults, ...stored, hydrated: true });
+      set({ ...createDefaults(), ...stored, hydrated: true });
     } else {
-      set({ hydrated: true });
+      set({ ...createDefaults(), hydrated: true });
     }
   },
   setTokens({ accessToken, refreshToken }) {
@@ -113,9 +114,15 @@ export const useSessionStore = create((set, get) => ({
       return next;
     });
   },
-  clearSession() {
-    clearSessionStorage();
-    set({ ...defaults, hydrated: true });
+  async clearSession() {
+    set({ ...createDefaults({ persistDeviceId: false }), hydrated: true });
+
+    try {
+      clearSessionStorage();
+      await clearClientPersistence();
+    } catch (error) {
+      console.warn("Failed to fully clear client persistence", error);
+    }
   },
   can(permission) {
     return get().permissions.includes(permission);

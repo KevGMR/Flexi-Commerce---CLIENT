@@ -27,7 +27,7 @@ export default function DashboardLayout({ children }) {
   useEffect(() => {
     if (hydrated && !accessToken) {
       const nextPath = `${window.location.pathname}${window.location.search}`;
-      router.push(buildLoginRedirect(nextPath));
+      router.replace(buildLoginRedirect(nextPath));
     }
   }, [hydrated, accessToken, router]);
 

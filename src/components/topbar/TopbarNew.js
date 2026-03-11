@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useSessionStore } from "@/store/session";
 import { useSyncManager } from "@/hooks/useSyncManager";
 import { apiFetch } from "@/lib/api-client";
+import { logoutUser } from "@/lib/logout";
 import { Logo } from "./Logo";
 import { StatusIndicator } from "./StatusIndicator";
 import { NotificationBell } from "./NotificationBell";
@@ -17,7 +18,6 @@ export function TopbarNew({ sidebarOpen, onToggleSidebar }) {
     setActiveOrganization,
     user,
     accessToken,
-    clearSession,
     hydrated,
   } = useSessionStore();
 
@@ -100,7 +100,7 @@ export function TopbarNew({ sidebarOpen, onToggleSidebar }) {
             activeOrganization={activeOrganization}
             organizations={organizations}
             onOrgChange={setActiveOrganization}
-            onLogout={clearSession}
+            onLogout={logoutUser}
           />
         )}
       </div>

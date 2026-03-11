@@ -6,6 +6,22 @@ import { useSessionStore } from "@/store/session";
 import { useSyncManager } from "@/hooks/useSyncManager";
 import { PERMISSIONS } from "@/lib/permissions";
 
+const QUEUE_STATUS_STYLES = {
+  pending: "bg-yellow-100 text-yellow-800",
+  processing: "bg-blue-100 text-blue-700",
+  failed: "bg-red-100 text-red-700",
+  retrying: "bg-indigo-100 text-indigo-700",
+  needs_review: "bg-orange-100 text-orange-700",
+  completed: "bg-green-100 text-green-700",
+};
+
+const formatDateTime = (value) => {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleString();
+};
+
 export default function ShopifySettingsPage() {
   const { activeOrganization, can } = useSessionStore();
   const { isOnline } = useSyncManager();
@@ -26,6 +42,13 @@ export default function ShopifySettingsPage() {
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isRefreshingToken, setIsRefreshingToken] = useState(false);
+  const [syncQueue, setSyncQueue] = useState([]);
+  const [queueFilterStatus, setQueueFilterStatus] = useState("failed");
+  const [queueLoading, setQueueLoading] = useState(false);
+  const [queueMessage, setQueueMessage] = useState("");
+  const [queueError, setQueueError] = useState("");
+  const [processingQueue, setProcessingQueue] = useState(false);
+  const [retryingQueueItemId, setRetryingQueueItemId] = useState("");
 
   const canManage = can(PERMISSIONS.MANAGE_SETTINGS);
 
@@ -119,6 +142,29 @@ export default function ShopifySettingsPage() {
     }
   };
 
+  const loadSyncQueue = useCallback(async () => {
+    if (!isConnected) {
+      setSyncQueue([]);
+      return;
+    }
+
+    setQueueLoading(true);
+    setQueueError("");
+
+    try {
+      const query = new URLSearchParams();
+      if (queueFilterStatus) query.set("status", queueFilterStatus);
+
+      const response = await apiFetch(`/shopify/sync-queue?${query.toString()}`);
+      setSyncQueue(response?.data || []);
+    } catch (err) {
+      setQueueError(err?.message || "Failed to load Shopify sync queue.");
+      setSyncQueue([]);
+    } finally {
+      setQueueLoading(false);
+    }
+  }, [isConnected, queueFilterStatus]);
+
   useEffect(() => {
     loadConnection();
   }, [activeOrganization, loadConnection]);
@@ -128,6 +174,10 @@ export default function ShopifySettingsPage() {
       loadLocations();
     }
   }, [isConnected]);
+
+  useEffect(() => {
+    loadSyncQueue();
+  }, [loadSyncQueue]);
 
   const handleConnect = async (e) => {
     e.preventDefault();
@@ -207,6 +257,45 @@ export default function ShopifySettingsPage() {
       setError(err?.message || "Failed to update mapping.");
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleProcessSyncQueue = async () => {
+    setProcessingQueue(true);
+    setQueueMessage("");
+    setQueueError("");
+
+    try {
+      const response = await apiFetch("/shopify/sync-queue/process", {
+        method: "POST",
+      });
+      setQueueMessage(
+        response?.message ||
+          `Processed ${response?.data?.processed || 0} queued item(s).`,
+      );
+      await loadSyncQueue();
+    } catch (err) {
+      setQueueError(err?.message || "Failed to process sync queue.");
+    } finally {
+      setProcessingQueue(false);
+    }
+  };
+
+  const handleRetryQueueItem = async (queueId) => {
+    setRetryingQueueItemId(queueId);
+    setQueueMessage("");
+    setQueueError("");
+
+    try {
+      const response = await apiFetch(`/shopify/sync-queue/${queueId}/retry`, {
+        method: "POST",
+      });
+      setQueueMessage(response?.message || "Retry processed.");
+      await loadSyncQueue();
+    } catch (err) {
+      setQueueError(err?.message || "Failed to retry sync queue item.");
+    } finally {
+      setRetryingQueueItemId("");
     }
   };
 
@@ -377,6 +466,155 @@ export default function ShopifySettingsPage() {
                 No Flexi locations found.
               </div>
             )}
+          </div>
+        )}
+      </div>
+
+      <div className="bg-white border border-zinc-200 rounded-lg p-6 mt-6">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
+          <div>
+            <h2 className="text-sm font-semibold mb-1">Shopify Product Sync Retries</h2>
+            <p className="text-xs text-zinc-500">
+              Organization-level queue with per-item retry attempts and status.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <select
+              value={queueFilterStatus}
+              onChange={(e) => setQueueFilterStatus(e.target.value)}
+              className="rounded border border-zinc-300 px-3 py-2 text-sm"
+            >
+              <option value="">All statuses</option>
+              <option value="failed">Failed</option>
+              <option value="pending">Pending</option>
+              <option value="processing">Processing</option>
+              <option value="retrying">Retrying</option>
+              <option value="needs_review">Needs Review</option>
+              <option value="completed">Completed</option>
+            </select>
+            <button
+              onClick={loadSyncQueue}
+              disabled={queueLoading}
+              className="px-3 py-2 rounded border border-zinc-300 text-sm disabled:opacity-50"
+            >
+              Refresh
+            </button>
+            <button
+              onClick={handleProcessSyncQueue}
+              disabled={processingQueue || !canManage || !isOnline || !isConnected}
+              className="px-3 py-2 rounded bg-zinc-900 text-white text-sm disabled:opacity-50"
+            >
+              {processingQueue ? "Processing..." : "Process Queue"}
+            </button>
+          </div>
+        </div>
+
+        {queueMessage && (
+          <div className="bg-green-50 border border-green-200 rounded p-3 mb-4 text-sm text-green-700">
+            {queueMessage}
+          </div>
+        )}
+
+        {queueError && (
+          <div className="bg-red-50 border border-red-200 rounded p-3 mb-4 text-sm text-red-700">
+            {queueError}
+          </div>
+        )}
+
+        {queueLoading ? (
+          <div className="text-xs text-zinc-500">Loading sync queue...</div>
+        ) : syncQueue.length === 0 ? (
+          <div className="text-xs text-zinc-500">No queue items for this filter.</div>
+        ) : (
+          <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white">
+            <table className="w-full">
+              <thead className="border-b border-zinc-200 bg-zinc-50">
+                <tr>
+                  <th className="px-3 py-2 text-left text-[11px] font-medium text-zinc-700 uppercase tracking-wider">
+                    Sale
+                  </th>
+                  <th className="px-3 py-2 text-left text-[11px] font-medium text-zinc-700 uppercase tracking-wider">
+                    Shopify Variant
+                  </th>
+                  <th className="px-3 py-2 text-left text-[11px] font-medium text-zinc-700 uppercase tracking-wider">
+                    Qty Change
+                  </th>
+                  <th className="px-3 py-2 text-left text-[11px] font-medium text-zinc-700 uppercase tracking-wider">
+                    Retry Attempts
+                  </th>
+                  <th className="px-3 py-2 text-left text-[11px] font-medium text-zinc-700 uppercase tracking-wider">
+                    Status
+                  </th>
+                  <th className="px-3 py-2 text-left text-[11px] font-medium text-zinc-700 uppercase tracking-wider">
+                    Next Retry
+                  </th>
+                  <th className="px-3 py-2 text-left text-[11px] font-medium text-zinc-700 uppercase tracking-wider">
+                    Last Error
+                  </th>
+                  <th className="px-3 py-2 text-right text-[11px] font-medium text-zinc-700 uppercase tracking-wider">
+                    Action
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-200">
+                {syncQueue.map((item) => {
+                  const retryDisabled =
+                    !canManage ||
+                    !isOnline ||
+                    item.status === "completed" ||
+                    item.status === "processing" ||
+                    retryingQueueItemId === item._id;
+
+                  return (
+                    <tr key={item._id} className="hover:bg-zinc-50">
+                      <td className="px-3 py-2 text-xs text-zinc-700">
+                        {item.saleId ? String(item.saleId) : "—"}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-zinc-700">
+                        {item.shopifyVariantId || "—"}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-zinc-700">
+                        {item.inventoryUpdate?.quantityChange ?? "—"}
+                      </td>
+                      <td className="px-3 py-2 text-xs text-zinc-700">
+                        {(item.attemptCount || 0) + 1} / {item.maxAttempts || 10}
+                      </td>
+                      <td className="px-3 py-2 text-xs">
+                        <span
+                          className={`inline-block rounded px-2 py-1 text-xs font-medium ${QUEUE_STATUS_STYLES[item.status] || "bg-zinc-100 text-zinc-700"}`}
+                        >
+                          {item.status || "unknown"}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-xs text-zinc-700">
+                        {formatDateTime(item.nextRetryAt)}
+                      </td>
+                      <td
+                        className="px-3 py-2 text-xs text-zinc-700 max-w-75 truncate"
+                        title={item.lastError?.message || ""}
+                      >
+                        {item.lastError?.message || "—"}
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <button
+                          onClick={() => handleRetryQueueItem(item._id)}
+                          disabled={retryDisabled}
+                          className="px-3 py-1 rounded border border-zinc-300 text-xs disabled:opacity-50"
+                        >
+                          {retryingQueueItemId === item._id ? "Retrying..." : "Retry"}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {!canManage && (
+          <div className="mt-3 text-xs text-zinc-500">
+            Retry actions are available to Managers and Owners only.
           </div>
         )}
       </div>

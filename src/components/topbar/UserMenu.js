@@ -29,7 +29,7 @@ export function UserMenu({
   const trigger = (
     <button className="flex items-center gap-2 hover:bg-zinc-50 rounded-md px-2 py-1 transition-colors">
       <Avatar user={user} size="sm" />
-      <span className="text-sm font-medium text-zinc-700 hidden sm:inline max-w-[150px] truncate">
+      <span className="text-sm font-medium text-zinc-700 hidden sm:inline max-w-37.5 truncate">
         {user?.fullname || user?.email}
       </span>
       <ChevronDown className="w-4 h-4 text-zinc-600" />
@@ -118,9 +118,9 @@ export function UserMenu({
 
         {/* Logout */}
         <button
-          onClick={() => {
-            onLogout?.();
-            router.push("/auth/login");
+          onClick={async () => {
+            await onLogout?.();
+            router.replace("/auth/login");
           }}
           className="w-full flex items-center gap-2 text-sm text-red-600 hover:text-red-700 font-medium py-2 px-2 rounded-md hover:bg-red-50"
         >

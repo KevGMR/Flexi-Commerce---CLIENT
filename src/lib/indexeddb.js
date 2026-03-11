@@ -9,6 +9,16 @@ const CACHED_CATEGORIES_STORE = "cached_delivery_categories";
 
 let db = null;
 
+function getStoreNames() {
+  return [
+    STORE_NAME,
+    SHOPIFY_STORE_NAME,
+    PENDING_DELIVERIES_STORE,
+    PENDING_DELIVERY_UPDATES_STORE,
+    CACHED_CATEGORIES_STORE,
+  ];
+}
+
 // Initialize IndexedDB
 export async function initDB() {
   return new Promise((resolve, reject) => {
@@ -683,5 +693,44 @@ export async function clearShopifyProducts() {
     const request = store.clear();
     request.onerror = () => reject(request.error);
     request.onsuccess = () => resolve();
+  });
+}
+
+export async function clearAllIndexedDbData() {
+  if (typeof indexedDB === "undefined") return;
+  if (!db) await initDB();
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(getStoreNames(), "readwrite");
+
+    transaction.onerror = () => reject(transaction.error);
+    transaction.oncomplete = () => resolve();
+
+    for (const storeName of getStoreNames()) {
+      transaction.objectStore(storeName).clear();
+    }
+  });
+}
+
+export async function deleteFlexiPosDatabase() {
+  if (typeof indexedDB === "undefined") return false;
+
+  if (db) {
+    db.close();
+    db = null;
+  }
+
+  return new Promise((resolve) => {
+    const request = indexedDB.deleteDatabase(DB_NAME);
+
+    request.onsuccess = () => resolve(true);
+    request.onerror = () => {
+      console.warn("Failed to delete IndexedDB database", request.error);
+      resolve(false);
+    };
+    request.onblocked = () => {
+      console.warn("IndexedDB deletion was blocked; falling back to clearing stores");
+      resolve(false);
+    };
   });
 }

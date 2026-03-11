@@ -1,15 +1,25 @@
-export function getDeviceId() {
+export const DEVICE_STORAGE_KEY = "flexi_device_id";
+
+export function getDeviceId({ persist = true } = {}) {
   if (typeof window === "undefined") return "web-dashboard-001";
   
-  let deviceId = localStorage.getItem("flexi_device_id");
+  let deviceId = localStorage.getItem(DEVICE_STORAGE_KEY);
   
   if (!deviceId) {
     // Generate unique ID: timestamp + random
     deviceId = `web-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-    localStorage.setItem("flexi_device_id", deviceId);
+    if (persist) {
+      localStorage.setItem(DEVICE_STORAGE_KEY, deviceId);
+    }
   }
   
   return deviceId;
+}
+
+export function clearStoredDeviceId() {
+  if (typeof window === "undefined") return;
+
+  localStorage.removeItem(DEVICE_STORAGE_KEY);
 }
 
 export function getDeviceName() {
