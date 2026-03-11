@@ -126,13 +126,15 @@ export default function CompleteCheckoutModal({
             </button>
 
             {/* Delivery Summary */}
+            {console.log(deliveryInfo)}
             {deliveryInfo && (
+              
               <div className="border-t px-4 py-3 bg-blue-50 space-y-2 text-sm">
                 <div>
-                  <span className="font-medium">Category:</span> {deliveryInfo.category}
+                  <span className="font-medium">Category:</span> {deliveryInfo.deliveryCategory}
                 </div>
                 <div>
-                  <span className="font-medium">Option:</span> {deliveryInfo.option}
+                  <span className="font-medium">Option:</span> {deliveryInfo.deliveryOption}
                 </div>
                 <div>
                   <span className="font-medium">Recipient:</span> {deliveryInfo.recipientName}
@@ -141,7 +143,7 @@ export default function CompleteCheckoutModal({
                   <span className="font-medium">Phone:</span> {deliveryInfo.recipientPhone}
                 </div>
                 <div>
-                  <span className="font-medium">Address:</span> {deliveryInfo.deliveryStreet}, {deliveryInfo.deliveryCity}
+                  <span className="font-medium">Address:</span> {deliveryInfo.deliveryAddress.street}, {deliveryInfo.deliveryCity}
                 </div>
                 <button
                   onClick={() => setShowDeliveryModal(true)}
