@@ -183,6 +183,18 @@ export const buildReceiptPrintHtml = ({
             }
             ${(isReturn || isExchange) && receipt.returnReason ? `<div class="section" style="font-size: 11px;"><strong>Return Reason:</strong> ${receipt.returnReason.replace(/-/g, " ").toUpperCase()}</div>` : ""}
             ${
+              !isReturn && !isExchange && (receipt.deliveryInfo || toNonNegativeAmount(receipt.deliveryFee) > 0)
+                ? `<div class="section">
+              <div style="font-weight: bold; margin-bottom: 8px; font-size: 12px;">DELIVERY</div>
+              ${receipt.deliveryInfo?.recipientName ? `<div style="font-size: 12px; margin-bottom: 3px;"><strong>Recipient:</strong> ${receipt.deliveryInfo.recipientName}</div>` : ""}
+              ${receipt.deliveryInfo?.recipientPhone ? `<div style="font-size: 12px; margin-bottom: 3px;"><strong>Phone:</strong> ${receipt.deliveryInfo.recipientPhone}</div>` : ""}
+              ${receipt.deliveryInfo?.deliveryAddress?.street ? `<div style="font-size: 12px; margin-bottom: 3px;"><strong>Address:</strong> ${receipt.deliveryInfo.deliveryAddress.street}${receipt.deliveryInfo.deliveryAddress.city ? ", " + receipt.deliveryInfo.deliveryAddress.city : ""}${receipt.deliveryInfo.deliveryAddress.country ? ", " + receipt.deliveryInfo.deliveryAddress.country : ""}</div>` : ""}
+              ${receipt.deliveryInfo?.deliveryCategory ? `<div style="font-size: 12px; margin-bottom: 3px;"><strong>Category:</strong> ${receipt.deliveryInfo.deliveryCategory}${receipt.deliveryInfo.deliveryOption ? " — " + receipt.deliveryInfo.deliveryOption : ""}</div>` : ""}
+              ${toNonNegativeAmount(receipt.deliveryFee) > 0 ? `<div style="display: flex; justify-content: space-between; font-size: 12px; margin-top: 4px;"><span>Delivery Fee:</span><span>$${toNonNegativeAmount(receipt.deliveryFee).toFixed(2)}</span></div>` : ""}
+            </div>`
+                : ""
+            }
+            ${
               isExchange
                 ? exchangeTotals
                 : isReturn
@@ -191,9 +203,10 @@ export const buildReceiptPrintHtml = ({
               <span>$${toNonNegativeAmount(receipt.subtotal).toFixed(2)}</span>
             </div>`
                   : `<div class="section" style="margin-top: 10px; font-size: 12px;">
+              ${toNonNegativeAmount(receipt.deliveryFee) > 0 ? `<div style="display: flex; justify-content: space-between; margin-bottom: 4px;"><span>Subtotal:</span><span>$${toNonNegativeAmount(receipt.subtotal).toFixed(2)}</span></div><div style="display: flex; justify-content: space-between; margin-bottom: 4px;"><span>Delivery Fee:</span><span>$${toNonNegativeAmount(receipt.deliveryFee).toFixed(2)}</span></div>` : ""}
               <div style="display: flex; justify-content: space-between; margin-bottom: 4px; font-weight: bold; font-size: 14px;">
                 <span>TOTAL:</span>
-                <span>$${toNonNegativeAmount(receipt.subtotal).toFixed(2)}</span>
+                <span>$${(toNonNegativeAmount(receipt.subtotal) + toNonNegativeAmount(receipt.deliveryFee)).toFixed(2)}</span>
               </div>
               ${isPartialReceipt ? `<div style="display: flex; justify-content: space-between; margin-bottom: 4px;"><span>AMOUNT PAID:</span><span>$${receiptAmountPaid.toFixed(2)}</span></div>
               <div style="display: flex; justify-content: space-between;"><span>BALANCE DUE:</span><span>$${receiptBalanceDue.toFixed(2)}</span></div>` : ""}

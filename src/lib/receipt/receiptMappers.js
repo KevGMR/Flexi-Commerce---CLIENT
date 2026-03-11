@@ -72,6 +72,23 @@ export const mapSaleToReceipt = ({ sale, receivable }) => {
     notes: sale.notes || "",
     timestamp: sale.createdAt || new Date().toISOString(),
     isReservation: sale.isReservation === true,
+    requiresDelivery: sale.requiresDelivery === true,
+    deliveryFee: toNonNegativeAmount(sale.deliveryFeeAmount ?? sale.deliveryFee),
+    deliveryInfo: sale.requiresDelivery
+      ? {
+          recipientName:
+            sale.deliveryInfo?.recipientName ||
+            (typeof sale.deliveryFeeId === "object" ? sale.deliveryFeeId?.recipientName : undefined),
+          recipientPhone:
+            sale.deliveryInfo?.recipientPhone ||
+            (typeof sale.deliveryFeeId === "object" ? sale.deliveryFeeId?.recipientPhone : undefined),
+          deliveryAddress:
+            sale.deliveryInfo?.deliveryAddress ||
+            (typeof sale.deliveryFeeId === "object" ? sale.deliveryFeeId?.deliveryAddress : undefined),
+          deliveryCategory: sale.deliveryInfo?.deliveryCategory || sale.deliveryCategory,
+          deliveryOption: sale.deliveryInfo?.deliveryOption || sale.deliveryOption,
+        }
+      : sale.deliveryInfo || undefined,
   };
 };
 

@@ -143,7 +143,7 @@ export default function CompleteCheckoutModal({
                   <span className="font-medium">Phone:</span> {deliveryInfo.recipientPhone}
                 </div>
                 <div>
-                  <span className="font-medium">Address:</span> {deliveryInfo.deliveryAddress.street}, {deliveryInfo.deliveryCity}
+                  <span className="font-medium">Address:</span> {deliveryInfo.deliveryAddress.street}, {deliveryInfo.deliveryAddress?.city}
                 </div>
                 <button
                   onClick={() => setShowDeliveryModal(true)}
