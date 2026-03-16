@@ -31,6 +31,8 @@ export default function OrdersPage() {
     limit: 20,
     total: 0,
   });
+  const [exportLoading, setExportLoading] = useState(false);
+  const [exportError, setExportError] = useState("");
 
   const canViewSalesHistory = permissions?.includes(PERMISSIONS.VIEW_SALE_HISTORY);
 
@@ -159,6 +161,193 @@ export default function OrdersPage() {
     handleFilterChange("search", "");
   };
 
+  const escapeCsvValue = (value) => {
+    if (value === null || value === undefined) return "";
+    const str = String(value);
+    if (str.includes(",") || str.includes("\"") || str.includes("\n")) {
+      return `"${str.replace(/"/g, "\"\"")}"`;
+    }
+    return str;
+  };
+
+  const handleExport = async () => {
+    if (exportLoading) return;
+    setExportLoading(true);
+    setExportError("");
+    try {
+      const limit = pagination.total > 0 ? pagination.total : 10000;
+      const params = new URLSearchParams({
+        status: filters.status,
+        limit,
+        page: 1,
+      });
+
+      if (filters.startDate) {
+        const [year, month, day] = filters.startDate.split("-").map(Number);
+        params.append("startDate", new Date(year, month - 1, day).toISOString());
+      }
+      if (filters.endDate) {
+        const [year, month, day] = filters.endDate.split("-").map(Number);
+        params.append("endDate", new Date(year, month - 1, day + 1).toISOString());
+      }
+      if (filters.paymentMethod) params.append("paymentMethod", filters.paymentMethod);
+      if (filters.shopifySyncStatus) params.append("shopifySyncStatus", filters.shopifySyncStatus);
+      if (filters.paymentStatus) params.append("paymentStatus", filters.paymentStatus);
+      if (filters.locationId) params.append("locationId", filters.locationId);
+      if (filters.deliveryCategory) params.append("deliveryCategory", filters.deliveryCategory);
+      if (filters.categoryStatus) params.append("categoryStatus", filters.categoryStatus);
+      if (filters.requiresDelivery) params.append("requiresDelivery", filters.requiresDelivery);
+      if (filters.search) params.append("search", filters.search);
+
+      const response = await apiFetch(`/sales?${params.toString()}`);
+
+      let exportSales = [];
+      if (response?.data?.sales && Array.isArray(response.data.sales)) {
+        exportSales = response.data.sales;
+      } else if (response?.data && Array.isArray(response.data)) {
+        exportSales = response.data;
+      } else if (Array.isArray(response)) {
+        exportSales = response;
+      }
+
+      if (exportSales.length === 0) {
+        setExportError("No records to export for the current filters.");
+        return;
+      }
+
+      const headers = [
+        "Receipt Number",
+        "Transaction ID",
+        "Date",
+        "Time",
+        "Location ID",
+        "Customer Name",
+        "Customer Phone",
+        "Customer Email",
+        "Product Name",
+        "Product SKU",
+        "Sold Quantity",
+        "Item Unit Price",
+        "Subtotal",
+        "Discount",
+        "Tax Amount",
+        "Tax Rate (%)",
+        "Delivery Fee",
+        "Total Amount",
+        "Payment Methods",
+        "Payment Status",
+        "Card Last4",
+        "Transaction Ref",
+        "Sale Status",
+        "Void Reason",
+        "Voided At",
+        "Refund Amount",
+        "Refund Reason",
+        "Delivery Category",
+        "Delivery Option",
+        "Delivery Status",
+        "Shopify Sync Status",
+        "Notes",
+      ];
+
+      const rows = exportSales.flatMap((sale) => {
+        const dt = sale.completedAt || sale.createdAt ? new Date(sale.completedAt || sale.createdAt) : null;
+        const dateStr = dt ? dt.toLocaleDateString() : "";
+        const timeStr = dt ? dt.toLocaleTimeString() : "";
+
+        const paymentMethods = (sale.payments || []).map((p) => {
+          return `${p.method}:${p.amount}`;
+        }).join("; ");
+
+        const orderPrefix = [
+          sale.receiptNumber,
+          sale.transactionId,
+          dateStr,
+          timeStr,
+          sale.locationId,
+          sale.customerName,
+          sale.customerPhone,
+          sale.customerEmail,
+        ];
+
+        const orderSuffix = [
+          sale.subtotal,
+          sale.discountAmount,
+          sale.taxAmount,
+          sale.taxRateUsed,
+          sale.deliveryFeeAmount,
+          sale.totalAmount,
+          paymentMethods,
+          sale.paymentStatus,
+          sale.cardLast4,
+          sale.transactionRef,
+          sale.status,
+          sale.voidReason,
+          sale.voidedAt ? new Date(sale.voidedAt).toLocaleString() : "",
+          sale.refundAmount,
+          sale.refundReason,
+          sale.deliveryCategory,
+          sale.deliveryOption,
+          sale.categoryStatus || sale.deliveryStatus,
+          sale.shopifySyncStatus,
+          sale.notes,
+        ];
+
+        const items = Array.isArray(sale.items) ? sale.items : [];
+
+        if (items.length === 0) {
+          return [[
+            ...orderPrefix,
+            "",
+            "",
+            "",
+            "",
+            ...orderSuffix,
+          ].map(escapeCsvValue)];
+        }
+
+        const itemRows = items.map((item) => {
+          const parsedQuantity = Number(item?.quantity);
+          const soldQuantity = Number.isFinite(parsedQuantity) ? parsedQuantity : 0;
+
+          return {
+            productName: item?.productName || "Unknown",
+            productSku: item?.sku || "",
+            soldQuantity,
+            itemUnitPrice: item?.unitPrice ?? "",
+          };
+        });
+
+        return itemRows.map((itemRow, index) => {
+          const showOrderFields = index === 0;
+
+          return [
+            ...(showOrderFields ? orderPrefix : Array(orderPrefix.length).fill("")),
+            itemRow.productName,
+            itemRow.productSku,
+            itemRow.soldQuantity,
+            itemRow.itemUnitPrice,
+            ...(showOrderFields ? orderSuffix : Array(orderSuffix.length).fill("")),
+          ].map(escapeCsvValue);
+        });
+      });
+
+      const csv = [headers.map(escapeCsvValue), ...rows].map((row) => row.join(",")).join("\n");
+      const blob = new Blob([csv], { type: "text/csv" });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `sales-export-${new Date().toISOString().split("T")[0]}.csv`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("Export failed:", err);
+      setExportError("Export failed. Please try again.");
+    } finally {
+      setExportLoading(false);
+    }
+  };
+
   if (!canViewSalesHistory) {
     return (
       <div className="space-y-4 rounded-lg border border-zinc-200 bg-white p-6 shadow-sm">
@@ -172,9 +361,26 @@ export default function OrdersPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-zinc-900">Sales History</h1>
-        <p className="mt-1 text-sm text-zinc-600">View and manage all POS transactions</p>
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-3xl font-bold text-zinc-900">Sales History</h1>
+          <p className="mt-1 text-sm text-zinc-600">View and manage all POS transactions</p>
+        </div>
+        {canViewSalesHistory && (
+          <div className="flex flex-col items-end gap-1">
+            <button
+              type="button"
+              onClick={handleExport}
+              disabled={exportLoading}
+              className="rounded border border-zinc-300 bg-white px-4 py-2 text-sm font-medium hover:bg-zinc-50 disabled:opacity-50"
+            >
+              {exportLoading ? "Exporting…" : "Export CSV"}
+            </button>
+            {exportError && (
+              <p className="text-xs text-red-600">{exportError}</p>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Filters */}
