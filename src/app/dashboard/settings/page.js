@@ -47,6 +47,12 @@ const cards = [
     href: "/dashboard/settings/team",
     permission: PERMISSIONS.VIEW_USERS,
   },
+  {
+    title: "Financial Controls",
+    description: "Open shifts, reconcile sessions, and manage expenses.",
+    href: "/dashboard/expenses",
+    permission: PERMISSIONS.VIEW_EXPENSES,
+  },
 ];
 
 export default function SettingsPage() {

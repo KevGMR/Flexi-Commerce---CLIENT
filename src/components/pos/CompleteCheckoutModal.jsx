@@ -22,6 +22,8 @@ export default function CompleteCheckoutModal({
   onUseSplitPaymentChange,
   onComplete,
   onClose,
+  status,
+  error,
 }) {
   const [showDeliveryModal, setShowDeliveryModal] = useState(false);
   const [deliveryInfo, setDeliveryInfo] = useState(null);
@@ -315,6 +317,18 @@ export default function CompleteCheckoutModal({
               rows="3"
             />
           </div>
+
+          {/* Status/Error */}
+          {status && (
+            <div className="mb-6 text-sm text-green-700 bg-green-50 px-3 py-2 rounded border border-green-200">
+              {status}
+            </div>
+          )}
+          {error && (
+            <div className="mb-6 text-sm text-red-700 bg-red-50 px-3 py-2 rounded border border-red-200">
+              {error}
+            </div>
+          )}
 
           {/* Action Buttons */}
           <div className="flex gap-3">

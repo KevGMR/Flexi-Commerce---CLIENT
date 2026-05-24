@@ -71,7 +71,7 @@ export default function PosPage() {
     isReconnectingShopify,
     retrySyncPendingSales,
     retrySingleSale,
-    updatePendingCount,
+    updatePendingCounts,
   } = useSyncManager();
 
   const [locationId, setLocationId] = useState(() => selectedLocationId || "");
@@ -101,7 +101,9 @@ export default function PosPage() {
   const [sendingEmail, setSendingEmail] = useState(false);
   const [shopifyConnection, setShopifyConnection] = useState(null);
   const [shopifyProducts, setShopifyProductsState] = useState([]);
+  const [serviceProducts, setServiceProductsState] = useState([]);
   const [shopifyLoading, setShopifyLoading] = useState(false);
+  const [serviceLoading, setServiceLoading] = useState(false);
   const [showVariantPicker, setShowVariantPicker] = useState(false);
   const [variantPickerProduct, setVariantPickerProduct] = useState(null);
   const [searchResults, setSearchResults] = useState([]);
@@ -307,14 +309,43 @@ export default function PosPage() {
     }
   };
 
+  const loadServiceProductsData = useCallback(async () => {
+    if (!activeOrganization) {
+      return;
+    }
+
+    setServiceLoading(true);
+    try {
+      const res = await apiFetch("/products?type=service&status=active&limit=100");
+      const products = res?.data?.products || res?.products || [];
+      setServiceProductsState(products);
+    } catch (err) {
+      console.error("[POS] Failed to load service products:", err);
+      setServiceProductsState([]);
+    } finally {
+      setServiceLoading(false);
+    }
+  }, [activeOrganization]);
+
   // Load Shopify products and cache them - memoized to fix exhaustive-deps warning
   const loadShopifyProductsData = useCallback(async () => {
-    if (!shopifyConnection?.status) return;
+    console.log("[POS] loadShopifyProductsData called");
+    if (!shopifyConnection?.status) {
+      console.log("[POS] No shopifyConnection.status, returning early");
+      return;
+    }
     const requestId = ++shopifyFetchRequestIdRef.current;
     setShopifyLoading(true);
     try {
+      console.log("[POS] Fetching /shopify/products...");
       const res = await apiFetch("/shopify/products");
+      console.log("[POS] API response received:", {
+        hasProducts: !!res?.data?.products,
+        productCount: res?.data?.products?.length,
+        locationScope: res?.data?.locationScope,
+      });
       if (requestId !== shopifyFetchRequestIdRef.current) {
+        console.log("[POS] Request ID mismatch, returning");
         return;
       }
 
@@ -322,6 +353,7 @@ export default function PosPage() {
       setShopifyLocationScope(locationScope);
 
       if (locationScope?.scoped && locationScope?.hasMapping === false) {
+        console.log("[POS] Location scoped without mapping, clearing products");
         await clearShopifyProducts();
         setShopifyProductsState([]);
         setSearchResults([]);
@@ -330,17 +362,23 @@ export default function PosPage() {
       }
 
       if (res?.data?.products) {
+        console.log("[POS] Calling setShopifyProducts with", res.data.products.length, "products");
         await setShopifyProducts(res.data.products);
+        console.log("[POS] setShopifyProducts completed, searching...");
         const cached = await searchShopifyProducts("");
+        console.log("[POS] searchShopifyProducts returned", cached.length, "products");
         if (requestId !== shopifyFetchRequestIdRef.current) {
+          console.log("[POS] Request ID mismatch after search, returning");
           return;
         }
         setShopifyProductsState(cached);
         setSearchResults(cached);
         setLastSyncTimestamp(res?.data?.lastFetchedAt || new Date().toISOString());
+      } else {
+        console.log("[POS] No products in response");
       }
     } catch (err) {
-      console.error("Failed to load Shopify products:", err);
+      console.error("[POS] Failed to load Shopify products:", err);
     } finally {
       if (requestId === shopifyFetchRequestIdRef.current) {
         setShopifyLoading(false);
@@ -351,6 +389,7 @@ export default function PosPage() {
   // Load Shopify data on mount and when organization changes
   useEffect(() => {
     loadShopifyConnection();
+    loadServiceProductsData();
 
     // Load cached products on mount and check staleness
     searchShopifyProducts("").then((cached) => {
@@ -376,7 +415,7 @@ export default function PosPage() {
         }
       }
     });
-  }, [activeOrganization, loadShopifyProductsData]);
+  }, [activeOrganization, loadShopifyProductsData, loadServiceProductsData]);
 
   // Load products when connection/location context is active
   useEffect(() => {
@@ -405,7 +444,7 @@ export default function PosPage() {
   const addToCart = (product) => {
     const newItem = {
       type: product.type,
-      variant: product.id,
+      variant: product.id || product._id,
       name: product.name,
       price: product.price,
       quantity: 1,
@@ -1145,7 +1184,12 @@ export default function PosPage() {
 
       setTimeout(() => setStatus(""), 3000);
     } catch (err) {
-      setError(err.message || "Failed to process exchange");
+      const errMsg = err?.message || "";
+      if (err.status === 400 && errMsg.includes("open shift")) {
+        setError(errMsg);
+      } else {
+        setError(errMsg || "Failed to process exchange");
+      }
     } finally {
       setProcessingExchange(false);
     }
@@ -1331,6 +1375,12 @@ export default function PosPage() {
         return;
       }
 
+      const errMessage = err?.message || err?.details?.message || "";
+      if (err.status === 400 && errMessage.includes("open shift")) {
+        setError(errMessage);
+        return;
+      }
+
       try {
         const formattedItems = cart.map((item) => {
           const baseItem = {
@@ -1414,7 +1464,7 @@ export default function PosPage() {
         });
         offlinePayload.idempotencyKey = idempotencyKey;
         await savePendingSale(offlinePayload);
-        await updatePendingCount();
+        await updatePendingCounts();
 
         const offlineReceipt = {
           receiptNumber: idempotencyKey,
@@ -1580,6 +1630,11 @@ export default function PosPage() {
         return;
       }
 
+      if (err.status === 400 && errMessage.includes("open shift")) {
+        setError(errMessage);
+        return;
+      }
+
       try {
         const offlinePayload = {
           locationId,
@@ -1623,7 +1678,7 @@ export default function PosPage() {
 
         await savePendingSale(offlinePayload);
 
-        await updatePendingCount();
+        await updatePendingCounts();
 
         const offlineReceipt = {
           receiptNumber: idempotencyKey,
@@ -1824,7 +1879,7 @@ export default function PosPage() {
 
         await savePendingSale(offlinePayload);
 
-        await updatePendingCount();
+        await updatePendingCounts();
 
         const offlineReceipt = {
           receiptNumber: idempotencyKey,
@@ -1937,6 +1992,10 @@ export default function PosPage() {
   const handleSearch = async (query) => {
     setSearchQuery(query);
 
+    if (productTab !== "shopify") {
+      return;
+    }
+
     // Clear existing timer
     if (searchDebounceTimer) {
       clearTimeout(searchDebounceTimer);
@@ -1964,6 +2023,14 @@ export default function PosPage() {
     await loadShopifyProductsData();
     setLastSyncTimestamp(new Date().toISOString());
   };
+
+  const filteredServiceProducts = serviceProducts.filter((product) => {
+    const matchesSearch = product.name
+      .toLowerCase()
+      .includes(searchQuery.toLowerCase());
+    const matchesTab = productTab === "all" || productTab === "services";
+    return matchesSearch && matchesTab;
+  });
 
   // Background refresh after sale (debounced)
   const scheduleProductRefresh = () => {
@@ -2042,7 +2109,10 @@ export default function PosPage() {
                 )}
               </button>
               {showLocationDropdown && locations && locations.length > 1 && (
-                <div className="absolute top-full mt-2 right-0 bg-white rounded-lg shadow-lg border border-gray-200 z-40 min-w-[200px]">
+                <div
+                  className="absolute top-full mt-2 right-0 bg-white rounded-lg shadow-lg border border-gray-200 z-40"
+                  style={{ minWidth: "200px" }}
+                >
                   {locations.map((loc) => (
                     <button
                       key={loc}
@@ -2200,6 +2270,8 @@ export default function PosPage() {
         }}
         onComplete={handleCompleteCheckout}
         onClose={() => setShowCompleteCheckoutModal(false)}
+        status={status}
+        error={error}
       />
 
       {/* Main Content */}
@@ -2248,6 +2320,17 @@ export default function PosPage() {
               >
                 FLEXI
               </button>
+              <button
+                onClick={() => setProductTab("services")}
+                className={`px-4 py-2 rounded-lg font-medium ${productTab === "services" ? "bg-blue-500 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}
+              >
+                Services
+                {serviceProducts.length > 0 && (
+                  <span className="ml-2 px-2 py-0.5 text-xs bg-blue-100 text-blue-600 rounded-full">
+                    {serviceProducts.length}
+                  </span>
+                )}
+              </button>
               {shopifyConnection && (
                 <button
                   onClick={() => setProductTab("shopify")}
@@ -2266,6 +2349,40 @@ export default function PosPage() {
 
           {/* Product Grid */}
           <div className="flex-1 overflow-auto p-4">
+            {productTab === "services" &&
+              filteredServiceProducts.length === 0 &&
+              !serviceLoading && (
+                <div className="flex flex-col items-center justify-center h-full text-center p-8">
+                  <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
+                    <svg
+                      className="w-8 h-8 text-gray-400"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M12 8c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm0 2c-4 0-7 2.7-7 6v2h14v-2c0-3.3-3-6-7-6z"
+                      />
+                    </svg>
+                  </div>
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">
+                    No Services Yet
+                  </h3>
+                  <p className="text-sm text-gray-500 mb-4 max-w-sm">
+                    Create active service products in Products to make them available in POS.
+                  </p>
+                  <button
+                    onClick={() => router.push("/dashboard/products/services")}
+                    className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                  >
+                    Go to Services
+                  </button>
+                </div>
+              )}
+
             {/* Empty State - No Shopify Products */}
             {productTab === "shopify" &&
               searchResults.length === 0 &&
@@ -2340,6 +2457,29 @@ export default function PosPage() {
                       </h3>
                       <p className="text-lg font-bold text-blue-600">
                         ${product.price.toFixed(2)}
+                      </p>
+                    </button>
+                  ))}
+
+                {/* Services */}
+                {(productTab === "all" || productTab === "services") &&
+                  filteredServiceProducts.map((product) => (
+                    <button
+                      key={product.id || product._id}
+                      onClick={() => addToCart(product)}
+                      className="bg-white rounded-lg border-2 border-gray-200 hover:border-blue-500 p-4 flex flex-col items-center gap-2 transition-all hover:shadow-lg"
+                    >
+                      <div className="w-full aspect-square bg-blue-50 rounded-lg flex items-center justify-center text-4xl">
+                        🛎️
+                      </div>
+                      <h3 className="font-medium text-gray-900 text-center text-sm">
+                        {product.name}
+                      </h3>
+                      <p className="text-xs text-gray-500 text-center">
+                        {product.serviceKind === "bundle" ? "Service bundle" : "Service"}
+                      </p>
+                      <p className="text-lg font-bold text-blue-600">
+                        ${Number(product.price || 0).toFixed(2)}
                       </p>
                     </button>
                   ))}
@@ -3317,18 +3457,6 @@ export default function PosPage() {
                     onChange={(e) => setNotes(e.target.value)}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
                   /> */}
-
-                  {/* Status/Error */}
-                  {status && (
-                    <div className="text-sm text-green-700 bg-green-50 px-3 py-2 rounded">
-                      {status}
-                    </div>
-                  )}
-                  {error && (
-                    <div className="text-sm text-red-700 bg-red-50 px-3 py-2 rounded">
-                      {error}
-                    </div>
-                  )}
 
                   {/* Payments and Delivery Modals Button */}
                   <button

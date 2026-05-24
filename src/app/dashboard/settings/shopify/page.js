@@ -49,6 +49,7 @@ export default function ShopifySettingsPage() {
   const [queueError, setQueueError] = useState("");
   const [processingQueue, setProcessingQueue] = useState(false);
   const [retryingQueueItemId, setRetryingQueueItemId] = useState("");
+  const [importingLocationId, setImportingLocationId] = useState("");
 
   const canManage = can(PERMISSIONS.MANAGE_SETTINGS);
 
@@ -281,6 +282,33 @@ export default function ShopifySettingsPage() {
     }
   };
 
+  const handleImportShipping = async (locationId) => {
+    setImportingLocationId(locationId);
+    setStatus("");
+    setNotice("");
+    setError("");
+
+    try {
+      const response = await apiFetch("/shopify/import-shipping", {
+        method: "POST",
+        body: { locationId },
+      });
+
+      const summary = response?.data?.summary;
+      if (summary) {
+        setStatus(
+          `Shipping import complete: +${summary.createdCategories} categories, ~${summary.updatedCategories} categories, +${summary.createdOptions} options, ~${summary.updatedOptions} options.`,
+        );
+      } else {
+        setStatus(response?.message || "Shipping import completed.");
+      }
+    } catch (err) {
+      setError(err?.message || "Failed to import Shopify shipping data.");
+    } finally {
+      setImportingLocationId("");
+    }
+  };
+
   const handleRetryQueueItem = async (queueId) => {
     setRetryingQueueItemId(queueId);
     setQueueMessage("");
@@ -459,6 +487,20 @@ export default function ShopifySettingsPage() {
                     </option>
                   ))}
                 </select>
+                <button
+                  onClick={() => handleImportShipping(loc._id)}
+                  disabled={
+                    !loc.shopifyLocationId ||
+                    !canManage ||
+                    !isOnline ||
+                    importingLocationId === loc._id
+                  }
+                  className="px-3 py-2 rounded border border-zinc-300 text-sm disabled:opacity-50"
+                >
+                  {importingLocationId === loc._id
+                    ? "Importing..."
+                    : "Import Shipping"}
+                </button>
               </div>
             ))}
             {flexiLocations.length === 0 && (

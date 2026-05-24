@@ -555,37 +555,84 @@ function hasWordPrefixMatch(query, text) {
 
 // Set Shopify products in cache (clears old data)
 export async function setShopifyProducts(products) {
-  if (!db) await initDB();
+  console.log("[setShopifyProducts] Called with", products?.length, "products, db exists:", !!db);
+  if (!db) {
+    console.log("[setShopifyProducts] DB not initialized, initializing...");
+    await initDB();
+    console.log("[setShopifyProducts] DB initialized, db:", !!db);
+  }
   return new Promise((resolve, reject) => {
+    console.log("[setShopifyProducts] Creating transaction for store:", SHOPIFY_STORE_NAME);
     const transaction = db.transaction([SHOPIFY_STORE_NAME], "readwrite");
     const store = transaction.objectStore(SHOPIFY_STORE_NAME);
-    store.clear();
-    for (const product of products) {
-      store.add({
-        id: product.id,
-        title: product.title,
-        descriptionHtml: product.descriptionHtml,
-        vendor: product.vendor,
-        productType: product.productType,
-        status: product.status,
-        totalInventory: product.totalInventory,
-        variants: product.variants?.edges?.map(e => ({
-          id: e.node.id,
-          title: e.node.title,
-          sku: e.node.sku,
-          price: parseFloat(e.node.price),
-          inventoryQuantity: e.node.inventoryQuantity,
-          inventoryItemId: e.node.inventoryItem?.id,
-        })) || [],
-        images: product.images?.edges?.map(e => ({
-          url: e.node.url,
-          altText: e.node.altText,
-        })) || [],
-        savedAt: new Date().toISOString(),
-      });
-    }
-    transaction.onerror = () => reject(transaction.error);
-    transaction.oncomplete = () => resolve();
+    
+    // Clear the store and wait for it to complete
+    const clearRequest = store.clear();
+    
+    clearRequest.onerror = () => {
+      console.error("[setShopifyProducts] Failed to clear store:", clearRequest.error);
+      reject(clearRequest.error);
+    };
+    
+    clearRequest.onsuccess = () => {
+      console.log("[setShopifyProducts] Cleared store, now adding", products.length, "products");
+      
+      let addCount = 0;
+      let hasError = false;
+      
+      if (products.length === 0) {
+        console.log("[setShopifyProducts] No products to add");
+      }
+      
+      for (const product of products) {
+        console.log("[setShopifyProducts] Adding product", product.id, "title:", product.title);
+        const addRequest = store.put({
+          id: product.id,
+          title: product.title,
+          descriptionHtml: product.descriptionHtml,
+          vendor: product.vendor,
+          productType: product.productType,
+          status: product.status,
+          totalInventory: product.totalInventory,
+          variants: product.variants?.edges?.map(e => ({
+            id: e.node.id,
+            title: e.node.title,
+            sku: e.node.sku,
+            price: parseFloat(e.node.price),
+            inventoryQuantity: e.node.inventoryQuantity,
+            inventoryItemId: e.node.inventoryItem?.id,
+          })) || [],
+          images: product.images?.edges?.map(e => ({
+            url: e.node.url,
+            altText: e.node.altText,
+          })) || [],
+          savedAt: new Date().toISOString(),
+        });
+        
+        addRequest.onerror = () => {
+          console.error("[setShopifyProducts] Failed to add product", product.id, ":", addRequest.error);
+          hasError = true;
+        };
+        
+        addRequest.onsuccess = () => {
+          addCount++;
+          console.log("[setShopifyProducts] Added product", product.id, `(${addCount}/${products.length})`);
+          if (addCount === products.length && hasError) {
+            console.warn(`[setShopifyProducts] Added ${addCount} products with some errors`);
+          }
+        };
+      }
+    };
+    
+    transaction.onerror = () => {
+      console.error("[setShopifyProducts] Transaction error:", transaction.error);
+      reject(transaction.error);
+    };
+    
+    transaction.oncomplete = () => {
+      console.log("[setShopifyProducts] Transaction complete! Saved Shopify products.");
+      resolve();
+    };
   });
 }
 
@@ -608,6 +655,7 @@ export async function getShopifyProducts() {
  * @returns {Promise<Array>} - Matching products sorted by score
  */
 export async function searchShopifyProducts(query = "", limit = 50) {
+  console.log("[searchShopifyProducts] Called with query:", query, "limit:", limit, "db exists:", !!db);
   if (!db) await initDB();
   
   return new Promise((resolve, reject) => {
@@ -615,11 +663,16 @@ export async function searchShopifyProducts(query = "", limit = 50) {
     const store = transaction.objectStore(SHOPIFY_STORE_NAME);
     const request = store.getAll();
     
-    request.onerror = () => reject(request.error);
+    request.onerror = () => {
+      console.error("[searchShopifyProducts] Error retrieving products:", request.error);
+      reject(request.error);
+    };
     request.onsuccess = () => {
       const allProducts = request.result || [];
+      console.log("[searchShopifyProducts] Retrieved", allProducts.length, "products from store");
       
       if (!query.trim()) {
+        console.log("[searchShopifyProducts] No query, returning first", Math.min(limit, allProducts.length), "products");
         return resolve(allProducts.slice(0, limit));
       }
 
@@ -678,7 +731,8 @@ export async function searchShopifyProducts(query = "", limit = 50) {
 
       // Sort by score (highest first)
       results.sort((a, b) => b._matchScore - a._matchScore);
-
+      
+      console.log("[searchShopifyProducts] Found", results.length, "matching products for query:", query);
       resolve(results.slice(0, limit));
     };
   });

@@ -1,7 +1,7 @@
 // Permission constants matching backend permission system
 // Keep this in sync with server/config/permissions.js
 
-export const PERMISSIONS = {
+export const  PERMISSIONS = {
   // Sales Permissions
   CREATE_SALE: "create_sale",
   VIEW_SALE_HISTORY: "view_sale_history",
@@ -19,6 +19,12 @@ export const PERMISSIONS = {
   VIEW_REPORTS: "view_reports",
   EXPORT_REPORTS: "export_reports",
   VIEW_FINANCIAL_REPORTS: "view_financial_reports",
+
+  // Finance Permissions
+  MANAGE_FINANCE: "manage_finance",
+  VIEW_EXPENSES: "view_expenses",
+  CREATE_EXPENSES: "create_expenses",
+  APPROVE_EXPENSES: "approve_expenses",
 
   // Inventory Permissions
   MANAGE_INVENTORY: "manage_inventory",
@@ -98,6 +104,12 @@ export const PERMISSION_GROUPS = {
     PERMISSIONS.VIEW_REPORTS,
     PERMISSIONS.EXPORT_REPORTS,
     PERMISSIONS.VIEW_FINANCIAL_REPORTS,
+  ],
+  finance: [
+    PERMISSIONS.MANAGE_FINANCE,
+    PERMISSIONS.VIEW_EXPENSES,
+    PERMISSIONS.CREATE_EXPENSES,
+    PERMISSIONS.APPROVE_EXPENSES,
   ],
   inventory: [
     PERMISSIONS.MANAGE_INVENTORY,

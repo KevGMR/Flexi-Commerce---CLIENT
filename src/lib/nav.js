@@ -17,6 +17,7 @@ export const navItems = [
     href: "/dashboard/products",
     permission: PERMISSIONS.VIEW_PRODUCT,
     children: [
+      { label: "Services", href: "/dashboard/products/services", permission: PERMISSIONS.VIEW_PRODUCT },
       { label: "Collections", href: "/dashboard/collections", permission: PERMISSIONS.VIEW_PRODUCT },
       { label: "Inventory", href: "/dashboard/inventory", permission: PERMISSIONS.VIEW_PRODUCT },
       { label: "Purchase Orders", href: "/dashboard/purchase-orders", permission: PERMISSIONS.VIEW_PRODUCT },
@@ -26,6 +27,15 @@ export const navItems = [
   },
   { label: "Customers", href: "/dashboard/customers", permission: PERMISSIONS.VIEW_USERS },
   { label: "Analytics (Reports)", href: "/dashboard/analytics", permission: PERMISSIONS.VIEW_REPORTS },
+  {
+    label: "Expenses",
+    href: "/dashboard/expenses",
+    permission: PERMISSIONS.VIEW_EXPENSES,
+    children: [
+      { label: "Expense List", href: "/dashboard/expenses", permission: PERMISSIONS.VIEW_EXPENSES },
+      { label: "Create Expense", href: "/dashboard/expenses/create", permission: PERMISSIONS.CREATE_EXPENSES },
+    ],
+  },
   {
     label: "Deliveries",
     href: "/dashboard/deliveries",
@@ -45,6 +55,8 @@ export const navItems = [
     children: [
       { label: "POS Terminal", href: "/dashboard/sales-channels/pos", permission: PERMISSIONS.CREATE_SALE },
       { label: "Sales Reports", href: "/dashboard/sales-channels/pos/reports", permission: PERMISSIONS.VIEW_REPORTS },
+      { label: "Shift Sessions", href: "/dashboard/sales-channels/pos/shifts", permission: PERMISSIONS.CREATE_SALE },
+      { label: "Reconciliation", href: "/dashboard/sales-channels/pos/reconciliation", permission: PERMISSIONS.MANAGE_FINANCE },
     ],
   },
   {
