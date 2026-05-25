@@ -1,10 +1,4 @@
-Perfect! I have the session plan with all the tooltip texts. Now I'll create the modified file with:
-
-1. Enhanced `StatCard` with optional `tooltip` prop
-2. Tooltips for all overview stat cards  
-3. `title` attributes for Tax & Discounts and Operating Expenses fields
-
-```javascript
+"use client";
 "use client";
 
 import { useState, useEffect } from "react";
@@ -772,4 +766,3 @@ export default function SalesReportsPage() {
     </div>
   );
 }
-```
