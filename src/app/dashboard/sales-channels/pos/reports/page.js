@@ -1,3 +1,10 @@
+Perfect! I have the session plan with all the tooltip texts. Now I'll create the modified file with:
+
+1. Enhanced `StatCard` with optional `tooltip` prop
+2. Tooltips for all overview stat cards  
+3. `title` attributes for Tax & Discounts and Operating Expenses fields
+
+```javascript
 "use client";
 
 import { useState, useEffect } from "react";
@@ -6,12 +13,14 @@ import { apiFetch } from "@/lib/api-client";
 import { PERMISSIONS } from "@/lib/permissions";
 import { useSessionStore } from "@/store/session";
 
-function StatCard({ label, value, change, icon }) {
+function StatCard({ label, value, change, icon, tooltip }) {
   return (
     <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
       <div className="flex items-start justify-between">
         <div>
-          <p className="text-xs font-medium text-zinc-600">{label}</p>
+          <p className="text-xs font-medium text-zinc-600">
+            {tooltip ? <span title={tooltip}>{label}</span> : label}
+          </p>
           <p className="mt-1 text-2xl font-bold text-zinc-900">{value}</p>
           {change && (
             <p className={`mt-1 text-xs font-medium ${change > 0 ? "text-green-600" : "text-red-600"}`}>
@@ -438,31 +447,37 @@ export default function SalesReportsPage() {
                   label="Net Collected"
                   value={formatCurrency(reportData.totalRevenue)}
                   icon="💰"
+                  tooltip="Total money received after exchange credits are deducted"
                 />
                 <StatCard
                   label="Gross Sales"
                   value={formatCurrency(reportData.grossRevenue || reportData.totalRevenue || 0)}
                   icon="🧾"
+                  tooltip="Sum of item totals + tax + delivery − discounts (before exchange credits)"
                 />
                 <StatCard
                   label="Transactions"
                   value={reportData.totalSales || 0}
                   icon="📋"
+                  tooltip="Count of sale transactions in the period"
                 />
                 <StatCard
                   label="Items Sold"
                   value={reportData.itemsSold?.total || 0}
                   icon="📦"
+                  tooltip="Total quantity of items sold"
                 />
                 <StatCard
                   label="Avg Transaction"
                   value={formatCurrency(reportData.averageTransactionValue || 0)}
                   icon="📊"
+                  tooltip="Average value collected per transaction"
                 />
                 <StatCard
                   label="Exchange Credit"
                   value={formatCurrency(reportData.exchangeCreditApplied || 0)}
                   icon="🔁"
+                  tooltip="Amount paid using store/account credit (reduces net collected)"
                 />
               </div>
 
@@ -516,13 +531,13 @@ export default function SalesReportsPage() {
                   <h3 className="mb-4 font-semibold text-zinc-900">Tax & Discounts</h3>
                   <div className="space-y-3 text-sm">
                     <div className="flex items-center justify-between">
-                      <span className="text-zinc-600">Subtotal (Excl. Exchange Credit)</span>
+                      <span className="text-zinc-600" title="Item subtotal excluding delivery and before exchange credits and discounts">Subtotal (Excl. Exchange Credit)</span>
                       <span className="font-semibold text-zinc-900">
                         {formatCurrency(getSubtotalExcludingExchangeCredit())}
                       </span>
                     </div>
                     <div className="flex items-center justify-between">
-                      <span className="text-zinc-600">
+                      <span className="text-zinc-600" title="Portion of prices that is tax when tax is included in item prices">
                         {reportData.taxDisplayMode === "exclusive"
                           ? "Tax (Exclusive)"
                           : reportData.taxDisplayMode === "mixed"
@@ -534,19 +549,19 @@ export default function SalesReportsPage() {
                       </span>
                     </div>
                     <div className="flex items-center justify-between">
-                      <span className="text-zinc-600">Total Discount</span>
+                      <span className="text-zinc-600" title="Sum of all discounts applied across items/transactions">Total Discount</span>
                       <span className="font-semibold text-red-600">
                         -{formatCurrency(reportData.totalDiscount || 0)}
                       </span>
                     </div>
                     <div className="flex items-center justify-between">
-                      <span className="text-zinc-600">Exchange Credit Applied</span>
+                      <span className="text-zinc-600" title="Total exchange-credit used to pay sales">Exchange Credit Applied</span>
                       <span className="font-semibold text-indigo-600">
                         {formatCurrency(reportData.exchangeCreditApplied || 0)}
                       </span>
                     </div>
                     <div className="flex items-center justify-between">
-                      <span className="text-zinc-600">Delivery Collected</span>
+                      <span className="text-zinc-600" title="Total delivery fees collected">Delivery Collected</span>
                       <span className="font-semibold text-zinc-900">
                         {formatCurrency(reportData.deliveryAmountCollected || 0)}
                       </span>
@@ -559,15 +574,15 @@ export default function SalesReportsPage() {
                     <h3 className="mb-4 font-semibold text-zinc-900">Operating Expenses</h3>
                     <div className="space-y-3 text-sm">
                       <div className="flex items-center justify-between">
-                        <span className="text-zinc-600">Approved Expenses</span>
+                        <span className="text-zinc-600" title="Approved operating expenses in the period">Approved Expenses</span>
                         <span className="font-semibold text-red-600">-{formatCurrency(reportData.totalExpenses || 0)}</span>
                       </div>
                       <div className="flex items-center justify-between">
-                        <span className="text-zinc-600">Net Profit (after expenses)</span>
+                        <span className="text-zinc-600" title="Net sales (excl. tax & delivery) − Approved expenses">Net Profit (after expenses)</span>
                         <span className="font-semibold text-green-600">{formatCurrency(reportData.netProfitAfterExpenses || (Number(reportData.netSalesExcludingTax || 0) - Number(reportData.totalExpenses || 0)))}</span>
                       </div>
                       <div className="flex items-center justify-between">
-                        <span className="text-zinc-600">Expense / Revenue</span>
+                        <span className="text-zinc-600" title="Approved expenses ÷ Gross Sales shown as a percent">Expense / Revenue</span>
                         <span className="font-semibold text-zinc-900">{reportData.expenseToRevenueRatio || 0}%</span>
                       </div>
                     </div>
@@ -757,3 +772,4 @@ export default function SalesReportsPage() {
     </div>
   );
 }
+```
