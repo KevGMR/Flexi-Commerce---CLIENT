@@ -141,6 +141,8 @@ export default function CreateExpensePage() {
         vendorName: "",
         reference: "",
       }));
+
+      router.push("/dashboard/expenses");
     } catch (err) {
       setError(err?.message || "Failed to create expense.");
     } finally {
