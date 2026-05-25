@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/api-client";
 import { useSessionStore } from "@/store/session";
 import { PERMISSIONS } from "@/lib/permissions";
@@ -73,6 +73,22 @@ export default function ServicesPage() {
       loadServices();
     }
   }, [canView]);
+
+  const searchParams = useSearchParams();
+
+  useEffect(() => {
+    const editId = searchParams?.get("edit");
+    if (editId) {
+      setSelectedServiceId(editId);
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (selectedServiceId && services.length > 0) {
+      const s = services.find((service) => (service._id || service.id) === selectedServiceId);
+      if (s) applyServiceToForm(s);
+    }
+  }, [selectedServiceId, services]);
 
   const resetEditor = () => {
     setSelectedServiceId("");
@@ -326,7 +342,7 @@ export default function ServicesPage() {
           </button>
           <button
             type="button"
-            onClick={resetEditor}
+            onClick={() => router.push("/dashboard/products/services/new")}
             className="rounded bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800"
           >
             New Service
@@ -484,7 +500,8 @@ export default function ServicesPage() {
           )}
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-5 rounded-lg border border-zinc-200 bg-white p-6 shadow-sm">
+        {selectedServiceId ? (
+          <form onSubmit={handleSubmit} className="space-y-5 rounded-lg border border-zinc-200 bg-white p-6 shadow-sm">
           <div className="flex items-start justify-between gap-3">
             <div>
               <h2 className="text-lg font-semibold text-zinc-900">
@@ -725,23 +742,38 @@ export default function ServicesPage() {
             </div>
           )}
 
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="submit"
-              disabled={saving || (!selectedServiceId && !canCreate) || (selectedServiceId && !canEdit)}
-              className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {saving ? "Saving..." : selectedServiceId ? "Update Service" : "Create Service"}
-            </button>
-            <button
-              type="button"
-              onClick={() => router.push("/dashboard/sales-channels/pos")}
-              className="rounded border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
-            >
-              Open POS
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="submit"
+                disabled={saving || (selectedServiceId && !canEdit)}
+                className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {saving ? "Saving..." : "Update Service"}
+              </button>
+              <button
+                type="button"
+                onClick={() => router.push("/dashboard/sales-channels/pos")}
+                className="rounded border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+              >
+                Open POS
+              </button>
+            </div>
+          </form>
+        ) : (
+          <div className="rounded-lg border border-zinc-200 bg-white p-6 shadow-sm">
+            <h2 className="text-lg font-semibold text-zinc-900">Create Service</h2>
+            <p className="mt-1 text-sm text-zinc-600">To create a new service, click the button above to open the dedicated create page.</p>
+            <div className="mt-4">
+              <button
+                type="button"
+                onClick={() => router.push("/dashboard/products/services/new")}
+                className="rounded bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800"
+              >
+                New Service
+              </button>
+            </div>
           </div>
-        </form>
+        )}
       </div>
     </div>
   );
