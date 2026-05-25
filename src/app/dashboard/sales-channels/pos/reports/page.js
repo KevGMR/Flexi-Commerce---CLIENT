@@ -766,4 +766,3 @@ export default function SalesReportsPage() {
     </div>
   );
 }
-```
