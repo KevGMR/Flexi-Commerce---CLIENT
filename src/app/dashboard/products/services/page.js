@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/api-client";
 import { useSessionStore } from "@/store/session";
@@ -32,7 +32,7 @@ const toNumberOrZero = (value) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-export default function ServicesPage() {
+function ServicesPageContent() {
   const router = useRouter();
   const can = useSessionStore((state) => state.can);
 
@@ -776,5 +776,20 @@ export default function ServicesPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function ServicesPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="space-y-4 rounded-lg border border-zinc-200 bg-white p-6 shadow-sm">
+          <h1 className="text-2xl font-semibold text-zinc-900">Services</h1>
+          <p className="text-sm text-zinc-600">Loading services...</p>
+        </div>
+      }
+    >
+      <ServicesPageContent />
+    </Suspense>
   );
 }
