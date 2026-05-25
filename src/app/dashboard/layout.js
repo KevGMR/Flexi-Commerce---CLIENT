@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/Sidebar";
 import { TopbarNew } from "@/components/topbar/TopbarNew";
 import { useSessionStore } from "@/store/session";
 import { buildLoginRedirect } from "@/lib/auth-redirect";
+import { refreshActiveOrganizationContext } from "@/lib/orgs";
 
 export default function DashboardLayout({ children }) {
   const router = useRouter();
@@ -14,6 +15,7 @@ export default function DashboardLayout({ children }) {
   const hydrated = useSessionStore((s) => s.hydrated);
   const activeOrganization = useSessionStore((s) => s.activeOrganization);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const lastRefreshedOrgId = useRef(null);
   const organizationKey =
     activeOrganization?._id ||
     activeOrganization?.id ||
@@ -30,6 +32,23 @@ export default function DashboardLayout({ children }) {
       router.replace(buildLoginRedirect(nextPath));
     }
   }, [hydrated, accessToken, router]);
+
+  useEffect(() => {
+    if (!hydrated || !accessToken || !activeOrganization) return;
+
+    const orgId =
+      activeOrganization?._id ||
+      activeOrganization?.id ||
+      activeOrganization?.organizationId;
+
+    if (!orgId || lastRefreshedOrgId.current === orgId) return;
+
+    lastRefreshedOrgId.current = orgId;
+
+    refreshActiveOrganizationContext(orgId).catch((error) => {
+      console.warn("Failed to refresh organization permissions", error);
+    });
+  }, [hydrated, accessToken, activeOrganization]);
 
   const isAuthed = Boolean(accessToken);
 

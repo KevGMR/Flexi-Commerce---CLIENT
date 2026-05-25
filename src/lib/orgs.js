@@ -6,6 +6,17 @@ export async function fetchMyOrganizations() {
   return data?.organizations || [];
 }
 
+export async function refreshActiveOrganizationContext(orgId) {
+  if (!orgId) return null;
+
+  const data = await apiFetch(`/organizations/${orgId}`, { method: "GET" });
+  if (data?.organization) {
+    useSessionStore.getState().setActiveOrganization(data.organization);
+    useSessionStore.getState().setPermissions(data.organization.permissions || []);
+  }
+  return data?.organization || null;
+}
+
 export async function switchOrganization(orgId) {
   const data = await apiFetch(`/organizations/${orgId}/switch`, {
     method: "POST",
@@ -18,6 +29,7 @@ export async function switchOrganization(orgId) {
   }
   if (data?.organization) {
     useSessionStore.getState().setActiveOrganization(data.organization);
+    useSessionStore.getState().setPermissions(data.organization.permissions || []);
   }
   return data;
 }
