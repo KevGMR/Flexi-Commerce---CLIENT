@@ -46,6 +46,7 @@ export default function HomePage() {
   const [error, setError] = useState("");
 
   const canViewReports = permissions?.includes(PERMISSIONS.VIEW_REPORTS);
+  const canViewExpenses = permissions?.includes(PERMISSIONS.VIEW_EXPENSES);
 
   useEffect(() => {
     if (!canViewReports) {
@@ -86,7 +87,7 @@ export default function HomePage() {
     return (
       <div className="space-y-4 rounded-lg border border-zinc-200 bg-white p-6 shadow-sm">
         <h1 className="text-2xl font-semibold text-zinc-900">Dashboard</h1>
-        <p className="text-sm text-zinc-600">You don't have permission to view sales data.</p>
+        <p className="text-sm text-zinc-600">You don&apos;t have permission to view sales data.</p>
       </div>
     );
   }
@@ -103,7 +104,7 @@ export default function HomePage() {
       <div>
         <h1 className="text-3xl font-bold text-zinc-900">Sales Dashboard</h1>
         <p className="mt-1 text-sm text-zinc-600">
-          Real-time overview of today's POS sales and system status
+          Real-time overview of today&apos;s POS sales and system status
         </p>
       </div>
 
@@ -136,7 +137,7 @@ export default function HomePage() {
 
       {/* Sales KPIs */}
       <div>
-        <h2 className="mb-4 text-lg font-semibold text-zinc-900">Today's Performance</h2>
+        <h2 className="mb-4 text-lg font-semibold text-zinc-900">Today&apos;s Performance</h2>
         {loading ? (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
             <LoadingCard title="Total Revenue" />
@@ -149,7 +150,7 @@ export default function HomePage() {
             <p className="text-sm text-red-700">{error}</p>
           </div>
         ) : salesData ? (
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <div className={`grid gap-4 md:grid-cols-2 ${canViewExpenses ? "lg:grid-cols-5" : "lg:grid-cols-4"}`}>
             <KPICard
               title="Net Collected"
               value={formatCurrency(salesData.totalRevenue)}
@@ -174,6 +175,14 @@ export default function HomePage() {
               icon="📊"
               subtitle="Average order value"
             />
+            {canViewExpenses && (
+              <KPICard
+                title="Total Expenses"
+                value={formatCurrency(salesData.totalExpenses || 0)}
+                icon="💸"
+                subtitle={`${salesData.totalExpenses ? "Approved expenses" : "No approved expenses"}`}
+              />
+            )}
           </div>
         ) : (
           <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-6 text-center">

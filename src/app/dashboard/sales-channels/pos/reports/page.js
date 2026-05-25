@@ -61,6 +61,7 @@ export default function SalesReportsPage() {
   });
 
   const canViewReports = permissions?.includes(PERMISSIONS.VIEW_REPORTS);
+  const canViewExpenses = permissions?.includes(PERMISSIONS.VIEW_EXPENSES);
 
   useEffect(() => {
     if (!canViewReports) {
@@ -152,7 +153,7 @@ export default function SalesReportsPage() {
     };
 
     fetchReports();
-  }, [canViewReports, filters, pagination.page]);
+  }, [canViewReports, filters, pagination.page, pagination.limit]);
 
   const handleFilterChange = (key, value) => {
     setFilters((prev) => {
@@ -231,7 +232,7 @@ export default function SalesReportsPage() {
     return (
       <div className="space-y-4 rounded-lg border border-zinc-200 bg-white p-6 shadow-sm">
         <h1 className="text-2xl font-semibold text-zinc-900">Sales Reports</h1>
-        <p className="text-sm text-zinc-600">You don't have permission to view sales reports.</p>
+        <p className="text-sm text-zinc-600">You don&apos;t have permission to view sales reports.</p>
       </div>
     );
   }
@@ -552,6 +553,26 @@ export default function SalesReportsPage() {
                     </div>
                   </div>
                 </div>
+                {/* Operating Expenses */}
+                {canViewExpenses && (
+                  <div className="rounded-lg border border-zinc-200 bg-white p-6 shadow-sm">
+                    <h3 className="mb-4 font-semibold text-zinc-900">Operating Expenses</h3>
+                    <div className="space-y-3 text-sm">
+                      <div className="flex items-center justify-between">
+                        <span className="text-zinc-600">Approved Expenses</span>
+                        <span className="font-semibold text-red-600">-{formatCurrency(reportData.totalExpenses || 0)}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-zinc-600">Net Profit (after expenses)</span>
+                        <span className="font-semibold text-green-600">{formatCurrency(reportData.netProfitAfterExpenses || (Number(reportData.netSalesExcludingTax || 0) - Number(reportData.totalExpenses || 0)))}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-zinc-600">Expense / Revenue</span>
+                        <span className="font-semibold text-zinc-900">{reportData.expenseToRevenueRatio || 0}%</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </>
           ) : (
