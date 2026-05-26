@@ -60,6 +60,13 @@ const getLocalDayStartIso = () => {
   return localStart.toISOString();
 };
 
+const PRODUCT_TAB_STORAGE_KEY = "flexi-pos-product-tab";
+const DEFAULT_PRODUCT_TAB = "flexi";
+const PRODUCT_TABS = new Set(["flexi", "services", "shopify"]);
+
+const normalizeProductTab = (value) =>
+  PRODUCT_TABS.has(value) ? value : DEFAULT_PRODUCT_TAB;
+
 export default function PosPage() {
   const router = useRouter();
   const {
@@ -85,7 +92,8 @@ export default function PosPage() {
   const [cart, setCart] = useState([]);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState("cash");
   const [searchQuery, setSearchQuery] = useState("");
-  const [productTab, setProductTab] = useState("all");
+  const [productTab, setProductTab] = useState(DEFAULT_PRODUCT_TAB);
+  const [hasLoadedProductTab, setHasLoadedProductTab] = useState(false);
   const [notes, setNotes] = useState("");
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
@@ -107,6 +115,7 @@ export default function PosPage() {
   const [emailError, setEmailError] = useState("");
   const [sendingEmail, setSendingEmail] = useState(false);
   const [shopifyConnection, setShopifyConnection] = useState(null);
+  const [hasLoadedShopifyConnection, setHasLoadedShopifyConnection] = useState(false);
   const [shopifyProducts, setShopifyProductsState] = useState([]);
   const [serviceProducts, setServiceProductsState] = useState([]);
   const [shopifyLoading, setShopifyLoading] = useState(false);
@@ -124,6 +133,26 @@ export default function PosPage() {
   const [checkingPreviousDayShift, setCheckingPreviousDayShift] = useState(false);
   const [previousDayShiftError, setPreviousDayShiftError] = useState("");
   const [showPreviousDayShiftModal, setShowPreviousDayShiftModal] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const storedProductTab = window.localStorage.getItem(PRODUCT_TAB_STORAGE_KEY);
+    setProductTab(normalizeProductTab(storedProductTab));
+    setHasLoadedProductTab(true);
+  }, []);
+
+  useEffect(() => {
+    if (!hasLoadedProductTab || typeof window === "undefined") return;
+
+    window.localStorage.setItem(PRODUCT_TAB_STORAGE_KEY, productTab);
+  }, [productTab, hasLoadedProductTab]);
+
+  useEffect(() => {
+    if (!hasLoadedShopifyConnection || productTab !== "shopify" || shopifyConnection) return;
+
+    setProductTab(DEFAULT_PRODUCT_TAB);
+  }, [hasLoadedShopifyConnection, productTab, shopifyConnection]);
 
   // Returns mode state
   const [returnMode, setReturnMode] = useState(false);
@@ -351,6 +380,8 @@ export default function PosPage() {
     } catch (err) {
       console.error("Failed to load Shopify connection:", err);
       setShopifyConnection(null);
+    } finally {
+      setHasLoadedShopifyConnection(true);
     }
   };
 
@@ -2084,7 +2115,7 @@ export default function PosPage() {
     const matchesSearch = product.name
       .toLowerCase()
       .includes(searchQuery.toLowerCase());
-    const matchesTab = productTab === "all" || productTab === "services";
+    const matchesTab = productTab === "services";
     return matchesSearch && matchesTab;
   });
 
@@ -2116,7 +2147,7 @@ export default function PosPage() {
     const matchesSearch = p.name
       .toLowerCase()
       .includes(searchQuery.toLowerCase());
-    const matchesTab = productTab === "all" || p.type === productTab;
+    const matchesTab = p.type === productTab;
     return matchesSearch && matchesTab;
   });
   const isPartialReceipt = hasPartialPaymentSignal(receipt);
@@ -2379,12 +2410,6 @@ export default function PosPage() {
             </div>
             <div className="flex gap-2">
               <button
-                onClick={() => setProductTab("all")}
-                className={`px-4 py-2 rounded-lg font-medium ${productTab === "all" ? "bg-blue-500 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}
-              >
-                All
-              </button>
-              <button
                 onClick={() => setProductTab("flexi")}
                 className={`px-4 py-2 rounded-lg font-medium ${productTab === "flexi" ? "bg-blue-500 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}
               >
@@ -2512,7 +2537,7 @@ export default function PosPage() {
               productTab !== "shopify") && (
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                 {/* FLEXI Products */}
-                {(productTab === "all" || productTab === "flexi") &&
+                {productTab === "flexi" &&
                   filteredProducts.map((product) => (
                     <button
                       key={product.id}
@@ -2532,7 +2557,7 @@ export default function PosPage() {
                   ))}
 
                 {/* Services */}
-                {(productTab === "all" || productTab === "services") &&
+                {productTab === "services" &&
                   filteredServiceProducts.map((product) => (
                     <button
                       key={product.id || product._id}
@@ -2555,7 +2580,7 @@ export default function PosPage() {
                   ))}
 
                 {/* Shopify Products */}
-                {(productTab === "all" || productTab === "shopify") &&
+                {productTab === "shopify" &&
                   searchResults.map((product) => (
                     <button
                       key={product.id}

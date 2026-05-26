@@ -181,15 +181,15 @@ Root:
 ### Test 7: Product Tabs in POS
 **Steps:**
 1. Navigate to POS page
-2. See two tabs: "FLEXI Products" and "Shopify Products"
-3. "FLEXI Products" tab active by default
-4. Click "Shopify Products" tab
-5. Tab styling changes (underline moves)
-6. Click "+ Add item"
-7. New item row has type="shopify" by default
-8. Click back to "FLEXI Products"
-9. Click "+ Add item" again
-10. New item has type="flexi" by default
+2. See three tabs: "FLEXI", "Services", and "Shopify" (Shopify only appears when connected)
+3. "FLEXI" tab active by default on a fresh browser state
+4. Click "Services" tab
+5. Navigate away from POS, then return
+6. "Services" tab is restored as the active tab
+7. Click "Shopify" tab
+8. Tab styling changes and Shopify products are shown when connected
+9. Click back to "FLEXI"
+10. The previously selected tab should always be restored on return
 
 **Expected Result:** ✅ Product tabs work correctly
 
