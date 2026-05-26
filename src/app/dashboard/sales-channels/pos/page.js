@@ -17,6 +17,7 @@ import { useSyncManager } from "@/hooks/useSyncManager";
 import { useSessionStore } from "@/store/session";
 import DeliveryCheckoutModal from "@/components/pos/DeliveryCheckoutModal";
 import CompleteCheckoutModal from "@/components/pos/CompleteCheckoutModal";
+import PreviousShiftBlockModal from "@/components/pos/PreviousShiftBlockModal";
 import { printReceiptInBrowser } from "@/lib/receipt/browserPrint";
 import {
   hasPartialPaymentSignal,
@@ -52,6 +53,12 @@ const normalizeSplitPaymentAmounts = (payments = []) =>
     ...payment,
     amount: toNonNegativeAmount(payment?.amount),
   }));
+
+const getLocalDayStartIso = () => {
+  const now = new Date();
+  const localStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return localStart.toISOString();
+};
 
 export default function PosPage() {
   const router = useRouter();
@@ -113,6 +120,10 @@ export default function PosPage() {
   const [refreshDebounceTimer, setRefreshDebounceTimer] = useState(null);
   const [shopifyLocationScope, setShopifyLocationScope] = useState(null);
   const shopifyFetchRequestIdRef = useRef(0);
+  const [previousDayOpenShift, setPreviousDayOpenShift] = useState(null);
+  const [checkingPreviousDayShift, setCheckingPreviousDayShift] = useState(false);
+  const [previousDayShiftError, setPreviousDayShiftError] = useState("");
+  const [showPreviousDayShiftModal, setShowPreviousDayShiftModal] = useState(false);
 
   // Returns mode state
   const [returnMode, setReturnMode] = useState(false);
@@ -258,6 +269,40 @@ export default function PosPage() {
       }
     }
   }, [locationId, locations]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const checkPreviousDayOpenShift = useCallback(async (targetLocationId) => {
+    if (!targetLocationId) return;
+
+    setCheckingPreviousDayShift(true);
+    setPreviousDayShiftError("");
+
+    try {
+      const dayStart = getLocalDayStartIso();
+      const response = await apiFetch(
+        `/shift-sessions/open/previous-day?locationId=${encodeURIComponent(targetLocationId)}&dayStart=${encodeURIComponent(dayStart)}`,
+      );
+      const detectedShift = response?.data?.shift || null;
+      setPreviousDayOpenShift(detectedShift);
+      setShowPreviousDayShiftModal(Boolean(detectedShift));
+    } catch (err) {
+      console.error("Failed to check previous-day shift:", err);
+      setPreviousDayShiftError(err?.message || "Failed to check previous-day shift");
+      setPreviousDayOpenShift(null);
+      setShowPreviousDayShiftModal(false);
+    } finally {
+      setCheckingPreviousDayShift(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!locationId || !locations || !locations.includes(locationId)) {
+      setPreviousDayOpenShift(null);
+      setShowPreviousDayShiftModal(false);
+      return;
+    }
+
+    checkPreviousDayOpenShift(locationId);
+  }, [locationId, locations, checkPreviousDayOpenShift]);
 
   // Load pending sales on mount and when count changes
   useEffect(() => {
@@ -1201,6 +1246,11 @@ export default function PosPage() {
       return;
     }
 
+    if (checkingPreviousDayShift) {
+      setError("Checking shift status. Please wait a moment.");
+      return;
+    }
+
     if (!locationId) {
       setError("Please select a location before completing the sale.");
       if (!locations || locations.length === 0) {
@@ -1213,6 +1263,12 @@ export default function PosPage() {
 
     if (locations && locations.length > 0 && !locations.includes(locationId)) {
       setError("You don't have access to the selected location.");
+      return;
+    }
+
+    if (previousDayOpenShift) {
+      setShowPreviousDayShiftModal(true);
+      setError("Close the previous day's shift before completing a new sale.");
       return;
     }
 
@@ -2235,6 +2291,20 @@ export default function PosPage() {
           </div>
         </div>
       )}
+
+      {/* Previous Day Shift Block Modal */}
+      <PreviousShiftBlockModal
+        isOpen={showPreviousDayShiftModal}
+        shift={previousDayOpenShift}
+        onOpenShiftSessions={() => {
+          router.push("/dashboard/sales-channels/pos/shifts");
+        }}
+        onRecheck={() => {
+          if (locationId) {
+            checkPreviousDayOpenShift(locationId);
+          }
+        }}
+      />
 
       {/* Complete Checkout Modal */}
       <CompleteCheckoutModal
@@ -3461,11 +3531,21 @@ export default function PosPage() {
                   {/* Payments and Delivery Modals Button */}
                   <button
                     onClick={handleCheckout}
-                    disabled={cart.length === 0}
+                    disabled={cart.length === 0 || checkingPreviousDayShift}
                     className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 text-white font-bold py-4 rounded-lg text-lg transition-colors"
                   >
                     Add Payments
                   </button>
+                  {checkingPreviousDayShift && (
+                    <p className="mt-2 text-xs text-gray-500">
+                      Checking whether a previous-day shift is still open...
+                    </p>
+                  )}
+                  {previousDayShiftError && !checkingPreviousDayShift && (
+                    <p className="mt-2 text-xs text-amber-700">
+                      {previousDayShiftError}
+                    </p>
+                  )}
                 </div>
               )}
             </>
