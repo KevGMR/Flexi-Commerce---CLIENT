@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import DeliveryCheckoutModal from './DeliveryCheckoutModal';
 
 export default function CompleteCheckoutModal({
@@ -25,12 +25,146 @@ export default function CompleteCheckoutModal({
   status,
   error,
 }) {
+  const [isProductsExpanded, setIsProductsExpanded] = useState(true);
+  const [isServicesExpanded, setIsServicesExpanded] = useState(true);
   const [showDeliveryModal, setShowDeliveryModal] = useState(false);
   const [deliveryInfo, setDeliveryInfo] = useState(null);
   const [deliveryFee, setDeliveryFee] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   if (!isOpen) return null;
+
+  const getItemName = (item) =>
+    item?.name || item?.productName || item?.title || item?.product?.name || 'Unknown Item';
+
+  const getItemUnitPrice = (item) => Number(item?.price || item?.unitPrice || 0);
+
+  const getItemDiscount = (item) => Number(item?.discount || 0);
+
+  const getBundleComponents = (item) =>
+    Array.isArray(item?.serviceBundleComponents)
+      ? item.serviceBundleComponents
+      : Array.isArray(item?.bundleComponents)
+        ? item.bundleComponents
+        : [];
+
+  const formatMoney = (value) => `$${Number(value || 0).toFixed(2)}`;
+
+  const normalizeCartBreakdown = () => {
+    const products = [];
+    const services = [];
+
+    cart.forEach((item, index) => {
+      const isService = item?.type === 'service';
+      const bundleComponents = getBundleComponents(item);
+      const quantity = Number(item?.quantity || 0);
+      const unitPrice = getItemUnitPrice(item);
+      const discount = getItemDiscount(item);
+
+      const baseEntry = {
+        key: `${item?.variant || index}-${index}`,
+        index,
+        item,
+        name: getItemName(item),
+        quantity,
+        unitPrice,
+        discount,
+        lineTotal: Math.max(0, unitPrice * quantity - discount),
+        bundleComponents,
+      };
+
+      if (isService) {
+        services.push(baseEntry);
+      } else {
+        products.push(baseEntry);
+      }
+    });
+
+    return { products, services };
+  };
+
+  const { products, services } = normalizeCartBreakdown();
+  const hasBreakdownItems = products.length > 0 || services.length > 0;
+
+  const renderBundleComponent = (component, parentQuantity, componentIndex) => {
+    const componentQuantity = Number(component?.quantity || 0);
+    const componentUnitPrice = Number(component?.priceSnapshot || component?.price || 0);
+    const componentTotalQuantity = componentQuantity * parentQuantity;
+    const componentLineTotal = Math.max(0, componentUnitPrice * componentTotalQuantity);
+    const componentName =
+      component?.nameSnapshot || component?.name || component?.serviceName || 'Bundle Component';
+
+    return (
+      <div
+        key={`${component?.serviceProductId || componentName}-${componentIndex}`}
+        className="ml-6 border-l border-dashed border-gray-300 pl-4"
+      >
+        <div className="flex items-start justify-between gap-3 py-2">
+          <div className="min-w-0">
+            <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+              Component
+            </div>
+            <div className="font-medium text-gray-800 truncate">{componentName}</div>
+            <div className="mt-1 text-xs text-gray-500">
+              {component?.skuSnapshot ? `SKU ${component.skuSnapshot} · ` : ''}
+              {componentQuantity} per bundle · {formatMoney(componentUnitPrice)} each
+            </div>
+          </div>
+          <div className="text-right text-sm">
+            <div className="font-semibold text-gray-900">{formatMoney(componentLineTotal)}</div>
+            <div className="text-xs text-gray-500">{componentTotalQuantity} total units</div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderItemRow = (entry, itemType) => {
+    const isBundle = entry.bundleComponents.length > 0;
+
+    return (
+      <div key={entry.key} className="rounded-lg border border-gray-200 bg-white px-3 py-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h4 className="font-medium text-gray-900 truncate">{entry.name}</h4>
+              <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${itemType === 'service' ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>
+                {itemType === 'service' ? 'Service' : 'Product'}
+              </span>
+              {isBundle && (
+                <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-gray-600">
+                  Bundle
+                </span>
+              )}
+            </div>
+            <div className="mt-1 text-xs text-gray-500">
+              Qty {entry.quantity} · {formatMoney(entry.unitPrice)} each
+              {entry.item?.sku ? ` · SKU ${entry.item.sku}` : ''}
+            </div>
+            {entry.discount > 0 && (
+              <div className="mt-1 text-xs font-medium text-green-600">
+                Discount {formatMoney(entry.discount)}
+              </div>
+            )}
+          </div>
+          <div className="text-right">
+            <div className="text-base font-bold text-gray-900">{formatMoney(entry.lineTotal)}</div>
+            {entry.discount > 0 && (
+              <div className="text-xs text-gray-500">Before discount {formatMoney(entry.unitPrice * entry.quantity)}</div>
+            )}
+          </div>
+        </div>
+
+        {isBundle && (
+          <div className="mt-2 space-y-1 rounded-md bg-gray-50 px-2 py-2">
+            {entry.bundleComponents.map((component, componentIndex) =>
+              renderBundleComponent(component, entry.quantity, componentIndex),
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
 
   const handleDeliveryConfirm = (deliveryData, fee) => {
     setDeliveryInfo(deliveryData);
@@ -83,6 +217,55 @@ export default function CompleteCheckoutModal({
         <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
           <h2 className="text-2xl font-bold text-gray-900 mb-6">Complete Sale</h2>
 
+          {/* Cart Breakdown */}
+          {hasBreakdownItems && (
+            <div className="bg-gray-50 rounded-lg p-4 mb-6 space-y-4">
+              <h3 className="font-semibold text-gray-900">Cart Breakdown</h3>
+
+              {products.length > 0 && (
+                <div className="border border-amber-200 rounded-lg bg-white overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => setIsProductsExpanded((prev) => !prev)}
+                    className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-amber-50 transition-colors"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-gray-900">Products</span>
+                      <span className="text-xs text-gray-500">{products.length} item{products.length === 1 ? '' : 's'}</span>
+                    </div>
+                    <span className="text-gray-600">{isProductsExpanded ? '−' : '+'}</span>
+                  </button>
+                  {isProductsExpanded && (
+                    <div className="space-y-2 border-t border-amber-100 p-3">
+                      {products.map((entry) => renderItemRow(entry, 'product'))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {services.length > 0 && (
+                <div className="border border-blue-200 rounded-lg bg-white overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => setIsServicesExpanded((prev) => !prev)}
+                    className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-blue-50 transition-colors"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-gray-900">Services</span>
+                      <span className="text-xs text-gray-500">{services.length} item{services.length === 1 ? '' : 's'}</span>
+                    </div>
+                    <span className="text-gray-600">{isServicesExpanded ? '−' : '+'}</span>
+                  </button>
+                  {isServicesExpanded && (
+                    <div className="space-y-2 border-t border-blue-100 p-3">
+                      {services.map((entry) => renderItemRow(entry, 'service'))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Order Summary */}
           <div className="bg-gray-50 rounded-lg p-4 mb-6">
             <h3 className="font-semibold text-gray-900 mb-3">Order Summary</h3>
@@ -128,7 +311,6 @@ export default function CompleteCheckoutModal({
             </button>
 
             {/* Delivery Summary */}
-            {console.log(deliveryInfo)}
             {deliveryInfo && (
               
               <div className="border-t px-4 py-3 bg-blue-50 space-y-2 text-sm">
