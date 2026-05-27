@@ -525,6 +525,10 @@ export default function PosPage() {
       price: product.price,
       quantity: 1,
       discount: 0,
+      serviceKind: product.serviceKind,
+      serviceBundleComponents: Array.isArray(product.serviceBundleComponents)
+        ? product.serviceBundleComponents.map((component) => ({ ...component }))
+        : undefined,
     };
 
     if (exchangeMode) {
