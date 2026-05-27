@@ -918,6 +918,22 @@ export default function SalesReportsPage() {
                         }}
                       />
                     </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm text-zinc-600">Services</span>
+                      <span className="text-lg font-semibold text-zinc-900">{reportData.itemsSold?.service || 0}</span>
+                    </div>
+                    <div className="h-2 overflow-hidden rounded-full bg-zinc-200">
+                      <div
+                        className="h-full bg-violet-600"
+                        style={{
+                          width: `${
+                            reportData.itemsSold?.total > 0
+                              ? ((reportData.itemsSold?.service || 0) / reportData.itemsSold.total) * 100
+                              : 0
+                          }%`,
+                        }}
+                      />
+                    </div>
                   </div>
                 </div>
 
