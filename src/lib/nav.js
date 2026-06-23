@@ -57,6 +57,7 @@ export const navItems = [
       { label: "Sales Reports", href: "/dashboard/sales-channels/pos/reports", permission: PERMISSIONS.VIEW_REPORTS },
       { label: "Shift Sessions", href: "/dashboard/sales-channels/pos/shifts", permission: PERMISSIONS.CREATE_SALE },
       { label: "Reconciliation", href: "/dashboard/sales-channels/pos/reconciliation", permission: PERMISSIONS.MANAGE_FINANCE },
+      { label: "Commissions", href: "/dashboard/sales-channels/pos/commissions", permission: PERMISSIONS.VIEW_REPORTS },
     ],
   },
   {
@@ -65,6 +66,7 @@ export const navItems = [
     permission: PERMISSIONS.VIEW_SETTINGS,
     children: [
       { label: "User Info", href: "/dashboard/settings/user-info", permission: PERMISSIONS.VIEW_SETTINGS },
+      { label: "Users", href: "/dashboard/settings/users", permission: PERMISSIONS.VIEW_USERS },
       { label: "Invitations", href: "/dashboard/settings/invitations", permission: PERMISSIONS.VIEW_USERS },
       { label: "Locations", href: "/dashboard/settings/locations", permission: PERMISSIONS.VIEW_INVENTORY },
       { label: "Delivery Categories", href: "/dashboard/settings/delivery-categories", permission: PERMISSIONS.MANAGE_INVENTORY },

@@ -14,6 +14,9 @@ const createEmptyForm = () => ({
   status: "active",
   serviceKind: "single",
   tags: "",
+  // NEW: commission fields
+  commissionType: "percentage",
+  commissionValue: "",
 });
 
 const createBundleRow = (initial = {}) => ({
@@ -114,6 +117,12 @@ function ServicesPageContent() {
       status: service.status || "active",
       serviceKind: service.serviceKind || "single",
       tags: Array.isArray(service.tags) ? service.tags.join(", ") : "",
+      // NEW: commission fields
+      commissionType: service.commissionType || "percentage",
+      commissionValue:
+        service.commissionValue !== undefined && service.commissionValue !== null
+          ? String(service.commissionValue)
+          : "",
     });
 
     const existingRows = Array.isArray(service.serviceBundleComponents)
@@ -214,6 +223,17 @@ function ServicesPageContent() {
       return;
     }
 
+    // Validate commission
+    const commissionValue = toNumberOrZero(form.commissionValue);
+    if (commissionValue < 0) {
+      setError("Commission value cannot be negative.");
+      return;
+    }
+    if (form.commissionType === "percentage" && commissionValue > 100) {
+      setError("Percentage commission cannot exceed 100%.");
+      return;
+    }
+
     let normalizedRows = [];
     if (form.serviceKind === "bundle") {
       normalizedRows = bundleRows
@@ -259,6 +279,9 @@ function ServicesPageContent() {
           .map((tag) => tag.trim())
           .filter(Boolean),
         trackInventory: false,
+        // NEW: commission fields
+        commissionType: form.commissionType,
+        commissionValue: commissionValue,
       };
 
       let response;
@@ -293,7 +316,7 @@ function ServicesPageContent() {
     const target = services.find((service) => (service._id || service.id) === serviceId);
     if (!target) return;
 
-    if (!window.confirm(`Delete service \"${target.name}\"?`)) {
+    if (!window.confirm(`Delete service "${target.name}"?`)) {
       return;
     }
 
@@ -446,6 +469,10 @@ function ServicesPageContent() {
                         <div className="mt-2 text-sm text-zinc-600">
                           ${Number(service.price || 0).toFixed(2)}
                         </div>
+                        {/* Show commission preview */}
+                        <div className="mt-1 text-xs text-zinc-500">
+                          Commission: {service.commissionType === "percentage" ? `${service.commissionValue || 0}%` : `$${Number(service.commissionValue || 0).toFixed(2)}`}
+                        </div>
                         {service.description ? (
                           <div className="mt-2 text-xs text-zinc-500 line-clamp-2">{service.description}</div>
                         ) : null}
@@ -502,245 +529,280 @@ function ServicesPageContent() {
 
         {selectedServiceId ? (
           <form onSubmit={handleSubmit} className="space-y-5 rounded-lg border border-zinc-200 bg-white p-6 shadow-sm">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-semibold text-zinc-900">
-                {selectedServiceId ? "Edit Service" : "Create Service"}
-              </h2>
-              <p className="text-sm text-zinc-600">
-                Bundle services can store a snapshot of each component and still sell as one item.
-              </p>
-            </div>
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={resetEditor}
-                className="rounded border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
-              >
-                Reset
-              </button>
-              <button
-                type="submit"
-                disabled={saving || (!selectedServiceId && !canCreate) || (selectedServiceId && !canEdit)}
-                className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {saving ? "Saving..." : selectedServiceId ? "Update Service" : "Create Service"}
-              </button>
-            </div>
-          </div>
-
-          {error ? (
-            <div className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-              {error}
-            </div>
-          ) : null}
-
-          {statusMessage ? (
-            <div className="rounded border border-green-200 bg-green-50 p-3 text-sm text-green-700">
-              {statusMessage}
-            </div>
-          ) : null}
-
-          <div className="grid gap-4 md:grid-cols-2">
-            <div>
-              <label className="text-xs font-medium text-zinc-700">Name *</label>
-              <input
-                name="name"
-                value={form.name}
-                onChange={handleFieldChange}
-                className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
-                placeholder="Service name"
-                required
-              />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-zinc-700">SKU *</label>
-              <input
-                name="sku"
-                value={form.sku}
-                onChange={handleFieldChange}
-                className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
-                placeholder="SERVICE-001"
-                required
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="text-xs font-medium text-zinc-700">Description</label>
-            <textarea
-              name="description"
-              value={form.description}
-              onChange={handleFieldChange}
-              rows={3}
-              className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
-              placeholder="Describe the service, scope, or inclusions"
-            />
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-3">
-            <div>
-              <label className="text-xs font-medium text-zinc-700">Price *</label>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                name="price"
-                value={form.price}
-                onChange={handleFieldChange}
-                className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
-                placeholder="0.00"
-                required
-              />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-zinc-700">Status</label>
-              <select
-                name="status"
-                value={form.status}
-                onChange={handleFieldChange}
-                className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
-              >
-                <option value="active">Active</option>
-                <option value="draft">Draft</option>
-                <option value="archived">Archived</option>
-              </select>
-            </div>
-            <div>
-              <label className="text-xs font-medium text-zinc-700">Service Type</label>
-              <select
-                name="serviceKind"
-                value={form.serviceKind}
-                onChange={(event) => {
-                  const nextKind = event.target.value;
-                  setForm((previous) => ({ ...previous, serviceKind: nextKind }));
-                  if (nextKind !== "bundle") {
-                    setBundleRows([createBundleRow()]);
-                  }
-                }}
-                className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
-              >
-                <option value="single">Single service</option>
-                <option value="bundle">Bundle service</option>
-              </select>
-            </div>
-          </div>
-
-          <div>
-            <label className="text-xs font-medium text-zinc-700">Tags</label>
-            <input
-              name="tags"
-              value={form.tags}
-              onChange={handleFieldChange}
-              className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
-              placeholder="spa, premium, consultation"
-            />
-          </div>
-
-          {form.serviceKind === "bundle" ? (
-            <div className="space-y-4 rounded-lg border border-blue-200 bg-blue-50 p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <h3 className="text-sm font-semibold text-zinc-900">Bundle Editor</h3>
-                  <p className="text-xs text-zinc-600">
-                    Group existing services into one sellable service line.
-                  </p>
-                </div>
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold text-zinc-900">
+                  {selectedServiceId ? "Edit Service" : "Create Service"}
+                </h2>
+                <p className="text-sm text-zinc-600">
+                  Bundle services can store a snapshot of each component and still sell as one item.
+                </p>
+              </div>
+              <div className="flex gap-2">
                 <button
                   type="button"
-                  onClick={addBundleRow}
-                  className="rounded bg-blue-600 px-3 py-2 text-xs font-medium text-white hover:bg-blue-700"
+                  onClick={resetEditor}
+                  className="rounded border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
                 >
-                  Add Component
+                  Reset
+                </button>
+                <button
+                  type="submit"
+                  disabled={saving || (!selectedServiceId && !canCreate) || (selectedServiceId && !canEdit)}
+                  className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {saving ? "Saving..." : selectedServiceId ? "Update Service" : "Create Service"}
                 </button>
               </div>
+            </div>
 
-              <div className="space-y-3">
-                {bundleRows.map((row, index) => (
-                  <div key={index} className="rounded border border-blue-200 bg-white p-4">
-                    <div className="grid gap-3 md:grid-cols-[1.1fr_100px_1fr_1fr_120px]">
-                      <div>
-                        <label className="text-[11px] font-medium text-zinc-700">Service</label>
-                        <select
-                          value={row.serviceProductId}
-                          onChange={(event) => updateBundleRow(index, "serviceProductId", event.target.value)}
-                          className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
-                        >
-                          <option value="">Select service</option>
-                          {bundleServiceOptions.map((service) => {
-                            const serviceId = service._id || service.id;
-                            return (
-                              <option key={serviceId} value={serviceId}>
-                                {service.name} ({service.sku})
-                              </option>
-                            );
-                          })}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="text-[11px] font-medium text-zinc-700">Qty</label>
-                        <input
-                          type="number"
-                          min="1"
-                          step="1"
-                          value={row.quantity}
-                          onChange={(event) => updateBundleRow(index, "quantity", event.target.value)}
-                          className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[11px] font-medium text-zinc-700">Name snapshot</label>
-                        <input
-                          value={row.nameSnapshot}
-                          onChange={(event) => updateBundleRow(index, "nameSnapshot", event.target.value)}
-                          className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
-                          placeholder="Component name"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[11px] font-medium text-zinc-700">SKU snapshot</label>
-                        <input
-                          value={row.skuSnapshot}
-                          onChange={(event) => updateBundleRow(index, "skuSnapshot", event.target.value)}
-                          className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
-                          placeholder="Component SKU"
-                        />
-                      </div>
-                      <div className="flex items-end gap-2">
-                        <div className="flex-1">
-                          <label className="text-[11px] font-medium text-zinc-700">Price snapshot</label>
+            {error ? (
+              <div className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                {error}
+              </div>
+            ) : null}
+
+            {statusMessage ? (
+              <div className="rounded border border-green-200 bg-green-50 p-3 text-sm text-green-700">
+                {statusMessage}
+              </div>
+            ) : null}
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <label className="text-xs font-medium text-zinc-700">Name *</label>
+                <input
+                  name="name"
+                  value={form.name}
+                  onChange={handleFieldChange}
+                  className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                  placeholder="Service name"
+                  required
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-zinc-700">SKU *</label>
+                <input
+                  name="sku"
+                  value={form.sku}
+                  onChange={handleFieldChange}
+                  className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                  placeholder="SERVICE-001"
+                  required
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs font-medium text-zinc-700">Description</label>
+              <textarea
+                name="description"
+                value={form.description}
+                onChange={handleFieldChange}
+                rows={3}
+                className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                placeholder="Describe the service, scope, or inclusions"
+              />
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-3">
+              <div>
+                <label className="text-xs font-medium text-zinc-700">Price *</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  name="price"
+                  value={form.price}
+                  onChange={handleFieldChange}
+                  className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                  placeholder="0.00"
+                  required
+                />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-zinc-700">Status</label>
+                <select
+                  name="status"
+                  value={form.status}
+                  onChange={handleFieldChange}
+                  className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                >
+                  <option value="active">Active</option>
+                  <option value="draft">Draft</option>
+                  <option value="archived">Archived</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-zinc-700">Service Type</label>
+                <select
+                  name="serviceKind"
+                  value={form.serviceKind}
+                  onChange={(event) => {
+                    const nextKind = event.target.value;
+                    setForm((previous) => ({ ...previous, serviceKind: nextKind }));
+                    if (nextKind !== "bundle") {
+                      setBundleRows([createBundleRow()]);
+                    }
+                  }}
+                  className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                >
+                  <option value="single">Single service</option>
+                  <option value="bundle">Bundle service</option>
+                </select>
+              </div>
+            </div>
+
+            {/* NEW: Commission section */}
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
+              <h3 className="text-sm font-semibold text-zinc-900 mb-2">Commission Default</h3>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div>
+                  <label className="text-xs font-medium text-zinc-700">Commission Type</label>
+                  <select
+                    name="commissionType"
+                    value={form.commissionType}
+                    onChange={handleFieldChange}
+                    className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                  >
+                    <option value="percentage">Percentage</option>
+                    <option value="fixed">Fixed Amount ($)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-zinc-700">Commission Value</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step={form.commissionType === "percentage" ? "1" : "0.01"}
+                    name="commissionValue"
+                    value={form.commissionValue}
+                    onChange={handleFieldChange}
+                    className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                    placeholder={form.commissionType === "percentage" ? "e.g., 10" : "e.g., 5.00"}
+                  />
+                  <p className="mt-1 text-[10px] text-zinc-500">
+                    {form.commissionType === "percentage" ? "Percentage of service price (e.g. 10 = 10%)" : "Fixed dollar amount per service"}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs font-medium text-zinc-700">Tags</label>
+              <input
+                name="tags"
+                value={form.tags}
+                onChange={handleFieldChange}
+                className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                placeholder="spa, premium, consultation"
+              />
+            </div>
+
+            {form.serviceKind === "bundle" ? (
+              <div className="space-y-4 rounded-lg border border-blue-200 bg-blue-50 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-zinc-900">Bundle Editor</h3>
+                    <p className="text-xs text-zinc-600">
+                      Group existing services into one sellable service line.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={addBundleRow}
+                    className="rounded bg-blue-600 px-3 py-2 text-xs font-medium text-white hover:bg-blue-700"
+                  >
+                    Add Component
+                  </button>
+                </div>
+
+                <div className="space-y-3">
+                  {bundleRows.map((row, index) => (
+                    <div key={index} className="rounded border border-blue-200 bg-white p-4">
+                      <div className="grid gap-3 md:grid-cols-[1.1fr_100px_1fr_1fr_120px]">
+                        <div>
+                          <label className="text-[11px] font-medium text-zinc-700">Service</label>
+                          <select
+                            value={row.serviceProductId}
+                            onChange={(event) => updateBundleRow(index, "serviceProductId", event.target.value)}
+                            className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                          >
+                            <option value="">Select service</option>
+                            {bundleServiceOptions.map((service) => {
+                              const serviceId = service._id || service.id;
+                              return (
+                                <option key={serviceId} value={serviceId}>
+                                  {service.name} ({service.sku})
+                                </option>
+                              );
+                            })}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-[11px] font-medium text-zinc-700">Qty</label>
                           <input
                             type="number"
-                            min="0"
-                            step="0.01"
-                            value={row.priceSnapshot}
-                            onChange={(event) => updateBundleRow(index, "priceSnapshot", event.target.value)}
+                            min="1"
+                            step="1"
+                            value={row.quantity}
+                            onChange={(event) => updateBundleRow(index, "quantity", event.target.value)}
                             className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
-                            placeholder="0.00"
                           />
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => removeBundleRow(index)}
-                          className="rounded border border-red-200 px-3 py-2 text-xs font-medium text-red-700 hover:bg-red-50"
-                        >
-                          Remove
-                        </button>
+                        <div>
+                          <label className="text-[11px] font-medium text-zinc-700">Name snapshot</label>
+                          <input
+                            value={row.nameSnapshot}
+                            onChange={(event) => updateBundleRow(index, "nameSnapshot", event.target.value)}
+                            className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                            placeholder="Component name"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[11px] font-medium text-zinc-700">SKU snapshot</label>
+                          <input
+                            value={row.skuSnapshot}
+                            onChange={(event) => updateBundleRow(index, "skuSnapshot", event.target.value)}
+                            className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                            placeholder="Component SKU"
+                          />
+                        </div>
+                        <div className="flex items-end gap-2">
+                          <div className="flex-1">
+                            <label className="text-[11px] font-medium text-zinc-700">Price snapshot</label>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={row.priceSnapshot}
+                              onChange={(event) => updateBundleRow(index, "priceSnapshot", event.target.value)}
+                              className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                              placeholder="0.00"
+                            />
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => removeBundleRow(index)}
+                            className="rounded border border-red-200 px-3 py-2 text-xs font-medium text-red-700 hover:bg-red-50"
+                          >
+                            Remove
+                          </button>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
 
-              <div className="rounded border border-blue-200 bg-white p-3 text-sm text-zinc-700">
-                Bundle snapshot total: ${bundlePreviewTotal.toFixed(2)}
+                <div className="rounded border border-blue-200 bg-white p-3 text-sm text-zinc-700">
+                  Bundle snapshot total: ${bundlePreviewTotal.toFixed(2)}
+                </div>
               </div>
-            </div>
-          ) : (
-            <div className="rounded border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-600">
-              Single services sell as one line item. Switch to bundle mode if this service should contain other services.
-            </div>
-          )}
+            ) : (
+              <div className="rounded border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-600">
+                Single services sell as one line item. Switch to bundle mode if this service should contain other services.
+              </div>
+            )}
 
             <div className="flex flex-wrap gap-2">
               <button

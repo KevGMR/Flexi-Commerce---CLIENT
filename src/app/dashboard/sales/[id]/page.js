@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { apiFetch } from "@/lib/api-client";
 import { PERMISSIONS } from "@/lib/permissions";
+import { searchShopifyProducts } from "@/lib/indexeddb";
 import { useSessionStore } from "@/store/session";
 import { printReceiptInBrowser } from "@/lib/receipt/browserPrint";
 import { mapSaleToReceipt } from "@/lib/receipt/receiptMappers";
@@ -28,6 +29,19 @@ export default function SaleDetailPage() {
   const [showReallocatePaymentModal, setShowReallocatePaymentModal] = useState(false);
   const [submittingReallocation, setSubmittingReallocation] = useState(false);
   const [reallocationFormError, setReallocationFormError] = useState("");
+  const [showEditReservationModal, setShowEditReservationModal] = useState(false);
+  const [submittingReservationEdit, setSubmittingReservationEdit] = useState(false);
+  const [reservationEditError, setReservationEditError] = useState("");
+  const [productsLoading, setProductsLoading] = useState(false);
+  const [editableProducts, setEditableProducts] = useState([]);
+  const [reservationEditMode, setReservationEditMode] = useState("replace");
+  const [selectedEditLineIndex, setSelectedEditLineIndex] = useState(0);
+  const [reservationSearchQuery, setReservationSearchQuery] = useState("");
+  const [reservationSourceTab, setReservationSourceTab] = useState("flexi");
+  const [searchResults, setSearchResults] = useState([]);
+  const [shopifyResults, setShopifyResults] = useState([]);
+  const [shopifyLoading, setShopifyLoading] = useState(false);
+  const [selectedShopifyVariant, setSelectedShopifyVariant] = useState(null);
   const [copyReceiptStatus, setCopyReceiptStatus] = useState("");
   const [reallocationForm, setReallocationForm] = useState({
     fromAllocations: [{ paymentIndex: "", amount: "" }],
@@ -43,13 +57,62 @@ export default function SaleDetailPage() {
     cardBrand: "",
     notes: "",
   });
+  const [reservationEditForm, setReservationEditForm] = useState({
+    productType: "flexi",
+    productId: "",
+    quantity: "1",
+    unitPrice: "",
+    discount: "0",
+    recipientName: "",
+    recipientPhone: "",
+    recipientEmail: "",
+    deliveryCategory: "",
+    deliveryOption: "",
+    street: "",
+    city: "",
+    state: "",
+    postalCode: "",
+    country: "Kenya",
+    landmark: "",
+    notes: "",
+  });
 
   const canViewSalesHistory = permissions?.includes(PERMISSIONS.VIEW_SALE_HISTORY);
   const canCreateDeliveryFees = permissions?.includes(PERMISSIONS.DELIVERY_FEES_CREATE);
   const canCollectPayment = permissions?.includes(PERMISSIONS.CREATE_SALE);
   const canEditSale = permissions?.includes(PERMISSIONS.EDIT_SALE);
 
-  const fetchSaleById = async () => {
+  const roundCurrency = (value) => Math.round(Number(value || 0) * 100) / 100;
+
+  const saleItems = Array.isArray(sale?.items) ? sale.items : [];
+  const selectedEditLine = saleItems[selectedEditLineIndex] || saleItems[0] || null;
+  const reservationSourceProducts = useMemo(() => {
+    return reservationSourceTab === "service"
+      ? editableProducts.filter((product) => product.type === "service")
+      : editableProducts.filter((product) => product.type !== "service");
+  }, [editableProducts, reservationSourceTab]);
+
+  const calculateReplacementPreview = (baseItem, draft) => {
+    const quantity = Number(draft?.quantity || baseItem?.quantity || 1);
+    const unitPrice = Number(draft?.unitPrice || baseItem?.unitPrice || 0);
+    const discount = Number(draft?.discount || baseItem?.discount || 0);
+    const lineTotal = Math.max(0, quantity * unitPrice - discount);
+    return {
+      quantity,
+      unitPrice,
+      discount,
+      lineTotal,
+      delta: roundCurrency(lineTotal - Number(baseItem?.lineTotal || 0)),
+    };
+  };
+
+  const getLineLabel = (item) => {
+    if (!item) return "Unknown line";
+    const typeLabel = item.type === "shopify" ? "Shopify" : item.type === "service" ? "Service" : "FLEXI";
+    return `${item.productName || "Unnamed item"} · ${typeLabel}`;
+  };
+
+  const fetchSaleById = useCallback(async () => {
     try {
       setLoading(true);
       const response = await apiFetch(`/sales/${params.id}`);
@@ -66,9 +129,9 @@ export default function SaleDetailPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [params.id]);
 
-  const fetchReceivable = async () => {
+  const fetchReceivable = useCallback(async () => {
     if (!params.id) return;
 
     try {
@@ -84,6 +147,20 @@ export default function SaleDetailPage() {
     } finally {
       setLoadingReceivable(false);
     }
+  }, [params.id]);
+
+  const fetchEditableProducts = async () => {
+    try {
+      setProductsLoading(true);
+      const response = await apiFetch("/products?status=active&limit=200");
+      const products = response?.data?.products || response?.products || [];
+      setEditableProducts(Array.isArray(products) ? products : []);
+    } catch (err) {
+      console.error("Failed to fetch editable products:", err);
+      setEditableProducts([]);
+    } finally {
+      setProductsLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -93,7 +170,7 @@ export default function SaleDetailPage() {
     }
 
     fetchSaleById();
-  }, [params.id, canViewSalesHistory]);
+  }, [params.id, canViewSalesHistory, fetchSaleById]);
 
   // Fetch delivery if sale has deliveryFeeId
   useEffect(() => {
@@ -117,7 +194,7 @@ export default function SaleDetailPage() {
   useEffect(() => {
     if (!sale?._id) return;
     fetchReceivable();
-  }, [sale?._id]);
+  }, [sale?._id, fetchReceivable]);
 
   const formatCurrency = (value) => {
     return new Intl.NumberFormat("en-US", {
@@ -555,12 +632,266 @@ export default function SaleDetailPage() {
     }
   };
 
+  const handleOpenReservationEdit = async () => {
+    router.push(`/dashboard/sales/${sale._id}/edit`);
+  };
+
+  useEffect(() => {
+    if (!showEditReservationModal) return;
+
+    if (selectedEditLine) {
+      const nextTab = selectedEditLine.type === "service" ? "service" : selectedEditLine.type === "shopify" ? "shopify" : "flexi";
+      setReservationSourceTab(nextTab);
+      setReservationEditForm((prev) => ({
+        ...prev,
+        productType: nextTab,
+        productId: nextTab === "shopify" ? "" : selectedEditLine.productId || "",
+        quantity: String(selectedEditLine.quantity || 1),
+        unitPrice: String(selectedEditLine.unitPrice || ""),
+        discount: String(selectedEditLine.discount || 0),
+      }));
+    }
+  }, [selectedEditLineIndex, selectedEditLine, showEditReservationModal]);
+
+  useEffect(() => {
+    if (!showEditReservationModal) return;
+
+    if (reservationSourceTab === "shopify") {
+      let cancelled = false;
+      const timeoutId = setTimeout(async () => {
+        setShopifyLoading(true);
+        try {
+          const results = await searchShopifyProducts(reservationSearchQuery || "", 50);
+          if (!cancelled) {
+            setShopifyResults(Array.isArray(results) ? results : []);
+          }
+        } catch (err) {
+          if (!cancelled) {
+            console.error("Failed to search Shopify products:", err);
+            setShopifyResults([]);
+          }
+        } finally {
+          if (!cancelled) {
+            setShopifyLoading(false);
+          }
+        }
+      }, 180);
+
+      return () => {
+        cancelled = true;
+        clearTimeout(timeoutId);
+      };
+    }
+
+    const lowerQuery = reservationSearchQuery.trim().toLowerCase();
+    const filtered = !lowerQuery
+      ? reservationSourceProducts.slice(0, 50)
+      : reservationSourceProducts.filter((product) => {
+          const haystack = [product.name, product.sku, product.productType, product.type].filter(Boolean).join(" ").toLowerCase();
+          return haystack.includes(lowerQuery);
+        });
+
+    setSearchResults(filtered.slice(0, 50));
+  }, [reservationSearchQuery, reservationSourceTab, reservationSourceProducts, showEditReservationModal]);
+
+  const handleReservationEditFieldChange = (field, value) => {
+    setReservationEditForm((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+  };
+
+  const handleReservationEditProductChange = (productId) => {
+    const selected = editableProducts.find((product) => String(product._id) === String(productId));
+
+    setReservationEditForm((prev) => ({
+      ...prev,
+      productId,
+      unitPrice:
+        selected && Number.isFinite(Number(selected.price))
+          ? String(selected.price)
+          : prev.unitPrice,
+      productType: selected?.type === "service" ? "service" : "flexi",
+    }));
+  };
+
+  const handleSelectShopifyProduct = (product, variant = null) => {
+    setSelectedShopifyVariant({ product, variant });
+    setReservationEditForm((prev) => ({
+      ...prev,
+      productType: "shopify",
+      productId: "",
+      unitPrice: variant?.price !== undefined ? String(variant.price) : prev.unitPrice,
+    }));
+  };
+
+  const handleSubmitReservationEdit = async (event) => {
+    event.preventDefault();
+    setReservationEditError("");
+
+    const quantity = Number(reservationEditForm.quantity || 0);
+    const unitPrice = Number(reservationEditForm.unitPrice || 0);
+    const discount = Number(reservationEditForm.discount || 0);
+
+    if (!selectedEditLine) {
+      setReservationEditError("Select a line to edit");
+      return;
+    }
+
+    if (reservationEditMode === "remove") {
+      try {
+        setSubmittingReservationEdit(true);
+        await apiFetch(`/sales/${sale._id}/reservation`, {
+          method: "PATCH",
+          body: { edits: [{ action: "remove", itemIndex: selectedEditLineIndex }] },
+        });
+        setShowEditReservationModal(false);
+        await Promise.all([fetchSaleById(), fetchReceivable()]);
+      } catch (err) {
+        console.error("Failed to remove line:", err);
+        setReservationEditError(err.message || "Failed to remove line");
+      } finally {
+        setSubmittingReservationEdit(false);
+      }
+      return;
+    }
+
+    if (reservationEditMode === "decrement") {
+      if (!Number.isFinite(quantity) || quantity <= 0) {
+        setReservationEditError("Decrease amount must be greater than zero");
+        return;
+      }
+
+      try {
+        setSubmittingReservationEdit(true);
+        await apiFetch(`/sales/${sale._id}/reservation`, {
+          method: "PATCH",
+          body: { edits: [{ action: "decrement", itemIndex: selectedEditLineIndex, decrementBy: quantity }] },
+        });
+        setShowEditReservationModal(false);
+        await Promise.all([fetchSaleById(), fetchReceivable()]);
+      } catch (err) {
+        console.error("Failed to decrement line:", err);
+        setReservationEditError(err.message || "Failed to decrement line");
+      } finally {
+        setSubmittingReservationEdit(false);
+      }
+      return;
+    }
+
+    if (reservationEditForm.productType !== "shopify" && !reservationEditForm.productId) {
+      setReservationEditError("Select a replacement product");
+      return;
+    }
+
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      setReservationEditError("Quantity must be greater than zero");
+      return;
+    }
+
+    if (!Number.isFinite(unitPrice) || unitPrice < 0) {
+      setReservationEditError("Unit price must be zero or greater");
+      return;
+    }
+
+    if (!Number.isFinite(discount) || discount < 0) {
+      setReservationEditError("Discount must be zero or greater");
+      return;
+    }
+
+    try {
+      setSubmittingReservationEdit(true);
+
+      // Build replacementItem based on selected type
+      let replacementItemPayload = null;
+      if (reservationEditForm.productType === "shopify") {
+        if (!selectedShopifyVariant || !selectedShopifyVariant.product) {
+          setReservationEditError("Select a Shopify product/variant");
+          setSubmittingReservationEdit(false);
+          return;
+        }
+
+        const variant = selectedShopifyVariant.variant;
+        const product = selectedShopifyVariant.product;
+        const variantId = variant ? variant.id : null;
+        const productName = product?.title + (variant ? ` - ${variant.title}` : "");
+
+        replacementItemPayload = {
+          type: "shopify",
+          shopifyVariantId: variantId || undefined,
+          productName,
+          sku: variant?.sku || "",
+          quantity,
+          unitPrice,
+          discount,
+        };
+      } else {
+        replacementItemPayload = {
+          type: reservationEditForm.productType,
+          productId: reservationEditForm.productId,
+          quantity,
+          unitPrice,
+          discount,
+        };
+      }
+
+      const payload = {
+        edits: [
+          {
+            action: "replace",
+            itemIndex: selectedEditLineIndex,
+            replacementItem: replacementItemPayload,
+          },
+        ],
+        notes: reservationEditForm.notes,
+      };
+
+      if (sale?.deliveryFeeId) {
+        payload.recipientName = reservationEditForm.recipientName;
+        payload.recipientPhone = reservationEditForm.recipientPhone;
+        payload.recipientEmail = reservationEditForm.recipientEmail;
+        payload.deliveryCategory = reservationEditForm.deliveryCategory;
+        payload.deliveryOption = reservationEditForm.deliveryOption;
+        payload.deliveryAddress = {
+          street: reservationEditForm.street,
+          city: reservationEditForm.city,
+          state: reservationEditForm.state,
+          postalCode: reservationEditForm.postalCode,
+          country: reservationEditForm.country,
+          landmark: reservationEditForm.landmark,
+        };
+      }
+
+      await apiFetch(`/sales/${sale._id}/reservation`, {
+        method: "PATCH",
+        body: payload,
+      });
+
+      setShowEditReservationModal(false);
+      await Promise.all([fetchSaleById(), fetchReceivable()]);
+
+      if (sale?.deliveryFeeId) {
+        try {
+          const deliveryResponse = await apiFetch(`/delivery-fees/${sale.deliveryFeeId}`);
+          const deliveryData = deliveryResponse?.data || deliveryResponse;
+          setDelivery(deliveryData || null);
+        } catch (deliveryErr) {
+          console.error("Failed to refresh delivery after reservation edit:", deliveryErr);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to edit reservation:", err);
+      setReservationEditError(err.message || "Failed to update reservation");
+    } finally {
+      setSubmittingReservationEdit(false);
+    }
+  };
 
   if (!canViewSalesHistory) {
     return (
       <div className="space-y-4 rounded-lg border border-zinc-200 bg-white p-6 shadow-sm">
         <h1 className="text-2xl font-semibold text-zinc-900">Sale Details</h1>
-        <p className="text-sm text-zinc-600">You don't have permission to view sale details.</p>
+        <p className="text-sm text-zinc-600">You don&apos;t have permission to view sale details.</p>
         <button
           onClick={() => router.back()}
           className="mt-4 rounded bg-zinc-600 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700"
@@ -607,18 +938,63 @@ export default function SaleDetailPage() {
   const displayedPayments =
     sale?.effectivePayments?.length > 0 ? sale.effectivePayments : sale?.payments || [];
   const correctablePayments = getCorrectablePayments();
+  const selectedEditLineBaseTotal = Number(selectedEditLine?.lineTotal || 0);
+  const selectedEditLineCurrentTotal = Number(selectedEditLine?.lineTotal || 0);
+  const selectedBeforeLabel = selectedEditLine?.productName || "Selected line";
+  const selectedAfterLabel =
+    reservationEditMode === "remove"
+      ? "Removed"
+      : reservationEditMode === "decrement"
+        ? `${Math.max(0, Number(selectedEditLine?.quantity || 0) - Number(reservationEditForm.quantity || 0))} remaining`
+        : reservationEditForm.productType === "shopify" && selectedShopifyVariant
+          ? `${selectedShopifyVariant.product?.title || "Shopify item"}${selectedShopifyVariant.variant?.title ? ` · ${selectedShopifyVariant.variant.title}` : ""}`
+          : reservationEditForm.productId
+            ? `${reservationEditForm.productType === "service" ? "Service" : "FLEXI"} replacement`
+            : "Awaiting selection";
+  const selectedReplacementPreview = (() => {
+    if (!selectedEditLine) return null;
+
+    if (reservationEditMode === "remove") {
+      return { lineTotal: 0, delta: roundCurrency(-selectedEditLineBaseTotal) };
+    }
+
+    if (reservationEditMode === "decrement") {
+      const decrementBy = Math.min(Number(reservationEditForm.quantity || 0), Number(selectedEditLine.quantity || 0));
+      const remainingQty = Math.max(0, Number(selectedEditLine.quantity || 0) - (Number.isFinite(decrementBy) ? decrementBy : 0));
+      const lineTotal = roundCurrency(remainingQty * Number(selectedEditLine.unitPrice || 0));
+      return { lineTotal, delta: roundCurrency(lineTotal - selectedEditLineBaseTotal) };
+    }
+
+    if (reservationEditForm.productType === "shopify" && selectedShopifyVariant) {
+      const previewQty = Number(reservationEditForm.quantity || 1);
+      const previewUnit = Number(selectedShopifyVariant.variant?.price ?? reservationEditForm.unitPrice ?? 0);
+      const lineTotal = roundCurrency(Math.max(0, previewQty * previewUnit - Number(reservationEditForm.discount || 0)));
+      return { lineTotal, delta: roundCurrency(lineTotal - selectedEditLineBaseTotal) };
+    }
+
+    const preview = calculateReplacementPreview(selectedEditLine, reservationEditForm);
+    return { lineTotal: preview.lineTotal, delta: preview.delta };
+  })();
 
   return (
     <div className="space-y-6">
       {/* Header Actions */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <button
           onClick={() => router.back()}
           className="rounded bg-zinc-600 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700"
         >
           ← Go Back
         </button>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2 sm:justify-end">
+          {canEditSale && sale.status === "completed" && (
+            <button
+              onClick={handleOpenReservationEdit}
+              className="rounded bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700"
+            >
+              Edit Reservation
+            </button>
+          )}
           <button
             onClick={handlePrintOrder}
             className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
@@ -1084,7 +1460,582 @@ export default function SaleDetailPage() {
         </div>
       </div>
 
-      {/* Create Delivery Modal */}
+      {/* Edit Reservation Modal */}
+      {showEditReservationModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/60 px-3 py-4 backdrop-blur-sm sm:px-4 sm:py-6">
+          <div className="flex h-[94vh] w-full max-w-6xl flex-col overflow-hidden rounded-3xl bg-white shadow-2xl ring-1 ring-zinc-200">
+            <div className="flex items-start justify-between gap-4 border-b border-zinc-200 px-4 py-4 sm:px-6 sm:py-5">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">Edit order</p>
+                <h2 className="mt-1 text-xl font-bold text-zinc-900 sm:text-2xl">Reservation editor</h2>
+                <p className="mt-1 text-sm text-zinc-600">
+                  Update one selected line at a time while keeping payment history intact.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowEditReservationModal(false)}
+                className="rounded-full p-2 text-zinc-500 hover:bg-zinc-100 hover:text-zinc-800"
+                aria-label="Close editor"
+              >
+                ✕
+              </button>
+            </div>
+
+            {reservationEditError && (
+              <div className="mx-4 mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 sm:mx-6">
+                {reservationEditError}
+              </div>
+            )}
+
+            <div className="grid flex-1 gap-0 overflow-hidden lg:grid-cols-[1.45fr_0.85fr]">
+              <form onSubmit={handleSubmitReservationEdit} className="flex min-h-0 flex-col overflow-hidden border-zinc-200 lg:border-r">
+                <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
+                  <div className="rounded-2xl border border-zinc-200 bg-zinc-50/70 p-4 sm:p-5">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">Current sale lines</p>
+                        <h3 className="mt-1 text-lg font-semibold text-zinc-900">Select a line to edit</h3>
+                      </div>
+                      <div className="rounded-full bg-white px-3 py-1 text-xs font-medium text-zinc-600 ring-1 ring-zinc-200">
+                        {saleItems.length} line{saleItems.length === 1 ? "" : "s"}
+                      </div>
+                    </div>
+
+                    <div className="mt-4 space-y-3">
+                      {saleItems.map((item, index) => {
+                        const isSelected = index === selectedEditLineIndex;
+                        return (
+                          <button
+                            key={`${item.productName || item.sku || item.type}-${index}`}
+                            type="button"
+                            onClick={() => {
+                              setSelectedEditLineIndex(index);
+                              const nextTab = item.type === "service" ? "service" : item.type === "shopify" ? "shopify" : "flexi";
+                              setReservationSourceTab(nextTab);
+                              setReservationEditMode("replace");
+                              setReservationSearchQuery("");
+                              setShopifyResults([]);
+                              setSearchResults([]);
+                              setSelectedShopifyVariant(null);
+                            }}
+                            className={`flex w-full items-center gap-4 rounded-2xl border px-4 py-3 text-left transition ${
+                              isSelected
+                                ? "border-violet-300 bg-white shadow-sm ring-1 ring-violet-200"
+                                : "border-zinc-200 bg-white hover:border-zinc-300 hover:bg-zinc-50"
+                            }`}
+                          >
+                            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-100 text-sm font-semibold text-zinc-700">
+                              {index + 1}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2">
+                                <p className="truncate font-semibold text-zinc-900">{item.productName || item.sku || "Unnamed line"}</p>
+                                <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-zinc-600">
+                                  {item.type}
+                                </span>
+                              </div>
+                              <div className="mt-1 flex flex-wrap gap-3 text-sm text-zinc-500">
+                                <span>Qty {item.quantity || 0}</span>
+                                <span>{formatCurrency(item.unitPrice || 0)} each</span>
+                                <span>{formatCurrency(item.lineTotal || 0)}</span>
+                              </div>
+                            </div>
+                          </button>
+                        );
+                      })}
+                      {saleItems.length === 0 && (
+                        <div className="rounded-2xl border border-dashed border-zinc-300 bg-white px-4 py-6 text-sm text-zinc-500">
+                          No editable lines were found on this sale.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">Selected line</p>
+                        <h3 className="mt-1 text-lg font-semibold text-zinc-900">{getLineLabel(selectedEditLine)}</h3>
+                      </div>
+                      <div className="flex rounded-full bg-zinc-100 p-1 text-sm font-medium text-zinc-600">
+                        {[
+                          { key: "replace", label: "Replace" },
+                          { key: "decrement", label: "Decrease" },
+                          { key: "remove", label: "Remove" },
+                        ].map((mode) => (
+                          <button
+                            key={mode.key}
+                            type="button"
+                            onClick={() => setReservationEditMode(mode.key)}
+                            className={`rounded-full px-3 py-1.5 transition ${
+                              reservationEditMode === mode.key
+                                ? "bg-white text-zinc-900 shadow-sm ring-1 ring-zinc-200"
+                                : "hover:text-zinc-900"
+                            }`}
+                          >
+                            {mode.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="mt-4 grid gap-3 md:grid-cols-3 md:gap-4">
+                      <div className="rounded-2xl bg-zinc-50 p-4">
+                        <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">Current line</p>
+                        <p className="mt-2 text-lg font-semibold text-zinc-900">{formatCurrency(selectedEditLineCurrentTotal)}</p>
+                      </div>
+                      <div className="rounded-2xl bg-violet-50 p-4">
+                        <p className="text-xs font-medium uppercase tracking-wide text-violet-700">Preview change</p>
+                        <p className={`mt-2 text-lg font-semibold ${selectedReplacementPreview?.delta < 0 ? "text-emerald-700" : selectedReplacementPreview?.delta > 0 ? "text-rose-700" : "text-zinc-900"}`}>
+                          {selectedReplacementPreview ? `${selectedReplacementPreview.delta > 0 ? "+" : ""}${formatCurrency(Math.abs(selectedReplacementPreview.delta || 0))}` : "—"}
+                        </p>
+                      </div>
+                      <div className="rounded-2xl bg-zinc-50 p-4">
+                        <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">Estimated line total</p>
+                        <p className="mt-2 text-lg font-semibold text-zinc-900">
+                          {selectedReplacementPreview ? formatCurrency(selectedReplacementPreview.lineTotal) : "—"}
+                        </p>
+                      </div>
+                    </div>
+
+                    {reservationEditMode === "replace" && (
+                      <div className="mt-5 space-y-5">
+                        <div>
+                          <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">Replacement source</p>
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {[
+                              { key: "flexi", label: "FLEXI" },
+                              { key: "service", label: "Services" },
+                              { key: "shopify", label: "Shopify" },
+                            ].map((tab) => (
+                              <button
+                                key={tab.key}
+                                type="button"
+                                onClick={() => {
+                                  setReservationSourceTab(tab.key);
+                                  setReservationSearchQuery("");
+                                  setSelectedShopifyVariant(null);
+                                }}
+                                className={`rounded-full px-4 py-2 text-sm font-medium transition ${
+                                  reservationSourceTab === tab.key
+                                    ? "bg-zinc-900 text-white"
+                                    : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
+                                }`}
+                              >
+                                {tab.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 sm:p-5">
+                          <label className="block text-sm font-medium text-zinc-700">Search {reservationSourceTab === "shopify" ? "Shopify" : reservationSourceTab}</label>
+                          <input
+                            type="search"
+                            value={reservationSearchQuery}
+                            onChange={(e) => setReservationSearchQuery(e.target.value)}
+                            placeholder={reservationSourceTab === "shopify" ? "Search Shopify products or SKU" : `Search ${reservationSourceTab} products`}
+                            className="mt-2 w-full rounded-2xl border border-zinc-300 bg-white px-4 py-3 text-sm outline-none ring-0 focus:border-zinc-400"
+                            disabled={submittingReservationEdit}
+                          />
+
+                          <div className="mt-4 max-h-72 space-y-3 overflow-auto pr-1">
+                            {reservationSourceTab === "shopify" ? (
+                              shopifyLoading ? (
+                                <div className="rounded-2xl border border-dashed border-zinc-300 bg-white px-4 py-8 text-center text-sm text-zinc-500">
+                                  Loading Shopify products...
+                                </div>
+                              ) : shopifyResults.length > 0 ? (
+                                shopifyResults.map((product) => (
+                                  <div key={product.id} className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+                                    <div className="flex items-start justify-between gap-3">
+                                      <div>
+                                        <p className="font-semibold text-zinc-900">{product.title}</p>
+                                        <p className="text-sm text-zinc-500">{product.vendor || "Shopify"}</p>
+                                      </div>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleSelectShopifyProduct(product, null)}
+                                        className="rounded-full bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-violet-700"
+                                      >
+                                        Select
+                                      </button>
+                                    </div>
+
+                                    {Array.isArray(product.variants) && product.variants.length > 1 && (
+                                      <div className="mt-3 grid gap-2 md:grid-cols-[1fr_auto] md:items-center">
+                                        <select
+                                          className="w-full rounded-xl border border-zinc-300 px-3 py-2 text-sm"
+                                          onChange={(e) => {
+                                            const variant = product.variants.find((entry) => String(entry.id) === String(e.target.value));
+                                            if (variant) {
+                                              setReservationEditForm((prev) => ({
+                                                ...prev,
+                                                unitPrice: String(variant.price ?? (prev.unitPrice || 0)),
+                                              }));
+                                              setSelectedShopifyVariant({ product, variant });
+                                            }
+                                          }}
+                                          value={selectedShopifyVariant?.product?.id === product.id ? selectedShopifyVariant?.variant?.id || "" : ""}
+                                        >
+                                          <option value="">Choose variant</option>
+                                          {product.variants.map((variant) => (
+                                            <option key={variant.id} value={variant.id}>
+                                              {variant.title} {variant.sku ? `• ${variant.sku}` : ""} • {formatCurrency(variant.price)}
+                                            </option>
+                                          ))}
+                                        </select>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleSelectShopifyProduct(product, selectedShopifyVariant?.product?.id === product.id ? selectedShopifyVariant.variant : product.variants[0])}
+                                          className="rounded-xl border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+                                        >
+                                          Use selected variant
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+                                ))
+                              ) : (
+                                <div className="rounded-2xl border border-dashed border-zinc-300 bg-white px-4 py-8 text-center text-sm text-zinc-500">
+                                  No Shopify products match this search.
+                                </div>
+                              )
+                            ) : searchResults.length > 0 ? (
+                              searchResults.map((product) => (
+                                <button
+                                  key={product._id}
+                                  type="button"
+                                  onClick={() => {
+                                    setReservationEditForm((prev) => ({
+                                      ...prev,
+                                      productId: product._id,
+                                      productType: reservationSourceTab,
+                                      unitPrice: Number.isFinite(Number(product.price)) ? String(product.price) : prev.unitPrice,
+                                    }));
+                                  }}
+                                  className="flex w-full items-center justify-between rounded-2xl border border-zinc-200 bg-white px-4 py-3 text-left hover:border-violet-300 hover:bg-violet-50"
+                                >
+                                  <div>
+                                    <p className="font-medium text-zinc-900">{product.name}</p>
+                                    <p className="text-sm text-zinc-500">{product.sku || "No SKU"}</p>
+                                  </div>
+                                  <div className="text-right text-sm text-zinc-600">
+                                    <p>{formatCurrency(product.price || 0)}</p>
+                                    <p className="text-xs uppercase tracking-wide text-zinc-400">{product.type}</p>
+                                  </div>
+                                </button>
+                              ))
+                            ) : (
+                              <div className="rounded-2xl border border-dashed border-zinc-300 bg-white px-4 py-8 text-center text-sm text-zinc-500">
+                                No products available for this section.
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="grid gap-4 md:grid-cols-3">
+                          <div>
+                            <label className="block text-sm font-medium text-zinc-700">
+                              {reservationEditMode === "decrement" ? "Decrease by" : "Quantity"}
+                            </label>
+                            <input
+                              type="number"
+                              min="1"
+                              step="1"
+                              value={reservationEditForm.quantity}
+                              onChange={(event) => handleReservationEditFieldChange("quantity", event.target.value)}
+                              disabled={submittingReservationEdit}
+                              className="mt-1 w-full rounded-2xl border border-zinc-300 px-4 py-3 text-sm"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-zinc-700">Unit Price</label>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={reservationEditForm.unitPrice}
+                              onChange={(event) => handleReservationEditFieldChange("unitPrice", event.target.value)}
+                              disabled={submittingReservationEdit || reservationSourceTab === "shopify"}
+                              className="mt-1 w-full rounded-2xl border border-zinc-300 px-4 py-3 text-sm disabled:bg-zinc-100"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-zinc-700">Discount</label>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={reservationEditForm.discount}
+                              onChange={(event) => handleReservationEditFieldChange("discount", event.target.value)}
+                              disabled={submittingReservationEdit || reservationEditMode !== "replace"}
+                              className="mt-1 w-full rounded-2xl border border-zinc-300 px-4 py-3 text-sm disabled:bg-zinc-100"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {reservationEditMode === "decrement" && (
+                      <div className="mt-5 space-y-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                        <p>
+                          Reduce the selected line by the amount below. The line will be removed automatically if it reaches zero.
+                        </p>
+                        <div className="rounded-2xl border border-amber-200 bg-white p-4 shadow-sm">
+                          <label className="block text-sm font-medium text-zinc-700">Quantity reducer</label>
+                          <div className="mt-2 flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleReservationEditFieldChange(
+                                  "quantity",
+                                  String(Math.max(1, Number(reservationEditForm.quantity || 1) - 1)),
+                                )
+                              }
+                              disabled={submittingReservationEdit || Number(reservationEditForm.quantity || 1) <= 1}
+                              className="flex h-11 w-11 items-center justify-center rounded-xl border border-zinc-300 bg-zinc-50 text-lg font-semibold text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+                              aria-label="Reduce quantity"
+                            >
+                              −
+                            </button>
+                            <input
+                              type="number"
+                              min="1"
+                              step="1"
+                              value={reservationEditForm.quantity}
+                              onChange={(event) => handleReservationEditFieldChange("quantity", event.target.value)}
+                              disabled={submittingReservationEdit}
+                              className="w-full rounded-2xl border border-zinc-300 px-4 py-3 text-sm"
+                            />
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleReservationEditFieldChange(
+                                  "quantity",
+                                  String(Number(reservationEditForm.quantity || 1) + 1),
+                                )
+                              }
+                              disabled={submittingReservationEdit}
+                              className="flex h-11 w-11 items-center justify-center rounded-xl border border-zinc-300 bg-zinc-50 text-lg font-semibold text-zinc-700 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+                              aria-label="Increase quantity"
+                            >
+                              +
+                            </button>
+                          </div>
+                          <p className="mt-2 text-xs text-amber-800">This amount will be subtracted from the selected line.</p>
+                        </div>
+                      </div>
+                    )}
+
+                    {reservationEditMode === "remove" && (
+                      <div className="mt-5 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">
+                        Removing this line will delete it from the reservation while keeping already recorded payments intact.
+                      </div>
+                    )}
+
+                    {sale?.deliveryFeeId && (
+                      <div className="mt-6 space-y-4 rounded-2xl border border-zinc-200 bg-zinc-50/80 p-5">
+                        <div>
+                          <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">Delivery details</p>
+                          <p className="mt-1 text-sm text-zinc-600">Edit the delivery recipient or address if this reservation still requires delivery.</p>
+                        </div>
+                        <div className="grid gap-4 md:grid-cols-2">
+                          <div>
+                            <label className="block text-sm font-medium text-zinc-700">Recipient Name</label>
+                            <input
+                              type="text"
+                              value={reservationEditForm.recipientName}
+                              onChange={(event) => handleReservationEditFieldChange("recipientName", event.target.value)}
+                              disabled={submittingReservationEdit}
+                              className="mt-1 w-full rounded-2xl border border-zinc-300 px-4 py-3 text-sm"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-zinc-700">Recipient Phone</label>
+                            <input
+                              type="text"
+                              value={reservationEditForm.recipientPhone}
+                              onChange={(event) => handleReservationEditFieldChange("recipientPhone", event.target.value)}
+                              disabled={submittingReservationEdit}
+                              className="mt-1 w-full rounded-2xl border border-zinc-300 px-4 py-3 text-sm"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="grid gap-4 md:grid-cols-2">
+                          <div>
+                            <label className="block text-sm font-medium text-zinc-700">Delivery Category</label>
+                            <input
+                              type="text"
+                              value={reservationEditForm.deliveryCategory}
+                              onChange={(event) => handleReservationEditFieldChange("deliveryCategory", event.target.value)}
+                              disabled={submittingReservationEdit}
+                              className="mt-1 w-full rounded-2xl border border-zinc-300 px-4 py-3 text-sm"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-zinc-700">Delivery Option</label>
+                            <input
+                              type="text"
+                              value={reservationEditForm.deliveryOption}
+                              onChange={(event) => handleReservationEditFieldChange("deliveryOption", event.target.value)}
+                              disabled={submittingReservationEdit}
+                              className="mt-1 w-full rounded-2xl border border-zinc-300 px-4 py-3 text-sm"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="grid gap-3 md:grid-cols-2">
+                          <input
+                            type="text"
+                            placeholder="Street"
+                            value={reservationEditForm.street}
+                            onChange={(event) => handleReservationEditFieldChange("street", event.target.value)}
+                            disabled={submittingReservationEdit}
+                            className="w-full rounded-2xl border border-zinc-300 px-4 py-3 text-sm"
+                          />
+                          <input
+                            type="text"
+                            placeholder="City"
+                            value={reservationEditForm.city}
+                            onChange={(event) => handleReservationEditFieldChange("city", event.target.value)}
+                            disabled={submittingReservationEdit}
+                            className="w-full rounded-2xl border border-zinc-300 px-4 py-3 text-sm"
+                          />
+                          <input
+                            type="text"
+                            placeholder="State"
+                            value={reservationEditForm.state}
+                            onChange={(event) => handleReservationEditFieldChange("state", event.target.value)}
+                            disabled={submittingReservationEdit}
+                            className="w-full rounded-2xl border border-zinc-300 px-4 py-3 text-sm"
+                          />
+                          <input
+                            type="text"
+                            placeholder="Postal Code"
+                            value={reservationEditForm.postalCode}
+                            onChange={(event) => handleReservationEditFieldChange("postalCode", event.target.value)}
+                            disabled={submittingReservationEdit}
+                            className="w-full rounded-2xl border border-zinc-300 px-4 py-3 text-sm"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+                      <label className="block text-sm font-medium text-zinc-700">Internal Note</label>
+                      <textarea
+                        rows={4}
+                        value={reservationEditForm.notes}
+                        onChange={(event) => handleReservationEditFieldChange("notes", event.target.value)}
+                        disabled={submittingReservationEdit}
+                        className="mt-2 w-full rounded-2xl border border-zinc-300 px-4 py-3 text-sm"
+                      />
+                    </div>
+                  </div>
+
+                </div>
+
+                <div className="border-t border-zinc-200 bg-white px-4 py-4 sm:px-6">
+                  <div className="flex flex-col gap-3 sm:flex-row">
+                    <button
+                      type="button"
+                      onClick={() => setShowEditReservationModal(false)}
+                      disabled={submittingReservationEdit}
+                      className="flex-1 rounded-2xl border border-zinc-300 px-4 py-3 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={submittingReservationEdit || saleItems.length === 0}
+                      className="flex-1 rounded-2xl bg-zinc-900 px-4 py-3 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-50"
+                    >
+                      {submittingReservationEdit
+                        ? "Saving..."
+                        : reservationEditMode === "remove"
+                          ? "Remove line"
+                          : reservationEditMode === "decrement"
+                            ? "Apply decrement"
+                            : "Save changes"}
+                    </button>
+                  </div>
+                </div>
+              </form>
+
+              <aside className="flex min-h-0 flex-col bg-zinc-50/80 px-4 py-4 sm:px-6 sm:py-5">
+                <div className="rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm">
+                  <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">Summary</p>
+                  <div className="mt-4 space-y-4">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-zinc-600">Current total</span>
+                      <span className="font-semibold text-zinc-900">{formatCurrency(sale.totalAmount)}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-zinc-600">Estimated edited total</span>
+                      <span className="font-semibold text-zinc-900">
+                        {selectedReplacementPreview
+                          ? formatCurrency(roundCurrency(Number(sale.totalAmount || 0) - selectedEditLineBaseTotal + selectedReplacementPreview.lineTotal))
+                          : formatCurrency(sale.totalAmount)}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-zinc-600">Paid</span>
+                      <span className="font-semibold text-emerald-700">{formatCurrency(receivable?.totalPaid || 0)}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-zinc-600">Balance due</span>
+                      <span className="font-semibold text-amber-700">{formatCurrency(receivable?.balanceDue || 0)}</span>
+                    </div>
+                  </div>
+
+                  <div className="mt-5 rounded-2xl bg-zinc-50 p-4 text-sm text-zinc-600">
+                    <p className="font-medium text-zinc-900">Selected action</p>
+                    <p className="mt-1 capitalize">{reservationEditMode}</p>
+                    <p className="mt-3 text-xs leading-5 text-zinc-500">
+                      The final server-side recalculation keeps payments intact and updates totals, receivable, and delivery data in place.
+                    </p>
+                  </div>
+
+                  {saleItems.length > 0 && (
+                    <div className="mt-5 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+                      <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">Visual diff preview</p>
+                      <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto_1fr] sm:items-stretch">
+                        <div className="rounded-2xl bg-zinc-50 p-4">
+                          <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-500">Before</p>
+                          <p className="mt-2 font-semibold text-zinc-900">{selectedBeforeLabel}</p>
+                          <div className="mt-3 space-y-1 text-sm text-zinc-600">
+                            <p>Qty: {selectedEditLine?.quantity || 0}</p>
+                            <p>Unit: {formatCurrency(selectedEditLine?.unitPrice || 0)}</p>
+                            <p>Total: {formatCurrency(selectedEditLine?.lineTotal || 0)}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-center text-zinc-400">
+                          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-zinc-100 text-lg font-semibold">→</div>
+                        </div>
+                        <div className="rounded-2xl bg-violet-50 p-4">
+                          <p className="text-[11px] font-semibold uppercase tracking-wide text-violet-700">After</p>
+                          <p className="mt-2 font-semibold text-zinc-900">{selectedAfterLabel}</p>
+                          <div className="mt-3 space-y-1 text-sm text-zinc-600">
+                            <p>Mode: {reservationEditMode}</p>
+                            <p>Line total: {selectedReplacementPreview ? formatCurrency(selectedReplacementPreview.lineTotal) : "—"}</p>
+                            <p className={`font-semibold ${selectedReplacementPreview?.delta < 0 ? "text-emerald-700" : selectedReplacementPreview?.delta > 0 ? "text-rose-700" : "text-zinc-900"}`}>
+                              Change: {selectedReplacementPreview ? `${selectedReplacementPreview.delta > 0 ? "+" : ""}${formatCurrency(Math.abs(selectedReplacementPreview.delta || 0))}` : "—"}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </aside>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showCreateDeliveryModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
           <div className="w-full max-w-2xl rounded-lg bg-white p-8 shadow-xl">

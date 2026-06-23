@@ -14,6 +14,9 @@ const createEmptyForm = () => ({
   status: "active",
   serviceKind: "single",
   tags: "",
+  // NEW: commission fields
+  commissionType: "percentage",
+  commissionValue: "",
 });
 
 const createBundleRow = (initial = {}) => ({
@@ -113,6 +116,17 @@ export default function NewServicePage() {
       return;
     }
 
+    // Validate commission
+    const commissionValue = toNumberOrZero(form.commissionValue);
+    if (commissionValue < 0) {
+      setError("Commission value cannot be negative.");
+      return;
+    }
+    if (form.commissionType === "percentage" && commissionValue > 100) {
+      setError("Percentage commission cannot exceed 100%.");
+      return;
+    }
+
     let normalizedRows = [];
     if (form.serviceKind === "bundle") {
       normalizedRows = bundleRows
@@ -155,6 +169,9 @@ export default function NewServicePage() {
         status: form.status,
         tags: form.tags.split(",").map((t) => t.trim()).filter(Boolean),
         trackInventory: false,
+        // NEW: commission fields
+        commissionType: form.commissionType,
+        commissionValue: commissionValue,
       };
 
       const response = await apiFetch("/products", { method: "POST", body: payload });
@@ -218,6 +235,41 @@ export default function NewServicePage() {
               <option value="single">Single service</option>
               <option value="bundle">Bundle service</option>
             </select>
+          </div>
+        </div>
+
+        {/* NEW: Commission section */}
+        <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
+          <h3 className="text-sm font-semibold text-zinc-900 mb-2">Commission Default</h3>
+          <div className="grid gap-3 md:grid-cols-2">
+            <div>
+              <label className="text-xs font-medium text-zinc-700">Commission Type</label>
+              <select
+                name="commissionType"
+                value={form.commissionType}
+                onChange={handleFieldChange}
+                className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+              >
+                <option value="percentage">Percentage</option>
+                <option value="fixed">Fixed Amount ($)</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-zinc-700">Commission Value</label>
+              <input
+                type="number"
+                min="0"
+                step={form.commissionType === "percentage" ? "1" : "0.01"}
+                name="commissionValue"
+                value={form.commissionValue}
+                onChange={handleFieldChange}
+                className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                placeholder={form.commissionType === "percentage" ? "e.g., 10" : "e.g., 5.00"}
+              />
+              <p className="mt-1 text-[10px] text-zinc-500">
+                {form.commissionType === "percentage" ? "Percentage of service price (e.g. 10 = 10%)" : "Fixed dollar amount per service"}
+              </p>
+            </div>
           </div>
         </div>
 
