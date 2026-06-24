@@ -164,8 +164,12 @@ export default function PosPage() {
   const [saleAssignedUser, setSaleAssignedUser] = useState(null);
   const [showAttachModal, setShowAttachModal] = useState(false);
   const [pendingServiceProduct, setPendingServiceProduct] = useState(null);
-  const [showAttachDropdown, setShowAttachDropdown] = useState(false);
-  const [attachDropdownItemIndex, setAttachDropdownItemIndex] = useState(null);
+
+  // Attach with Quantity modal
+  const [showAttachQuantityModal, setShowAttachQuantityModal] = useState(false);
+  const [attachQuantityProductIndex, setAttachQuantityProductIndex] = useState(null);
+  const [attachQuantityValue, setAttachQuantityValue] = useState(1);
+  const [attachModalSelectedServiceIndex, setAttachModalSelectedServiceIndex] = useState(null);
 
   // Return mode state
   const [returnMode, setReturnMode] = useState(false);
@@ -396,7 +400,6 @@ export default function PosPage() {
       const products = res?.data?.products || res?.products || [];
       setServiceProductsState(products);
 
-      // Build map for commission lookup
       const productMap = {};
       products.forEach(p => {
         productMap[p._id || p.id] = {
@@ -414,7 +417,6 @@ export default function PosPage() {
     }
   }, [activeOrganization]);
 
-  // Load Shopify products and cache them - memoized to fix exhaustive-deps warning
   const loadShopifyProductsData = useCallback(async () => {
     console.log("[POS] loadShopifyProductsData called");
     if (!shopifyConnection?.status) {
@@ -507,7 +509,7 @@ export default function PosPage() {
     }
   }, [shopifyConnection?.status, locationId, loadShopifyProductsData]);
 
-  // NEW: Fetch users for assignment
+  // Fetch users for assignment
   useEffect(() => {
     const loadUsers = async () => {
       try {
@@ -574,7 +576,7 @@ export default function PosPage() {
     }
   }, [saleAssignedUser, serviceProductMap, users]);
 
-  // Cart operations with attach mode
+  // Cart operations
   const upsertCartItem = (targetCart, setTargetCart, cartItem) => {
     const existingIndex = targetCart.findIndex(
       (item) => item.variant === cartItem.variant,
@@ -624,7 +626,6 @@ export default function PosPage() {
       defaultCommissionValue: null,
     };
 
-    // If it's a service, compute commission
     if (product.type === "service") {
       const assignedUserId = saleAssignedUser || null;
       const assignedUser = assignedUserId
@@ -667,24 +668,56 @@ export default function PosPage() {
     }
   };
 
-  const attachToService = (itemIndex, serviceIndex) => {
-    const updatedCart = [...cart];
-    const item = updatedCart[itemIndex];
-    item.parentItemIndex = serviceIndex;
-    // If it's a product, set its price to 0 and store original
-    if (item.type !== "service") {
-      item.originalPrice = item.price;
-      item.price = 0;
+  const splitAndAttachItem = (productIndex, serviceIndex, attachQty) => {
+    const newCart = [...cart];
+    const product = newCart[productIndex];
+    if (!product || product.type === "service") return;
+    const originalQty = product.quantity;
+    const originalPrice = product.price;
+
+    if (attachQty <= 0 || attachQty > originalQty) return;
+
+    if (attachQty === originalQty) {
+      product.parentItemIndex = serviceIndex;
+      product.originalPrice = originalPrice;
+      product.price = 0;
+      setCart(newCart);
+    } else {
+      const remainingQty = originalQty - attachQty;
+      product.quantity = remainingQty;
+      product.parentItemIndex = null;
+      product.price = originalPrice;
+
+      const childItem = {
+        ...product,
+        quantity: attachQty,
+        parentItemIndex: serviceIndex,
+        price: 0,
+        originalPrice: originalPrice,
+      };
+      newCart.splice(productIndex + 1, 0, childItem);
+      setCart(newCart);
     }
-    setCart(updatedCart);
-    setShowAttachDropdown(false);
-    setAttachDropdownItemIndex(null);
+    setShowAttachQuantityModal(false);
+  };
+
+  const openAttachQuantityModal = (productIndex) => {
+    const serviceIndexes = cart
+      .map((item, idx) => (item.type === "service" ? idx : -1))
+      .filter(idx => idx !== -1);
+    if (serviceIndexes.length === 0) {
+      setError("No services in cart to attach to.");
+      return;
+    }
+    setAttachQuantityProductIndex(productIndex);
+    setAttachQuantityValue(cart[productIndex].quantity);
+    setAttachModalSelectedServiceIndex(serviceIndexes[0]);
+    setShowAttachQuantityModal(true);
   };
 
   const detachFromService = (itemIndex) => {
     const updatedCart = [...cart];
     const item = updatedCart[itemIndex];
-    // Restore original price if available
     if (item.originalPrice !== null && item.originalPrice !== undefined) {
       item.price = item.originalPrice;
     }
@@ -702,7 +735,14 @@ export default function PosPage() {
     setAttachingServiceIndex(null);
   };
 
-  // Update other cart functions
+  const toggleAttachMode = (index) => {
+    if (attachMode && attachingServiceIndex === index) {
+      stopAttach();
+    } else {
+      startAttach(index);
+    }
+  };
+
   const updateQuantity = (index, newQty) => {
     if (newQty <= 0) {
       removeFromCart(index);
@@ -1167,8 +1207,6 @@ export default function PosPage() {
         body: payload,
       });
 
-      const refundData = res?.data || res;
-
       const returnReceiptInfo = {
         receiptNumber: `RETURN-${originalSale.receiptNumber}`,
         originalReceiptNumber: originalSale.receiptNumber,
@@ -1437,7 +1475,6 @@ export default function PosPage() {
 
     setError("");
 
-    // Validate all services have assigned user
     const servicesWithNoUser = cart.filter(item => {
       if (item.type !== "service") return false;
       return !item.assignedUser && !saleAssignedUser;
@@ -1508,7 +1545,6 @@ export default function PosPage() {
         }
       }
 
-      // Build items with assignedUser and parentItemIndex
       const formattedItems = cart.map((item) => {
         const isChild = item.parentItemIndex !== null && item.parentItemIndex !== undefined;
         const baseItem = {
@@ -1519,7 +1555,6 @@ export default function PosPage() {
           parentItemIndex: isChild ? item.parentItemIndex : null,
         };
 
-        // For child products, include original price in metadata (for backend)
         if (isChild && item.originalPrice !== undefined) {
           baseItem.originalPrice = item.originalPrice;
         }
@@ -1658,7 +1693,6 @@ export default function PosPage() {
         return;
       }
 
-      // Offline save
       try {
         const formattedItems = cart.map((item) => {
           const isChild = item.parentItemIndex !== null && item.parentItemIndex !== undefined;
@@ -1799,9 +1833,6 @@ export default function PosPage() {
       setStatus("");
     }
   };
-
-  // Unused functions kept for reference (commented out in original)
-  // ...
 
   const handleManualRetry = async (saleId) => {
     try {
@@ -1958,9 +1989,12 @@ export default function PosPage() {
   const receiptAmountPaid = toNonNegativeAmount(receipt?.amountPaid);
   const receiptBalanceDue = toNonNegativeAmount(receipt?.balanceDue);
 
+  // --------------------------------------------------------------------
+  // RENDER
+  // --------------------------------------------------------------------
   return (
     <div className="flex flex-col bg-gray-50 min-h-0 h-full md:h-[calc(100vh-8rem)]">
-      {/* Top Bar (unchanged) */}
+      {/* Top Bar – unchanged */}
       <div className="bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-4">
           <h1 className="text-xl font-bold text-gray-900">Point of Sale</h1>
@@ -2054,7 +2088,7 @@ export default function PosPage() {
         </div>
       </div>
 
-      {/* Location Picker Modal (unchanged) */}
+      {/* Location Picker Modal – unchanged */}
       {showLocationPicker && locations && locations.length > 1 && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
@@ -2177,7 +2211,7 @@ export default function PosPage() {
 
       {/* Main Content */}
       <div className="flex-1 flex overflow-hidden min-h-0">
-        {/* Products Section */}
+        {/* Products Section – unchanged */}
         <div className="flex-1 flex flex-col overflow-hidden min-h-0">
           <div className="bg-white border-b border-gray-200 p-4">
             <div className="relative mb-3">
@@ -2241,146 +2275,78 @@ export default function PosPage() {
             </div>
           </div>
 
-          {/* Product Grid */}
+          {/* Product Grid – unchanged */}
           <div className="flex-1 overflow-auto p-4">
+            {/* ... same product grid ... */}
             {productTab === "services" &&
               filteredServiceProducts.length === 0 &&
               !serviceLoading && (
                 <div className="flex flex-col items-center justify-center h-full text-center p-8">
                   <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
-                    <svg
-                      className="w-8 h-8 text-gray-400"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M12 8c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm0 2c-4 0-7 2.7-7 6v2h14v-2c0-3.3-3-6-7-6z"
-                      />
+                    <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm0 2c-4 0-7 2.7-7 6v2h14v-2c0-3.3-3-6-7-6z" />
                     </svg>
                   </div>
-                  <h3 className="text-lg font-medium text-gray-900 mb-2">
-                    No Services Yet
-                  </h3>
-                  <p className="text-sm text-gray-500 mb-4 max-w-sm">
-                    Create active service products in Products to make them available in POS.
-                  </p>
-                  <button
-                    onClick={() => router.push("/dashboard/products/services")}
-                    className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                  >
-                    Go to Services
-                  </button>
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">No Services Yet</h3>
+                  <p className="text-sm text-gray-500 mb-4 max-w-sm">Create active service products in Products to make them available in POS.</p>
+                  <button onClick={() => router.push("/dashboard/products/services")} className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">Go to Services</button>
                 </div>
               )}
 
-            {productTab === "shopify" &&
-              searchResults.length === 0 &&
-              !isSearching && (
-                <div className="flex flex-col items-center justify-center h-full text-center p-8">
-                  <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
-                    <svg
-                      className="w-8 h-8 text-gray-400"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"
-                      />
-                    </svg>
-                  </div>
-                  <h3 className="text-lg font-medium text-gray-900 mb-2">
-                    {shopifyLocationScope?.scoped &&
-                    shopifyLocationScope?.hasMapping === false
-                      ? "No Shopify Mapping for This Location"
-                      : "No Cached Products"}
-                  </h3>
-                  <p className="text-sm text-gray-500 mb-4 max-w-sm">
-                    {shopifyLocationScope?.scoped &&
-                    shopifyLocationScope?.hasMapping === false
-                      ? "Map this FLEXI location to a Shopify location in Settings to load products."
-                      : navigator.onLine
-                        ? "Load products from your Shopify store to start selling."
-                        : "Sync when online to cache products for offline use."}
-                  </p>
-                  {lastSyncTimestamp && (
-                    <p className="text-xs text-gray-400 mb-4">
-                      Last synced:{" "}
-                      {new Date(lastSyncTimestamp).toLocaleString()}
-                    </p>
+            {productTab === "shopify" && searchResults.length === 0 && !isSearching && (
+              <div className="flex flex-col items-center justify-center h-full text-center p-8">
+                <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mb-4">
+                  <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                  </svg>
+                </div>
+                <h3 className="text-lg font-medium text-gray-900 mb-2">
+                  {shopifyLocationScope?.scoped && shopifyLocationScope?.hasMapping === false
+                    ? "No Shopify Mapping for This Location"
+                    : "No Cached Products"}
+                </h3>
+                <p className="text-sm text-gray-500 mb-4 max-w-sm">
+                  {shopifyLocationScope?.scoped && shopifyLocationScope?.hasMapping === false
+                    ? "Map this FLEXI location to a Shopify location in Settings to load products."
+                    : navigator.onLine
+                      ? "Load products from your Shopify store to start selling."
+                      : "Sync when online to cache products for offline use."}
+                </p>
+                {lastSyncTimestamp && (
+                  <p className="text-xs text-gray-400 mb-4">Last synced: {new Date(lastSyncTimestamp).toLocaleString()}</p>
+                )}
+                {navigator.onLine &&
+                  !(shopifyLocationScope?.scoped && shopifyLocationScope?.hasMapping === false) &&
+                  shopifyConnection?.status === "active" && (
+                    <button onClick={handleLoadProducts} className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">Load Shopify Products</button>
                   )}
-                  {navigator.onLine &&
-                    !(shopifyLocationScope?.scoped &&
-                      shopifyLocationScope?.hasMapping === false) &&
-                    shopifyConnection?.status === "active" && (
-                      <button
-                        onClick={handleLoadProducts}
-                        className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                      >
-                        Load Shopify Products
-                      </button>
-                    )}
-                </div>
-              )}
+              </div>
+            )}
 
-            {((productTab === "shopify" && searchResults.length > 0) ||
-              productTab !== "shopify") && (
+            {((productTab === "shopify" && searchResults.length > 0) || productTab !== "shopify") && (
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                 {productTab === "flexi" &&
                   filteredProducts.map((product) => (
-                    <button
-                      key={product.id}
-                      onClick={() => addToCart(product)}
-                      className="bg-white rounded-lg border-2 border-gray-200 hover:border-blue-500 p-4 flex flex-col items-center gap-2 transition-all hover:shadow-lg"
-                    >
-                      <div className="w-full aspect-square bg-gray-100 rounded-lg flex items-center justify-center text-4xl">
-                        📦
-                      </div>
-                      <h3 className="font-medium text-gray-900 text-center text-sm">
-                        {product.name}
-                      </h3>
-                      <p className="text-lg font-bold text-blue-600">
-                        ${product.price.toFixed(2)}
-                      </p>
+                    <button key={product.id} onClick={() => addToCart(product)} className="bg-white rounded-lg border-2 border-gray-200 hover:border-blue-500 p-4 flex flex-col items-center gap-2 transition-all hover:shadow-lg">
+                      <div className="w-full aspect-square bg-gray-100 rounded-lg flex items-center justify-center text-4xl">📦</div>
+                      <h3 className="font-medium text-gray-900 text-center text-sm">{product.name}</h3>
+                      <p className="text-lg font-bold text-blue-600">${product.price.toFixed(2)}</p>
                     </button>
                   ))}
 
                 {productTab === "services" &&
                   filteredServiceProducts.map((product) => (
-                    <button
-                      key={product.id || product._id}
-                      onClick={() => addToCart(product)}
-                      className="bg-white rounded-lg border-2 border-gray-200 hover:border-blue-500 p-4 flex flex-col items-center gap-2 transition-all hover:shadow-lg"
-                    >
-                      <div className="w-full aspect-square bg-blue-50 rounded-lg flex items-center justify-center text-4xl">
-                        🛎️
-                      </div>
-                      <h3 className="font-medium text-gray-900 text-center text-sm">
-                        {product.name}
-                      </h3>
-                      <p className="text-xs text-gray-500 text-center">
-                        {product.serviceKind === "bundle" ? "Service bundle" : "Service"}
-                      </p>
-                      <p className="text-lg font-bold text-blue-600">
-                        ${Number(product.price || 0).toFixed(2)}
-                      </p>
+                    <button key={product.id || product._id} onClick={() => addToCart(product)} className="bg-white rounded-lg border-2 border-gray-200 hover:border-blue-500 p-4 flex flex-col items-center gap-2 transition-all hover:shadow-lg">
+                      <div className="w-full aspect-square bg-blue-50 rounded-lg flex items-center justify-center text-4xl">🛎️</div>
+                      <h3 className="font-medium text-gray-900 text-center text-sm">{product.name}</h3>
+                      <p className="text-xs text-gray-500 text-center">{product.serviceKind === "bundle" ? "Service bundle" : "Service"}</p>
+                      <p className="text-lg font-bold text-blue-600">${Number(product.price || 0).toFixed(2)}</p>
                     </button>
                   ))}
 
                 {productTab === "shopify" &&
                   searchResults.map((product) => (
-                    <button
-                      key={product.id}
-                      onClick={() => handleProductClick(product)}
-                      className="bg-white rounded-lg border-2 border-gray-200 hover:border-blue-500 p-4 flex flex-col items-center gap-2 transition-all hover:shadow-lg relative"
-                    >
+                    <button key={product.id} onClick={() => handleProductClick(product)} className="bg-white rounded-lg border-2 border-gray-200 hover:border-blue-500 p-4 flex flex-col items-center gap-2 transition-all hover:shadow-lg relative">
                       {product.variants && product.variants.length > 1 && (
                         <span className="absolute top-2 right-2 z-10 px-2 py-0.5 text-xs font-medium bg-purple-100 text-purple-600 rounded-full">
                           {product.variants.length} variants
@@ -2388,34 +2354,19 @@ export default function PosPage() {
                       )}
                       <div className="w-full aspect-square bg-gray-100 rounded-lg flex items-center justify-center overflow-hidden relative">
                         {product.images && product.images.length > 0 ? (
-                          <Image
-                            src={`${product.images[0].url}?w=640&crop=center`}
-                            alt={product.images[0].altText || product.title}
-                            fill
-                            unoptimized
-                            sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
-                            className="object-cover"
-                          />
+                          <Image src={`${product.images[0].url}?w=640&crop=center`} alt={product.images[0].altText || product.title} fill unoptimized sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw" className="object-cover" />
                         ) : (
                           <span className="text-4xl">🛍️</span>
                         )}
                       </div>
-                      <h3 className="font-medium text-gray-900 text-center text-sm line-clamp-2">
-                        {product.title}
-                      </h3>
+                      <h3 className="font-medium text-gray-900 text-center text-sm line-clamp-2">{product.title}</h3>
                       {product.variants && product.variants.length > 0 && (
                         <p className="text-lg font-bold text-blue-600">
                           ${parseFloat(product.variants[0].price).toFixed(2)}
-                          {product.variants.length > 1 && (
-                            <span className="text-sm text-gray-500">+</span>
-                          )}
+                          {product.variants.length > 1 && <span className="text-sm text-gray-500">+</span>}
                         </p>
                       )}
-                      {product.vendor && (
-                        <p className="text-xs text-gray-500">
-                          {product.vendor}
-                        </p>
-                      )}
+                      {product.vendor && <p className="text-xs text-gray-500">{product.vendor}</p>}
                     </button>
                   ))}
               </div>
@@ -2423,27 +2374,19 @@ export default function PosPage() {
           </div>
         </div>
 
-        {/* Cart Section */}
+        {/* ---------- CART SECTION (CLEANED) ---------- */}
         <div className="w-96 bg-white border-l border-gray-200 flex flex-col min-h-0 overflow-auto">
           {exchangeMode ? (
+            // Exchange cart (unchanged)
             <>
               <div className="p-4 border-b border-gray-200 bg-indigo-50">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h2 className="text-lg font-bold text-indigo-900">
-                      Process Exchange
-                    </h2>
-                    {originalSale && (
-                      <p className="text-sm text-indigo-700 mt-1">
-                        Receipt: {originalSale.receiptNumber}
-                      </p>
-                    )}
+                    <h2 className="text-lg font-bold text-indigo-900">Process Exchange</h2>
+                    {originalSale && <p className="text-sm text-indigo-700 mt-1">Receipt: {originalSale.receiptNumber}</p>}
                   </div>
                   {!originalSale && (
-                    <button
-                      onClick={() => setShowReturnLookup(true)}
-                      className="px-3 py-1 bg-indigo-600 text-white rounded text-xs font-medium hover:bg-indigo-700"
-                    >
+                    <button onClick={() => setShowReturnLookup(true)} className="px-3 py-1 bg-indigo-600 text-white rounded text-xs font-medium hover:bg-indigo-700">
                       Lookup Receipt
                     </button>
                   )}
@@ -2452,76 +2395,30 @@ export default function PosPage() {
 
               {originalSale && (
                 <div className="border-b border-gray-200 p-4 space-y-2">
-                  <h3 className="text-sm font-semibold text-gray-900 mb-2">
-                    Return Items
-                  </h3>
+                  <h3 className="text-sm font-semibold text-gray-900 mb-2">Return Items</h3>
                   {originalSale.items.map((item, idx) => {
                     const returnItem = returnItems[idx];
                     if (!returnItem) return null;
-
                     const maxQty = returnItem.maxQuantity;
                     if (maxQty <= 0) return null;
-
                     return (
-                      <div
-                        key={idx}
-                        className={`rounded-lg p-3 border-2 transition-all ${
-                          returnItem.selected
-                            ? "border-orange-500 bg-orange-50"
-                            : "border-gray-200 bg-gray-50"
-                        }`}
-                      >
+                      <div key={idx} className={`rounded-lg p-3 border-2 transition-all ${returnItem.selected ? "border-orange-500 bg-orange-50" : "border-gray-200 bg-gray-50"}`}>
                         <div className="flex items-start gap-3">
-                          <input
-                            type="checkbox"
-                            checked={returnItem.selected}
-                            onChange={() => toggleReturnItem(idx)}
-                            className="mt-1"
-                          />
+                          <input type="checkbox" checked={returnItem.selected} onChange={() => toggleReturnItem(idx)} className="mt-1" />
                           <div className="flex-1">
-                            <h4 className="font-medium text-gray-900 text-sm">
-                              {item.productName ||
-                                item.product?.name ||
-                                "Unknown Product"}
-                            </h4>
-                            <p className="text-xs text-gray-600">
-                              ${item.unitPrice.toFixed(2)} each
-                            </p>
-                            <p className="text-xs text-gray-500">
-                              Available: {maxQty}
-                            </p>
+                            <h4 className="font-medium text-gray-900 text-sm">{item.productName || item.product?.name || "Unknown Product"}</h4>
+                            <p className="text-xs text-gray-600">${item.unitPrice.toFixed(2)} each</p>
+                            <p className="text-xs text-gray-500">Available: {maxQty}</p>
                           </div>
                         </div>
-
                         {returnItem.selected && (
                           <div className="mt-2 flex items-center justify-between">
                             <div className="flex items-center gap-2">
-                              <button
-                                onClick={() =>
-                                  updateReturnQty(idx, returnItem.quantity - 1)
-                                }
-                                className="w-7 h-7 bg-white border border-gray-300 rounded hover:bg-gray-100 text-sm font-bold"
-                              >
-                                −
-                              </button>
-                              <span className="w-10 text-center font-medium text-sm">
-                                {returnItem.quantity}
-                              </span>
-                              <button
-                                onClick={() =>
-                                  updateReturnQty(idx, returnItem.quantity + 1)
-                                }
-                                className="w-7 h-7 bg-white border border-gray-300 rounded hover:bg-gray-100 text-sm font-bold"
-                              >
-                                +
-                              </button>
+                              <button onClick={() => updateReturnQty(idx, returnItem.quantity - 1)} className="w-7 h-7 bg-white border border-gray-300 rounded hover:bg-gray-100 text-sm font-bold">−</button>
+                              <span className="w-10 text-center font-medium text-sm">{returnItem.quantity}</span>
+                              <button onClick={() => updateReturnQty(idx, returnItem.quantity + 1)} className="w-7 h-7 bg-white border border-gray-300 rounded hover:bg-gray-100 text-sm font-bold">+</button>
                             </div>
-                            <p className="font-bold text-orange-600 text-sm">
-                              $
-                              {(item.unitPrice * returnItem.quantity).toFixed(
-                                2,
-                              )}
-                            </p>
+                            <p className="font-bold text-orange-600 text-sm">${(item.unitPrice * returnItem.quantity).toFixed(2)}</p>
                           </div>
                         )}
                       </div>
@@ -2533,114 +2430,44 @@ export default function PosPage() {
               <div className="flex-1 flex flex-col">
                 <div className="p-4 border-b border-gray-200">
                   <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-semibold text-gray-900">
-                      Exchange Items ({exchangeCartCount})
-                    </h3>
-                    {exchangeCart.length > 0 && (
-                      <button
-                        onClick={() => setExchangeCart([])}
-                        className="text-sm text-red-600 hover:text-red-700 font-medium"
-                      >
-                        Clear
-                      </button>
-                    )}
+                    <h3 className="text-sm font-semibold text-gray-900">Exchange Items ({exchangeCartCount})</h3>
+                    {exchangeCart.length > 0 && <button onClick={() => setExchangeCart([])} className="text-sm text-red-600 hover:text-red-700 font-medium">Clear</button>}
                   </div>
                 </div>
-                
-                <div className="flex-1 p-4  space-y-2">
+                <div className="flex-1 p-4 space-y-2">
                   {exchangeCart.length === 0 ? (
-                    <div className="text-center text-gray-400 text-sm py-8">
-                      <p className="text-3xl mb-2">🔄</p>
-                      <p>Add items to exchange</p>
-                    </div>
+                    <div className="text-center text-gray-400 text-sm py-8"><p className="text-3xl mb-2">🔄</p><p>Add items to exchange</p></div>
                   ) : (
                     <div className="space-y-2">
                       {exchangeCart.map((item, index) => (
                         <div key={index} className="bg-gray-50 rounded-lg p-3">
                           <div className="flex items-start justify-between mb-2">
                             <div className="flex-1">
-                              <h4 className="font-medium text-gray-900 text-sm">
-                                {item.name}
-                              </h4>
+                              <h4 className="font-medium text-gray-900 text-sm">{item.name}</h4>
                               <div className="flex items-center gap-2">
                                 {exchangeEditingPriceIndex === index ? (
-                                  <input
-                                    autoFocus
-                                    type="number"
-                                    step="0.01"
-                                    value={exchangeEditingPriceValue}
-                                    onChange={(e) =>
-                                      setExchangeEditingPriceValue(
-                                        e.target.value,
-                                      )
-                                    }
-                                    onBlur={() => saveExchangePriceEdit(index)}
-                                    onKeyDown={(e) =>
-                                      e.key === "Enter" &&
-                                      saveExchangePriceEdit(index)
-                                    }
-                                    className="w-20 px-2 py-1 border border-indigo-300 rounded text-sm font-medium"
-                                  />
+                                  <input autoFocus type="number" step="0.01" value={exchangeEditingPriceValue} onChange={(e) => setExchangeEditingPriceValue(e.target.value)} onBlur={() => saveExchangePriceEdit(index)} onKeyDown={(e) => e.key === "Enter" && saveExchangePriceEdit(index)} className="w-20 px-2 py-1 border border-indigo-300 rounded text-sm font-medium" />
                                 ) : (
-                                  <button
-                                    onClick={() =>
-                                      handleExchangePriceEdit(index)
-                                    }
-                                    className="text-sm text-gray-500 hover:text-indigo-600 flex items-center gap-1"
-                                    title="Click to edit price"
-                                  >
-                                    ${item.price.toFixed(2)}{" "}
-                                    <span className="text-xs">✎</span>
-                                  </button>
+                                  <button onClick={() => handleExchangePriceEdit(index)} className="text-sm text-gray-500 hover:text-indigo-600 flex items-center gap-1" title="Click to edit price">${item.price.toFixed(2)} <span className="text-xs">✎</span></button>
                                 )}
                               </div>
                               {useSessionStore.getState().can(PERMISSIONS.POS_APPLY_DISCOUNT) && (
                                 <div className="mt-1">
                                   {exchangeEditingDiscountIndex === index ? (
                                     <div className="flex items-center gap-2">
-                                      <select
-                                        value={exchangeDiscountType}
-                                        onChange={(e) => setExchangeDiscountType(e.target.value)}
-                                        className="px-2 py-1 border border-green-300 rounded text-xs"
-                                      >
+                                      <select value={exchangeDiscountType} onChange={(e) => setExchangeDiscountType(e.target.value)} className="px-2 py-1 border border-green-300 rounded text-xs">
                                         <option value="fixed">$</option>
                                         <option value="percentage">%</option>
                                       </select>
-                                      <input
-                                        autoFocus
-                                        type="number"
-                                        step="0.01"
-                                        placeholder="0"
-                                        value={exchangeDiscountValue}
-                                        onChange={(e) => setExchangeDiscountValue(e.target.value)}
-                                        onBlur={() => saveExchangeDiscountEdit(index)}
-                                        onKeyDown={(e) => e.key === "Enter" && saveExchangeDiscountEdit(index)}
-                                        className="w-20 px-2 py-1 border border-green-300 rounded text-xs"
-                                      />
-                                      <button
-                                        onClick={() => {
-                                          setExchangeEditingDiscountIndex(null);
-                                          setExchangeDiscountValue("");
-                                        }}
-                                        className="text-xs text-gray-500"
-                                      >
-                                        ✕
-                                      </button>
+                                      <input autoFocus type="number" step="0.01" placeholder="0" value={exchangeDiscountValue} onChange={(e) => setExchangeDiscountValue(e.target.value)} onBlur={() => saveExchangeDiscountEdit(index)} onKeyDown={(e) => e.key === "Enter" && saveExchangeDiscountEdit(index)} className="w-20 px-2 py-1 border border-green-300 rounded text-xs" />
+                                      <button onClick={() => { setExchangeEditingDiscountIndex(null); setExchangeDiscountValue(""); }} className="text-xs text-gray-500">✕</button>
                                     </div>
                                   ) : (
-                                    <button
-                                      onClick={() => handleExchangeDiscountEdit(index)}
-                                      className="text-xs text-green-600 hover:text-green-700 flex items-center gap-1"
-                                      title="Click to apply discount"
-                                    >
+                                    <button onClick={() => handleExchangeDiscountEdit(index)} className="text-xs text-green-600 hover:text-green-700 flex items-center gap-1" title="Click to apply discount">
                                       {item.discount > 0 ? (
                                         <>
-                                          <span className="line-through text-gray-400">
-                                            ${(item.price * item.quantity).toFixed(2)}
-                                          </span>
-                                          <span className="font-medium">
-                                            -${item.discount.toFixed(2)} 🏷️
-                                          </span>
+                                          <span className="line-through text-gray-400">${(item.price * item.quantity).toFixed(2)}</span>
+                                          <span className="font-medium">-${item.discount.toFixed(2)} 🏷️</span>
                                         </>
                                       ) : (
                                         <span>+ Add Discount</span>
@@ -2650,44 +2477,17 @@ export default function PosPage() {
                                 </div>
                               )}
                             </div>
-                            <button
-                              onClick={() => removeFromExchangeCart(index)}
-                              className="text-red-500 hover:text-red-700 ml-2"
-                            >
-                              ✕
-                            </button>
+                            <button onClick={() => removeFromExchangeCart(index)} className="text-red-500 hover:text-red-700 ml-2">✕</button>
                           </div>
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
-                              <button
-                                onClick={() =>
-                                  updateExchangeQuantity(index, item.quantity - 1)
-                                }
-                                className="w-8 h-8 bg-white border border-gray-300 rounded hover:bg-gray-100 font-bold"
-                              >
-                                −
-                              </button>
-                              <span className="w-12 text-center font-medium">
-                                {item.quantity}
-                              </span>
-                              <button
-                                onClick={() =>
-                                  updateExchangeQuantity(index, item.quantity + 1)
-                                }
-                                className="w-8 h-8 bg-white border border-gray-300 rounded hover:bg-gray-100 font-bold"
-                              >
-                                +
-                              </button>
+                              <button onClick={() => updateExchangeQuantity(index, item.quantity - 1)} className="w-8 h-8 bg-white border border-gray-300 rounded hover:bg-gray-100 font-bold">−</button>
+                              <span className="w-12 text-center font-medium">{item.quantity}</span>
+                              <button onClick={() => updateExchangeQuantity(index, item.quantity + 1)} className="w-8 h-8 bg-white border border-gray-300 rounded hover:bg-gray-100 font-bold">+</button>
                             </div>
                             <div className="text-right">
-                              <p className="font-bold text-indigo-600">
-                                ${((item.price * item.quantity) - (item.discount || 0)).toFixed(2)}
-                              </p>
-                              {item.discount > 0 && (
-                                <p className="text-xs text-green-600">
-                                  Saved ${item.discount.toFixed(2)}
-                                </p>
-                              )}
+                              <p className="font-bold text-indigo-600">${((item.price * item.quantity) - (item.discount || 0)).toFixed(2)}</p>
+                              {item.discount > 0 && <p className="text-xs text-green-600">Saved ${item.discount.toFixed(2)}</p>}
                             </div>
                           </div>
                         </div>
@@ -2701,179 +2501,65 @@ export default function PosPage() {
                 {originalSale && (
                   <>
                     <div>
-                      <label className="block text-xs font-medium text-gray-700 mb-1">
-                        Return Reason
-                      </label>
-                      <select
-                        value={returnReason}
-                        onChange={(e) => setReturnReason(e.target.value)}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                      >
-                        {returnReasons.map((reason) => (
-                          <option key={reason.value} value={reason.value}>
-                            {reason.label}
-                          </option>
-                        ))}
+                      <label className="block text-xs font-medium text-gray-700 mb-1">Return Reason</label>
+                      <select value={returnReason} onChange={(e) => setReturnReason(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                        {returnReasons.map((reason) => <option key={reason.value} value={reason.value}>{reason.label}</option>)}
                       </select>
                     </div>
-
                     <div className="space-y-1">
                       <div className="flex items-center justify-between text-sm">
                         <span className="text-gray-600">Return Total</span>
-                        <span className="font-semibold text-orange-600">
-                          ${calculateReturnTotal().toFixed(2)}
-                        </span>
+                        <span className="font-semibold text-orange-600">${calculateReturnTotal().toFixed(2)}</span>
                       </div>
                       <div className="flex items-center justify-between text-sm">
                         <span className="text-gray-600">Exchange Total</span>
-                        <span className="font-semibold text-indigo-600">
-                          ${exchangeCartTotal.toFixed(2)}
-                        </span>
+                        <span className="font-semibold text-indigo-600">${exchangeCartTotal.toFixed(2)}</span>
                       </div>
                       <div className="flex items-center justify-between text-base font-bold pt-2 border-t">
-                        <span>
-                          {exchangeNetBalance > 0
-                            ? "Customer Pays"
-                            : exchangeNetBalance < 0
-                              ? "Refund Due"
-                              : "Balanced"}
-                        </span>
-                        <span className="text-gray-900">
-                          ${Math.abs(exchangeNetBalance).toFixed(2)}
-                        </span>
+                        <span>{exchangeNetBalance > 0 ? "Customer Pays" : exchangeNetBalance < 0 ? "Refund Due" : "Balanced"}</span>
+                        <span className="text-gray-900">${Math.abs(exchangeNetBalance).toFixed(2)}</span>
                       </div>
                     </div>
-
                     {exchangeNetDue > 0 && (
                       <div>
                         <div className="flex items-center justify-between mb-2">
-                          <label className="block text-xs font-medium text-gray-700">
-                            Payment Method
-                          </label>
+                          <label className="block text-xs font-medium text-gray-700">Payment Method</label>
                           <label className="flex items-center gap-2 text-xs cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={exchangeUseSplitPayment}
-                              onChange={(e) => {
-                                setExchangeUseSplitPayment(e.target.checked);
-                                if (e.target.checked) {
-                                  setExchangeSplitPayments([
-                                    { method: "cash", amount: 0 },
-                                  ]);
-                                }
-                              }}
-                              className="rounded"
-                            />
+                            <input type="checkbox" checked={exchangeUseSplitPayment} onChange={(e) => { setExchangeUseSplitPayment(e.target.checked); if (e.target.checked) setExchangeSplitPayments([{ method: "cash", amount: 0 }]); }} className="rounded" />
                             <span className="text-gray-600">Split</span>
                           </label>
                         </div>
                         {!exchangeUseSplitPayment ? (
                           <div className="grid grid-cols-3 gap-2">
                             {paymentMethods.map((method) => (
-                              <button
-                                key={method.value}
-                                onClick={() =>
-                                  setExchangeSelectedPaymentMethod(method.value)
-                                }
-                                className={`p-2 rounded-lg border-2 transition-all ${
-                                  exchangeSelectedPaymentMethod === method.value
-                                    ? "border-indigo-500 bg-indigo-50"
-                                    : "border-gray-200 bg-white hover:border-gray-300"
-                                }`}
-                              >
+                              <button key={method.value} onClick={() => setExchangeSelectedPaymentMethod(method.value)} className={`p-2 rounded-lg border-2 transition-all ${exchangeSelectedPaymentMethod === method.value ? "border-indigo-500 bg-indigo-50" : "border-gray-200 bg-white hover:border-gray-300"}`}>
                                 <div className="text-xl mb-1">{method.icon}</div>
-                                <div className="text-xs font-medium">
-                                  {method.label}
-                                </div>
+                                <div className="text-xs font-medium">{method.label}</div>
                               </button>
                             ))}
                           </div>
                         ) : (
                           <div className="space-y-2">
                             {exchangeSplitPayments.map((payment, idx) => {
-                              const availableMethods = paymentMethods.filter(
-                                (m) =>
-                                  m.value === payment.method ||
-                                  !exchangeSplitPayments.some(
-                                    (p, i) =>
-                                      i !== idx && p.method === m.value,
-                                  ),
-                              );
-
+                              const availableMethods = paymentMethods.filter((m) => m.value === payment.method || !exchangeSplitPayments.some((p, i) => i !== idx && p.method === m.value));
                               return (
                                 <div key={idx} className="flex gap-2">
-                                  <select
-                                    value={payment.method}
-                                    onChange={(e) =>
-                                      updateExchangeSplitPayment(
-                                        idx,
-                                        "method",
-                                        e.target.value,
-                                      )
-                                    }
-                                    className="flex-1 px-2 py-2 border border-gray-300 rounded text-xs"
-                                  >
-                                    {availableMethods.map((m) => (
-                                      <option key={m.value} value={m.value}>
-                                        {m.label}
-                                      </option>
-                                    ))}
+                                  <select value={payment.method} onChange={(e) => updateExchangeSplitPayment(idx, "method", e.target.value)} className="flex-1 px-2 py-2 border border-gray-300 rounded text-xs">
+                                    {availableMethods.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
                                   </select>
-                                  <input
-                                    type="number"
-                                    step="0.01"
-                                    placeholder="Amount"
-                                    value={payment.amount}
-                                    onChange={(e) =>
-                                      updateExchangeSplitPayment(
-                                        idx,
-                                        "amount",
-                                        parseFloat(e.target.value) || 0,
-                                      )
-                                    }
-                                    className="w-24 px-2 py-2 border border-gray-300 rounded text-xs"
-                                  />
-                                  {exchangeSplitPayments.length > 1 && (
-                                    <button
-                                      onClick={() =>
-                                        removeExchangeSplitPayment(idx)
-                                      }
-                                      className="text-red-500 hover:text-red-700 font-bold"
-                                    >
-                                      ✕
-                                    </button>
-                                  )}
+                                  <input type="number" step="0.01" placeholder="Amount" value={payment.amount} onChange={(e) => updateExchangeSplitPayment(idx, "amount", parseFloat(e.target.value) || 0)} className="w-24 px-2 py-2 border border-gray-300 rounded text-xs" />
+                                  {exchangeSplitPayments.length > 1 && <button onClick={() => removeExchangeSplitPayment(idx)} className="text-red-500 hover:text-red-700 font-bold">✕</button>}
                                 </div>
                               );
                             })}
                             <div className="flex items-center justify-between text-xs text-gray-600">
                               <div className="flex flex-col gap-1">
-                                <span>
-                                  Total: ${exchangeSplitPaymentTotal.toFixed(2)}
-                                </span>
-                                <span
-                                  className={`${exchangeNetDue - exchangeSplitPaymentTotal > 0 ? "text-orange-600" : exchangeNetDue - exchangeSplitPaymentTotal < 0 ? "text-red-600" : "text-green-600"}`}
-                                >
-                                  {exchangeNetDue - exchangeSplitPaymentTotal >
-                                  0
-                                    ? `Remaining: $${(exchangeNetDue - exchangeSplitPaymentTotal).toFixed(2)}`
-                                    : exchangeNetDue -
-                                          exchangeSplitPaymentTotal <
-                                        0
-                                      ? `Over: $${Math.abs(exchangeNetDue - exchangeSplitPaymentTotal).toFixed(2)}`
-                                      : "Balanced ✓"}
+                                <span>Total: ${exchangeSplitPaymentTotal.toFixed(2)}</span>
+                                <span className={`${exchangeNetDue - exchangeSplitPaymentTotal > 0 ? "text-orange-600" : exchangeNetDue - exchangeSplitPaymentTotal < 0 ? "text-red-600" : "text-green-600"}`}>
+                                  {exchangeNetDue - exchangeSplitPaymentTotal > 0 ? `Remaining: $${(exchangeNetDue - exchangeSplitPaymentTotal).toFixed(2)}` : exchangeNetDue - exchangeSplitPaymentTotal < 0 ? `Over: $${Math.abs(exchangeNetDue - exchangeSplitPaymentTotal).toFixed(2)}` : "Balanced ✓"}
                                 </span>
                               </div>
-                              <button
-                                onClick={addExchangeSplitPayment}
-                                disabled={
-                                  exchangeSplitPayments.length >=
-                                  paymentMethods.length
-                                }
-                                className="text-indigo-600 hover:text-indigo-700 disabled:text-gray-400 disabled:cursor-not-allowed text-xs font-medium"
-                              >
-                                + Add
-                              </button>
+                              <button onClick={addExchangeSplitPayment} disabled={exchangeSplitPayments.length >= paymentMethods.length} className="text-indigo-600 hover:text-indigo-700 disabled:text-gray-400 disabled:cursor-not-allowed text-xs font-medium">+ Add</button>
                             </div>
                           </div>
                         )}
@@ -2881,70 +2567,32 @@ export default function PosPage() {
                     )}
                   </>
                 )}
-
-                <input
-                  type="text"
-                  placeholder="Add note (optional)"
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                />
-
-                {status && (
-                  <div className="text-xs text-green-700 bg-green-50 px-3 py-2 rounded">
-                    {status}
-                  </div>
-                )}
-                {error && (
-                  <div className="text-xs text-red-700 bg-red-50 px-3 py-2 rounded">
-                    {error}
-                  </div>
-                )}
-
+                <input type="text" placeholder="Add note (optional)" value={notes} onChange={(e) => setNotes(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
+                {status && <div className="text-xs text-green-700 bg-green-50 px-3 py-2 rounded">{status}</div>}
+                {error && <div className="text-xs text-red-700 bg-red-50 px-3 py-2 rounded">{error}</div>}
                 {!originalSale ? (
-                  <div className="text-sm text-gray-600 bg-gray-50 px-3 py-2 rounded text-center">
-                    Lookup a receipt to process returns with exchange, or just complete the sale below
-                  </div>
+                  <div className="text-sm text-gray-600 bg-gray-50 px-3 py-2 rounded text-center">Lookup a receipt to process returns with exchange, or just complete the sale below</div>
                 ) : (
-                  <button
-                    onClick={processExchange}
-                    disabled={
-                      processingExchange ||
-                      calculateReturnTotal() === 0 ||
-                      exchangeCart.length === 0 ||
-                      (exchangeNetDue > 0 &&
-                        exchangeUseSplitPayment &&
-                        !exchangeSplitPaymentValidation)
-                    }
-                    className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 text-white font-bold py-3 rounded-lg transition-colors"
-                  >
+                  <button onClick={processExchange} disabled={processingExchange || calculateReturnTotal() === 0 || exchangeCart.length === 0 || (exchangeNetDue > 0 && exchangeUseSplitPayment && !exchangeSplitPaymentValidation)} className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-300 text-white font-bold py-3 rounded-lg transition-colors">
                     {processingExchange ? "Processing..." : "Process Exchange"}
                   </button>
                 )}
               </div>
             </>
           ) : (!returnMode && !exchangeMode) || (returnMode && !originalSale) ? (
+            // ---------- NORMAL CART ----------
             <>
               {/* Cart Header */}
               <div className="p-4 border-b border-gray-200">
                 <div className="flex items-center justify-between">
-                  <h2 className="text-lg font-bold text-gray-900">
-                    Cart ({cartCount})
-                  </h2>
+                  <h2 className="text-lg font-bold text-gray-900">Cart ({cartCount})</h2>
                   {cart.length > 0 && (
-                    <button
-                      onClick={clearCart}
-                      className="text-sm text-red-600 hover:text-red-700 font-medium"
-                    >
-                      Clear
-                    </button>
+                    <button onClick={clearCart} className="text-sm text-red-600 hover:text-red-700 font-medium">Clear</button>
                   )}
                 </div>
                 {/* Sale-level User Assignment */}
                 <div className="mt-3">
-                  <label className="block text-xs font-medium text-gray-700 mb-1">
-                    Sale Assigned User
-                  </label>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Sale Assigned User</label>
                   <select
                     value={saleAssignedUser || ""}
                     onChange={(e) => setSaleAssignedUser(e.target.value || null)}
@@ -2952,9 +2600,7 @@ export default function PosPage() {
                   >
                     <option value="">None</option>
                     {users.map((user) => (
-                      <option key={user._id} value={user._id}>
-                        {user.fullname || user.email}
-                      </option>
+                      <option key={user._id} value={user._id}>{user.fullname || user.email}</option>
                     ))}
                   </select>
                 </div>
@@ -2963,120 +2609,54 @@ export default function PosPage() {
               {/* Cart Items */}
               <div className="flex-1 p-4 space-y-2 overflow-auto">
                 {cart.length === 0 ? (
-                  <div className="text-center text-gray-400 mt-12">
-                    <p className="text-4xl mb-2">🛒</p>
-                    <p>Cart is empty</p>
-                  </div>
+                  <div className="text-center text-gray-400 mt-12"><p className="text-4xl mb-2">🛒</p><p>Cart is empty</p></div>
                 ) : (
                   cart.map((item, index) => {
                     const isService = item.type === "service";
                     const isChild = item.parentItemIndex !== null && item.parentItemIndex !== undefined;
-                    const isAttachModeActive = attachMode && attachingServiceIndex === index;
+                    const isAttachActive = attachMode && attachingServiceIndex === index;
 
                     return (
-                      <div
-                        key={index}
-                        className={`bg-gray-50 rounded-lg p-3 ${isChild ? "ml-4 border-l-2 border-blue-300" : ""}`}
-                      >
-                        <div className="flex items-start justify-between mb-2">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2">
-                              <h4 className="font-medium text-gray-900">
-                                {item.name}
-                              </h4>
-                              {isChild && (
-                                <span className="text-xs text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded">
-                                  attached
-                                </span>
-                              )}
-                              {isService && (
-                                <span className="text-xs bg-purple-100 text-purple-600 px-1.5 py-0.5 rounded">
-                                  service
-                                </span>
-                              )}
+                      <div key={index} className={`bg-gray-50 rounded-lg p-3 ${isChild ? "ml-4 border-l-2 border-blue-300" : ""}`}>
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h4 className="font-medium text-gray-900 text-sm truncate">{item.name}</h4>
+                              {isChild && <span className="text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded whitespace-nowrap">attached</span>}
+                              {isService && <span className="text-[10px] bg-purple-100 text-purple-600 px-1.5 py-0.5 rounded whitespace-nowrap">service</span>}
                             </div>
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-2 mt-1">
                               {isChild && item.originalPrice ? (
                                 <div className="flex items-center gap-1">
-                                  <span className="text-sm text-gray-400 line-through">
-                                    ${item.originalPrice.toFixed(2)}
-                                  </span>
-                                  <span className="text-sm text-green-600 font-medium">Included</span>
+                                  <span className="text-xs text-gray-400 line-through">${item.originalPrice.toFixed(2)}</span>
+                                  <span className="text-xs text-green-600 font-medium">Included</span>
                                 </div>
                               ) : editingPriceIndex === index ? (
-                                <input
-                                  autoFocus
-                                  type="number"
-                                  step="0.01"
-                                  value={editingPriceValue}
-                                  onChange={(e) =>
-                                    setEditingPriceValue(e.target.value)
-                                  }
-                                  onBlur={() => savePriceEdit(index)}
-                                  onKeyDown={(e) =>
-                                    e.key === "Enter" && savePriceEdit(index)
-                                  }
-                                  className="w-20 px-2 py-1 border border-blue-300 rounded text-sm font-medium"
-                                />
+                                <input autoFocus type="number" step="0.01" value={editingPriceValue} onChange={(e) => setEditingPriceValue(e.target.value)} onBlur={() => savePriceEdit(index)} onKeyDown={(e) => e.key === "Enter" && savePriceEdit(index)} className="w-20 px-2 py-1 border border-blue-300 rounded text-sm" />
                               ) : (
-                                <button
-                                  onClick={() => handlePriceEdit(index)}
-                                  className="text-sm text-gray-500 hover:text-blue-600 flex items-center gap-1"
-                                  title="Click to edit price"
-                                >
-                                  ${item.price.toFixed(2)}{" "}
-                                  <span className="text-xs">✎</span>
+                                <button onClick={() => handlePriceEdit(index)} className="text-sm text-gray-500 hover:text-blue-600 flex items-center gap-1" title="Click to edit price">
+                                  ${item.price.toFixed(2)} <span className="text-xs">✎</span>
                                 </button>
                               )}
                             </div>
-                            {/* Discount UI */}
+                            {/* Discount UI (only on non-child) */}
                             {useSessionStore.getState().can(PERMISSIONS.POS_APPLY_DISCOUNT) && !isChild && (
                               <div className="mt-1">
                                 {editingDiscountIndex === index ? (
                                   <div className="flex items-center gap-2">
-                                    <select
-                                      value={discountType}
-                                      onChange={(e) => setDiscountType(e.target.value)}
-                                      className="px-2 py-1 border border-green-300 rounded text-xs"
-                                    >
+                                    <select value={discountType} onChange={(e) => setDiscountType(e.target.value)} className="px-2 py-1 border border-green-300 rounded text-xs">
                                       <option value="fixed">$</option>
                                       <option value="percentage">%</option>
                                     </select>
-                                    <input
-                                      autoFocus
-                                      type="number"
-                                      step="0.01"
-                                      placeholder="0"
-                                      value={discountValue}
-                                      onChange={(e) => setDiscountValue(e.target.value)}
-                                      onBlur={() => saveDiscountEdit(index)}
-                                      onKeyDown={(e) => e.key === "Enter" && saveDiscountEdit(index)}
-                                      className="w-20 px-2 py-1 border border-green-300 rounded text-xs"
-                                    />
-                                    <button
-                                      onClick={() => {
-                                        setEditingDiscountIndex(null);
-                                        setDiscountValue("");
-                                      }}
-                                      className="text-xs text-gray-500"
-                                    >
-                                      ✕
-                                    </button>
+                                    <input autoFocus type="number" step="0.01" placeholder="0" value={discountValue} onChange={(e) => setDiscountValue(e.target.value)} onBlur={() => saveDiscountEdit(index)} onKeyDown={(e) => e.key === "Enter" && saveDiscountEdit(index)} className="w-20 px-2 py-1 border border-green-300 rounded text-xs" />
+                                    <button onClick={() => { setEditingDiscountIndex(null); setDiscountValue(""); }} className="text-xs text-gray-500">✕</button>
                                   </div>
                                 ) : (
-                                  <button
-                                    onClick={() => handleDiscountEdit(index)}
-                                    className="text-xs text-green-600 hover:text-green-700 flex items-center gap-1"
-                                    title="Click to apply discount"
-                                  >
+                                  <button onClick={() => handleDiscountEdit(index)} className="text-xs text-green-600 hover:text-green-700 flex items-center gap-1" title="Click to apply discount">
                                     {item.discount > 0 ? (
                                       <>
-                                        <span className="line-through text-gray-400">
-                                          ${(item.price * item.quantity).toFixed(2)}
-                                        </span>
-                                        <span className="font-medium">
-                                          -${item.discount.toFixed(2)} 🏷️
-                                        </span>
+                                        <span className="line-through text-gray-400">${(item.price * item.quantity).toFixed(2)}</span>
+                                        <span className="font-medium">-${item.discount.toFixed(2)} 🏷️</span>
                                       </>
                                     ) : (
                                       <span>+ Add Discount</span>
@@ -3094,16 +2674,11 @@ export default function PosPage() {
                                     const userId = e.target.value || null;
                                     const newCart = [...cart];
                                     newCart[index].assignedUser = userId;
-                                    // Recalculate commission
                                     const productDefaults = serviceProductMap[item.variant];
                                     if (productDefaults) {
                                       const user = userId ? users.find(u => u._id === userId) : null;
                                       const commission = getEffectiveCommission(
-                                        {
-                                          _id: item.variant,
-                                          commissionType: productDefaults.commissionType,
-                                          commissionValue: productDefaults.commissionValue,
-                                        },
+                                        { _id: item.variant, commissionType: productDefaults.commissionType, commissionValue: productDefaults.commissionValue },
                                         user
                                       );
                                       newCart[index].commissionType = commission.type;
@@ -3113,13 +2688,11 @@ export default function PosPage() {
                                     }
                                     setCart(newCart);
                                   }}
-                                  className="text-xs border border-gray-300 rounded px-1 py-0.5"
+                                  className="text-xs border border-gray-300 rounded px-1 py-0.5 w-full max-w-[120px]"
                                 >
                                   <option value="">Assign user</option>
                                   {users.map((user) => (
-                                    <option key={user._id} value={user._id}>
-                                      {user.fullname || user.email}
-                                    </option>
+                                    <option key={user._id} value={user._id}>{user.fullname || user.email}</option>
                                   ))}
                                 </select>
                               </div>
@@ -3127,104 +2700,54 @@ export default function PosPage() {
                             {/* Commission display */}
                             {isService && (
                               <div className="text-xs mt-1 flex items-center gap-2">
-                                <span className="text-gray-500">
-                                  Commission: <span className="font-medium text-gray-700">{item.commissionDisplay || "0%"}</span>
-                                </span>
+                                <span className="text-gray-500">Commission: <span className="font-medium text-gray-700">{item.commissionDisplay || "0%"}</span></span>
                                 {item.commissionIsOverride ? (
-                                  <span className="text-xs bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded font-medium">
-                                    Override
-                                  </span>
+                                  <span className="text-[10px] bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded font-medium">Override</span>
                                 ) : (
-                                  <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">
-                                    Default
-                                  </span>
+                                  <span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">Default</span>
                                 )}
                               </div>
                             )}
                           </div>
-                          <div className="flex flex-col items-end gap-1">
-                            <button
-                              onClick={() => removeFromCart(index)}
-                              className="text-red-500 hover:text-red-700"
-                            >
-                              ✕
-                            </button>
-                            {/* Attach/Detach buttons */}
+
+                          {/* Right side actions */}
+                          <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                            <button onClick={() => removeFromCart(index)} className="text-red-500 hover:text-red-700">✕</button>
                             {!isService && !isChild && (
-                              <button
-                                onClick={() => {
-                                  setShowAttachDropdown(true);
-                                  setAttachDropdownItemIndex(index);
-                                }}
-                                className="text-xs text-blue-600 hover:text-blue-800"
-                              >
-                                Attach to service
+                              <button onClick={() => openAttachQuantityModal(index)} className="text-[10px] text-blue-600 hover:text-blue-800 whitespace-nowrap">
+                                Attach
                               </button>
                             )}
                             {isChild && (
-                              <button
-                                onClick={() => detachFromService(index)}
-                                className="text-xs text-red-500 hover:text-red-700"
-                              >
+                              <button onClick={() => detachFromService(index)} className="text-[10px] text-red-500 hover:text-red-700 whitespace-nowrap">
                                 Detach
                               </button>
                             )}
                             {isService && (
-                              <div className="flex gap-1 mt-1">
-                                {!attachMode ? (
-                                  <button
-                                    onClick={() => startAttach(index)}
-                                    className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded hover:bg-green-200"
-                                  >
-                                    Start Attach
-                                  </button>
-                                ) : isAttachModeActive ? (
-                                  <button
-                                    onClick={stopAttach}
-                                    className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded hover:bg-red-200"
-                                  >
-                                    Stop Attach
-                                  </button>
-                                ) : (
-                                  <span className="text-xs text-gray-400">
-                                    Attach in progress on another service
-                                  </span>
-                                )}
-                              </div>
+                              <button
+                                onClick={() => toggleAttachMode(index)}
+                                className={`text-[10px] p-1 rounded-full border ${isAttachActive ? "border-blue-500 bg-blue-100 text-blue-700" : "border-gray-300 bg-gray-100 text-gray-500 hover:bg-gray-200"}`}
+                                title={isAttachActive ? "Stop attaching" : "Start attaching"}
+                              >
+                                📎
+                              </button>
+                            )}
+                            {isService && isAttachActive && (
+                              <span className="text-[9px] text-blue-600 whitespace-nowrap">Attaching...</span>
                             )}
                           </div>
                         </div>
-                        <div className="flex items-center justify-between">
+
+                        {/* Quantity controls and item total */}
+                        <div className="flex items-center justify-between mt-2">
                           <div className="flex items-center gap-2">
-                            <button
-                              onClick={() =>
-                                updateQuantity(index, item.quantity - 1)
-                              }
-                              className="w-8 h-8 bg-white border border-gray-300 rounded hover:bg-gray-100 font-bold"
-                            >
-                              −
-                            </button>
-                            <span className="w-12 text-center font-medium">
-                              {item.quantity}
-                            </span>
-                            <button
-                              onClick={() =>
-                                updateQuantity(index, item.quantity + 1)
-                              }
-                              className="w-8 h-8 bg-white border border-gray-300 rounded hover:bg-gray-100 font-bold"
-                            >
-                              +
-                            </button>
+                            <button onClick={() => updateQuantity(index, item.quantity - 1)} className="w-8 h-8 bg-white border border-gray-300 rounded hover:bg-gray-100 font-bold">−</button>
+                            <span className="w-12 text-center font-medium">{item.quantity}</span>
+                            <button onClick={() => updateQuantity(index, item.quantity + 1)} className="w-8 h-8 bg-white border border-gray-300 rounded hover:bg-gray-100 font-bold">+</button>
                           </div>
                           <div className="text-right">
-                            <p className="font-bold text-gray-900">
-                              ${((item.price * item.quantity) - (item.discount || 0)).toFixed(2)}
-                            </p>
-                            {item.discount > 0 && (
-                              <p className="text-xs text-green-600">
-                                Saved ${item.discount.toFixed(2)}
-                              </p>
-                            )}
+                            <p className="font-bold text-gray-900">${((item.price * item.quantity) - (item.discount || 0)).toFixed(2)}</p>
+                            {item.discount > 0 && <p className="text-xs text-green-600">Saved ${item.discount.toFixed(2)}</p>}
                           </div>
                         </div>
                       </div>
@@ -3233,58 +2756,84 @@ export default function PosPage() {
                 )}
               </div>
 
-              {/* Attach Dropdown */}
-              {showAttachDropdown && attachDropdownItemIndex !== null && (
-                <div className="absolute z-50 bg-white border border-gray-300 rounded shadow-lg p-2 mt-1" style={{ bottom: "100px", right: "20px" }}>
-                  <div className="text-xs font-medium text-gray-700 mb-1">Attach to service:</div>
-                  {cart.map((item, idx) => {
-                    if (item.type === "service" && idx !== attachDropdownItemIndex) {
-                      return (
-                        <button
-                          key={idx}
-                          onClick={() => attachToService(attachDropdownItemIndex, idx)}
-                          className="block w-full text-left px-2 py-1 text-xs hover:bg-gray-100 rounded"
-                        >
-                          {item.name}
-                        </button>
-                      );
-                    }
-                    return null;
-                  })}
-                  <button
-                    onClick={() => setShowAttachDropdown(false)}
-                    className="block w-full text-left px-2 py-1 text-xs text-gray-500 hover:bg-gray-100 rounded mt-1"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              )}
-
               {/* Attach Modal (block second service) */}
               {showAttachModal && (
                 <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
                   <div className="bg-white rounded-lg p-6 max-w-sm w-full">
                     <h3 className="text-lg font-semibold text-gray-900 mb-2">Cannot Add Service</h3>
-                    <p className="text-sm text-gray-600 mb-4">
-                      You are currently attaching products to another service. Please stop attaching before adding a new service.
-                    </p>
+                    <p className="text-sm text-gray-600 mb-4">You are currently attaching products to another service. Please stop attaching before adding a new service.</p>
                     <div className="flex gap-3">
+                      <button onClick={() => { setShowAttachModal(false); setPendingServiceProduct(null); stopAttach(); }} className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">Stop Attach</button>
+                      <button onClick={() => { setShowAttachModal(false); setPendingServiceProduct(null); }} className="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300">Cancel</button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Attach with Quantity Modal */}
+              {showAttachQuantityModal && attachQuantityProductIndex !== null && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                  <div className="bg-white rounded-lg p-6 max-w-md w-full">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-2">Attach to Service</h3>
+                    <p className="text-sm text-gray-600 mb-4">
+                      Attach a quantity of <strong>{cart[attachQuantityProductIndex]?.name}</strong> to a service.
+                    </p>
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">Service</label>
+                        <select
+                          value={attachModalSelectedServiceIndex ?? ""}
+                          onChange={(e) => setAttachModalSelectedServiceIndex(Number(e.target.value))}
+                          className="w-full rounded border border-gray-300 px-3 py-2 text-sm"
+                        >
+                          {cart.map((item, idx) => {
+                            if (item.type === "service") {
+                              return <option key={idx} value={idx}>{item.name}</option>;
+                            }
+                            return null;
+                          })}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-700 mb-1">Quantity to Attach</label>
+                        <input
+                          type="number"
+                          min="1"
+                          max={cart[attachQuantityProductIndex]?.quantity || 1}
+                          value={attachQuantityValue}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value) || 1;
+                            const max = cart[attachQuantityProductIndex]?.quantity || 1;
+                            setAttachQuantityValue(Math.min(Math.max(1, val), max));
+                          }}
+                          className="w-full rounded border border-gray-300 px-3 py-2 text-sm"
+                        />
+                        <p className="text-xs text-gray-500 mt-1">Available: {cart[attachQuantityProductIndex]?.quantity}</p>
+                      </div>
+                    </div>
+                    <div className="mt-6 flex gap-3">
                       <button
                         onClick={() => {
-                          setShowAttachModal(false);
-                          setPendingServiceProduct(null);
-                          stopAttach();
+                          if (attachModalSelectedServiceIndex === null) {
+                            setError("Please select a service.");
+                            return;
+                          }
+                          splitAndAttachItem(
+                            attachQuantityProductIndex,
+                            attachModalSelectedServiceIndex,
+                            attachQuantityValue
+                          );
                         }}
-                        className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                        className="flex-1 rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
                       >
-                        Stop Attach
+                        Attach
                       </button>
                       <button
                         onClick={() => {
-                          setShowAttachModal(false);
-                          setPendingServiceProduct(null);
+                          setShowAttachQuantityModal(false);
+                          setAttachQuantityProductIndex(null);
                         }}
-                        className="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300"
+                        className="flex-1 rounded border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
                       >
                         Cancel
                       </button>
@@ -3323,28 +2872,17 @@ export default function PosPage() {
 
                   <div className="flex items-center justify-between text-xl font-bold border-t pt-2">
                     <span>Total</span>
-                    <span className="text-blue-600">
-                      ${cartTotal.toFixed(2)}
-                    </span>
+                    <span className="text-blue-600">${cartTotal.toFixed(2)}</span>
                   </div>
 
                   {useSessionStore.getState().can(PERMISSIONS.POS_APPLY_DISCOUNT) && (
                     <div className="border-t pt-2">
                       {!showTransactionDiscount ? (
-                        <button
-                          onClick={() => setShowTransactionDiscount(true)}
-                          className="text-sm text-green-600 hover:text-green-700 font-medium"
-                        >
-                          + Apply Transaction Discount
-                        </button>
+                        <button onClick={() => setShowTransactionDiscount(true)} className="text-sm text-green-600 hover:text-green-700 font-medium">+ Apply Transaction Discount</button>
                       ) : (
                         <div className="space-y-2">
                           <div className="flex items-center gap-2">
-                            <select
-                              value={transactionDiscountType}
-                              onChange={(e) => setTransactionDiscountType(e.target.value)}
-                              className="px-2 py-1 border border-green-300 rounded text-sm"
-                            >
+                            <select value={transactionDiscountType} onChange={(e) => setTransactionDiscountType(e.target.value)} className="px-2 py-1 border border-green-300 rounded text-sm">
                               <option value="fixed">$ Fixed Amount</option>
                               <option value="percentage">% Percentage</option>
                             </select>
@@ -3365,24 +2903,9 @@ export default function PosPage() {
                               }}
                               className="flex-1 px-2 py-1 border border-green-300 rounded text-sm"
                             />
-                            <button
-                              onClick={() => {
-                                setTransactionDiscount(0);
-                                setShowTransactionDiscount(false);
-                                setDiscountReason("");
-                              }}
-                              className="text-sm text-gray-500 hover:text-gray-700"
-                            >
-                              ✕
-                            </button>
+                            <button onClick={() => { setTransactionDiscount(0); setShowTransactionDiscount(false); setDiscountReason(""); }} className="text-sm text-gray-500 hover:text-gray-700">✕</button>
                           </div>
-                          <input
-                            type="text"
-                            placeholder="Discount reason (optional)"
-                            value={discountReason}
-                            onChange={(e) => setDiscountReason(e.target.value)}
-                            className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
-                          />
+                          <input type="text" placeholder="Discount reason (optional)" value={discountReason} onChange={(e) => setDiscountReason(e.target.value)} className="w-full px-2 py-1 border border-gray-300 rounded text-xs" />
                         </div>
                       )}
                     </div>
@@ -3395,151 +2918,63 @@ export default function PosPage() {
                   >
                     Add Payments
                   </button>
-                  {checkingPreviousDayShift && (
-                    <p className="mt-2 text-xs text-gray-500">
-                      Checking whether a previous-day shift is still open...
-                    </p>
-                  )}
-                  {previousDayShiftError && !checkingPreviousDayShift && (
-                    <p className="mt-2 text-xs text-amber-700">
-                      {previousDayShiftError}
-                    </p>
-                  )}
+                  {checkingPreviousDayShift && <p className="mt-2 text-xs text-gray-500">Checking whether a previous-day shift is still open...</p>}
+                  {previousDayShiftError && !checkingPreviousDayShift && <p className="mt-2 text-xs text-amber-700">{previousDayShiftError}</p>}
                 </div>
               )}
             </>
           ) : (
+            // ---------- RETURNS MODE ----------
             <>
               <div className="p-4 border-b border-gray-200 bg-orange-50">
-                <h2 className="text-lg font-bold text-orange-900">
-                  Process Return
-                </h2>
-                <p className="text-sm text-orange-700 mt-1">
-                  Receipt: {originalSale.receiptNumber}
-                </p>
+                <h2 className="text-lg font-bold text-orange-900">Process Return</h2>
+                <p className="text-sm text-orange-700 mt-1">Receipt: {originalSale.receiptNumber}</p>
               </div>
-
               <div className="flex-1 p-4 space-y-2 overflow-auto">
                 {originalSale.items.map((item, idx) => {
                   const returnItem = returnItems[idx];
                   if (!returnItem) return null;
-
                   const maxQty = returnItem.maxQuantity;
                   if (maxQty <= 0) return null;
-
                   return (
-                    <div
-                      key={idx}
-                      className={`rounded-lg p-3 border-2 transition-all ${
-                        returnItem.selected
-                          ? "border-orange-500 bg-orange-50"
-                          : "border-gray-200 bg-gray-50"
-                      }`}
-                    >
+                    <div key={idx} className={`rounded-lg p-3 border-2 transition-all ${returnItem.selected ? "border-orange-500 bg-orange-50" : "border-gray-200 bg-gray-50"}`}>
                       <div className="flex items-start gap-3">
-                        <input
-                          type="checkbox"
-                          checked={returnItem.selected}
-                          onChange={() => toggleReturnItem(idx)}
-                          className="mt-1"
-                        />
+                        <input type="checkbox" checked={returnItem.selected} onChange={() => toggleReturnItem(idx)} className="mt-1" />
                         <div className="flex-1">
-                          <h4 className="font-medium text-gray-900">
-                            {item.productName ||
-                              item.product?.name ||
-                              "Unknown Product"}
-                          </h4>
-                          <p className="text-sm text-gray-600">
-                            ${item.unitPrice.toFixed(2)} each
-                          </p>
-                          <p className="text-xs text-gray-500">
-                            Available to return: {maxQty}
-                          </p>
+                          <h4 className="font-medium text-gray-900">{item.productName || item.product?.name || "Unknown Product"}</h4>
+                          <p className="text-sm text-gray-600">${item.unitPrice.toFixed(2)} each</p>
+                          <p className="text-xs text-gray-500">Available to return: {maxQty}</p>
                         </div>
                       </div>
-
                       {returnItem.selected && (
                         <div className="mt-3 flex items-center justify-between">
                           <div className="flex items-center gap-2">
-                            <button
-                              onClick={() =>
-                                updateReturnQty(idx, returnItem.quantity - 1)
-                              }
-                              className="w-8 h-8 bg-white border border-gray-300 rounded hover:bg-gray-100 font-bold"
-                            >
-                              −
-                            </button>
-                            <span className="w-12 text-center font-medium">
-                              {returnItem.quantity}
-                            </span>
-                            <button
-                              onClick={() =>
-                                updateReturnQty(idx, returnItem.quantity + 1)
-                              }
-                              className="w-8 h-8 bg-white border border-gray-300 rounded hover:bg-gray-100 font-bold"
-                            >
-                              +
-                            </button>
+                            <button onClick={() => updateReturnQty(idx, returnItem.quantity - 1)} className="w-8 h-8 bg-white border border-gray-300 rounded hover:bg-gray-100 font-bold">−</button>
+                            <span className="w-12 text-center font-medium">{returnItem.quantity}</span>
+                            <button onClick={() => updateReturnQty(idx, returnItem.quantity + 1)} className="w-8 h-8 bg-white border border-gray-300 rounded hover:bg-gray-100 font-bold">+</button>
                           </div>
-                          <p className="font-bold text-orange-600">
-                            ${(item.unitPrice * returnItem.quantity).toFixed(2)}
-                          </p>
+                          <p className="font-bold text-orange-600">${(item.unitPrice * returnItem.quantity).toFixed(2)}</p>
                         </div>
                       )}
                     </div>
                   );
                 })}
               </div>
-
               <div className="border-t border-gray-200 p-4 space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Return Reason
-                  </label>
-                  <select
-                    value={returnReason}
-                    onChange={(e) => setReturnReason(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                  >
-                    {returnReasons.map((reason) => (
-                      <option key={reason.value} value={reason.value}>
-                        {reason.label}
-                      </option>
-                    ))}
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Return Reason</label>
+                  <select value={returnReason} onChange={(e) => setReturnReason(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
+                    {returnReasons.map((reason) => <option key={reason.value} value={reason.value}>{reason.label}</option>)}
                   </select>
                 </div>
-
-                <input
-                  type="text"
-                  placeholder="Add note (optional)"
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
-                />
-
+                <input type="text" placeholder="Add note (optional)" value={notes} onChange={(e) => setNotes(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
                 <div className="flex items-center justify-between text-xl font-bold">
                   <span>Refund Total</span>
-                  <span className="text-orange-600">
-                    ${calculateReturnTotal().toFixed(2)}
-                  </span>
+                  <span className="text-orange-600">${calculateReturnTotal().toFixed(2)}</span>
                 </div>
-
-                {status && (
-                  <div className="text-sm text-green-700 bg-green-50 px-3 py-2 rounded">
-                    {status}
-                  </div>
-                )}
-                {error && (
-                  <div className="text-sm text-red-700 bg-red-50 px-3 py-2 rounded">
-                    {error}
-                  </div>
-                )}
-
-                <button
-                  onClick={processReturn}
-                  disabled={processingReturn || calculateReturnTotal() === 0}
-                  className="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 text-white font-bold py-4 rounded-lg text-lg transition-colors"
-                >
+                {status && <div className="text-sm text-green-700 bg-green-50 px-3 py-2 rounded">{status}</div>}
+                {error && <div className="text-sm text-red-700 bg-red-50 px-3 py-2 rounded">{error}</div>}
+                <button onClick={processReturn} disabled={processingReturn || calculateReturnTotal() === 0} className="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 text-white font-bold py-4 rounded-lg text-lg transition-colors">
                   {processingReturn ? "Processing..." : "Process Return"}
                 </button>
               </div>
@@ -3548,468 +2983,129 @@ export default function PosPage() {
         </div>
       </div>
 
-      {/* Variant Picker Modal (unchanged) */}
+      {/* Variant Picker Modal – unchanged */}
       {showVariantPicker && variantPickerProduct && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
             <div className="flex items-center justify-between p-6 border-b border-gray-200">
               <div>
-                <h2 className="text-2xl font-bold text-gray-900">
-                  {variantPickerProduct.title}
-                </h2>
-                <p className="text-sm text-gray-500 mt-1">
-                  Select a variant to add to cart
-                </p>
+                <h2 className="text-2xl font-bold text-gray-900">{variantPickerProduct.title}</h2>
+                <p className="text-sm text-gray-500 mt-1">Select a variant to add to cart</p>
               </div>
-              <button
-                onClick={() => {
-                  setShowVariantPicker(false);
-                  setVariantPickerProduct(null);
-                }}
-                className="text-gray-400 hover:text-gray-600 transition-colors"
-              >
-                <svg
-                  className="w-6 h-6"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M6 18L18 6M6 6l12 12"
-                  />
-                </svg>
+              <button onClick={() => { setShowVariantPicker(false); setVariantPickerProduct(null); }} className="text-gray-400 hover:text-gray-600 transition-colors">
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
               </button>
             </div>
-
             <div className="flex-1 overflow-auto p-6">
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                 {variantPickerProduct.variants.map((variant) => (
-                  <button
-                    key={variant.id}
-                    onClick={() => handleVariantSelect(variant)}
-                    className="bg-white border-2 border-gray-200 hover:border-blue-500 rounded-lg p-4 text-left transition-all hover:shadow-md"
-                  >
-                    <h3 className="font-semibold text-gray-900 mb-2">
-                      {variant.title}
-                    </h3>
-                    {variant.sku && (
-                      <p className="text-sm text-gray-600 mb-2">
-                        SKU: <span className="font-mono">{variant.sku}</span>
-                      </p>
-                    )}
-                    <p className="text-xl font-bold text-blue-600 mb-2">
-                      ${parseFloat(variant.price).toFixed(2)}
-                    </p>
+                  <button key={variant.id} onClick={() => handleVariantSelect(variant)} className="bg-white border-2 border-gray-200 hover:border-blue-500 rounded-lg p-4 text-left transition-all hover:shadow-md">
+                    <h3 className="font-semibold text-gray-900 mb-2">{variant.title}</h3>
+                    {variant.sku && <p className="text-sm text-gray-600 mb-2">SKU: <span className="font-mono">{variant.sku}</span></p>}
+                    <p className="text-xl font-bold text-blue-600 mb-2">${parseFloat(variant.price).toFixed(2)}</p>
                     <div className="flex items-center gap-2">
                       {variant.inventoryQuantity > 0 ? (
-                        <>
-                          <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                          <span className="text-sm text-gray-600">
-                            {variant.inventoryQuantity} in stock
-                          </span>
-                        </>
+                        <><div className="w-2 h-2 bg-green-500 rounded-full"></div><span className="text-sm text-gray-600">{variant.inventoryQuantity} in stock</span></>
                       ) : (
-                        <>
-                          <div className="w-2 h-2 bg-red-500 rounded-full"></div>
-                          <span className="text-sm text-red-600">
-                            Out of stock
-                          </span>
-                        </>
+                        <><div className="w-2 h-2 bg-red-500 rounded-full"></div><span className="text-sm text-red-600">Out of stock</span></>
                       )}
                     </div>
                   </button>
                 ))}
               </div>
             </div>
-
             <div className="p-6 border-t border-gray-200 bg-gray-50">
-              <button
-                onClick={() => {
-                  setShowVariantPicker(false);
-                  setVariantPickerProduct(null);
-                }}
-                className="w-full px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
-              >
-                Cancel
-              </button>
+              <button onClick={() => { setShowVariantPicker(false); setVariantPickerProduct(null); }} className="w-full px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors">Cancel</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Receipt Lookup Modal (unchanged) */}
+      {/* Receipt Lookup Modal – unchanged */}
       {showReturnLookup && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg max-w-md w-full p-6">
-            <h2 className="text-xl font-bold text-gray-900 mb-4">
-              {exchangeMode ? "Lookup Receipt for Exchange" : "Lookup Receipt"}
-            </h2>
-            <p className="text-sm text-gray-600 mb-4">
-              {exchangeMode
-                ? "Enter the receipt number to start an exchange"
-                : "Enter the receipt number to process a return"}
-            </p>
-
+            <h2 className="text-xl font-bold text-gray-900 mb-4">{exchangeMode ? "Lookup Receipt for Exchange" : "Lookup Receipt"}</h2>
+            <p className="text-sm text-gray-600 mb-4">{exchangeMode ? "Enter the receipt number to start an exchange" : "Enter the receipt number to process a return"}</p>
             <div className="mb-4">
-              <input
-                type="text"
-                placeholder="Receipt number or idempotency key..."
-                value={receiptSearchQuery}
-                onChange={(e) => setReceiptSearchQuery(e.target.value)}
-                onKeyPress={(e) => e.key === "Enter" && lookupSale()}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500"
-                autoFocus
-              />
+              <input type="text" placeholder="Receipt number or idempotency key..." value={receiptSearchQuery} onChange={(e) => setReceiptSearchQuery(e.target.value)} onKeyPress={(e) => e.key === "Enter" && lookupSale()} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500" autoFocus />
             </div>
-
-            {lookupError && (
-              <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">
-                {lookupError}
-              </div>
-            )}
-
+            {lookupError && <div className="mb-4 p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">{lookupError}</div>}
             <div className="flex gap-3">
-              <button
-                onClick={lookupSale}
-                className={`flex-1 px-4 py-2 text-white rounded-lg font-medium ${
-                  exchangeMode
-                    ? "bg-indigo-600 hover:bg-indigo-700"
-                    : "bg-orange-500 hover:bg-orange-600"
-                }`}
-              >
-                Lookup
-              </button>
-              <button
-                onClick={exchangeMode ? exitExchangeMode : exitReturnMode}
-                className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 font-medium"
-              >
-                Cancel
-              </button>
+              <button onClick={lookupSale} className={`flex-1 px-4 py-2 text-white rounded-lg font-medium ${exchangeMode ? "bg-indigo-600 hover:bg-indigo-700" : "bg-orange-500 hover:bg-orange-600"}`}>Lookup</button>
+              <button onClick={exchangeMode ? exitExchangeMode : exitReturnMode} className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 font-medium">Cancel</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Receipt Modal (unchanged) */}
+      {/* Receipt Modal – unchanged */}
       {showReceipt && receipt && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg max-w-md w-full max-h-[90vh] overflow-auto">
             <div className="p-6 border-b border-gray-200 sticky top-0 bg-white">
               <div className="flex items-center gap-2">
-                <h2 className="text-2xl font-bold text-gray-900">
-                  {receipt.isExchange
-                    ? "Exchange Slip"
-                    : receipt.isReturn
-                      ? "Return Receipt"
-                      : "Receipt"}
-                </h2>
-                {isPartialReceipt && (
-                  <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-xs font-semibold">
-                    Partial
-                  </span>
-                )}
+                <h2 className="text-2xl font-bold text-gray-900">{receipt.isExchange ? "Exchange Slip" : receipt.isReturn ? "Return Receipt" : "Receipt"}</h2>
+                {isPartialReceipt && <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-xs font-semibold">Partial</span>}
               </div>
-              <p className="text-sm text-gray-600 font-mono">
-                #{receipt.receiptNumber}
-              </p>
-              <p className="text-xs text-gray-500 mt-1">
-                {new Date(receipt.timestamp).toLocaleString()}
-              </p>
-              {receipt.isOffline && (
-                <div className="mt-2 px-2 py-1 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800 font-medium">
-                  ⚠️ Offline Sale - Will sync when online
-                </div>
-              )}
+              <p className="text-sm text-gray-600 font-mono">#{receipt.receiptNumber}</p>
+              <p className="text-xs text-gray-500 mt-1">{new Date(receipt.timestamp).toLocaleString()}</p>
+              {receipt.isOffline && <div className="mt-2 px-2 py-1 bg-amber-50 border border-amber-200 rounded text-xs text-amber-800 font-medium">⚠️ Offline Sale - Will sync when online</div>}
             </div>
-
             <div className="p-6 space-y-4">
               <div className="border-b pb-4">
-                <p className="text-sm font-semibold text-gray-900">
-                  {activeOrganization?.name || "Organization"}
-                </p>
-                <p className="text-xs text-gray-600">
-                  Location: {getLocationLabel(locationId)}
-                </p>
+                <p className="text-sm font-semibold text-gray-900">{activeOrganization?.name || "Organization"}</p>
+                <p className="text-xs text-gray-600">Location: {getLocationLabel(locationId)}</p>
               </div>
-
               {receipt.isExchange ? (
                 <>
-                  <div className="border-b pb-4">
-                    <h3 className="text-sm font-semibold text-gray-900 mb-3">
-                      Returned Items
-                    </h3>
-                    <div className="space-y-2">
-                      {receipt.returnItems.map((item, idx) => (
-                        <div key={idx} className="flex justify-between items-start">
-                          <div className="flex-1">
-                            <p className="text-sm font-medium text-gray-900">
-                              {item.name}
-                            </p>
-                            <p className="text-xs text-gray-600">
-                              {item.quantity} × ${item.price.toFixed(2)}
-                            </p>
-                          </div>
-                          <p className="text-sm font-semibold text-gray-900 text-right">
-                            ${(item.price * item.quantity).toFixed(2)}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="border-b pb-4">
-                    <h3 className="text-sm font-semibold text-gray-900 mb-3">
-                      Exchange Items
-                    </h3>
-                    <div className="space-y-2">
-                      {receipt.exchangeItems.map((item, idx) => (
-                        <div key={idx} className="flex justify-between items-start">
-                          <div className="flex-1">
-                            <p className="text-sm font-medium text-gray-900">
-                              {item.name}
-                            </p>
-                            <p className="text-xs text-gray-600">
-                              {item.quantity} × ${item.price.toFixed(2)}
-                            </p>
-                          </div>
-                          <p className="text-sm font-semibold text-gray-900 text-right">
-                            ${(item.price * item.quantity).toFixed(2)}
-                          </p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+                  <div className="border-b pb-4"><h3 className="text-sm font-semibold text-gray-900 mb-3">Returned Items</h3><div className="space-y-2">{receipt.returnItems.map((item, idx) => (<div key={idx} className="flex justify-between items-start"><div className="flex-1"><p className="text-sm font-medium text-gray-900">{item.name}</p><p className="text-xs text-gray-600">{item.quantity} × ${item.price.toFixed(2)}</p></div><p className="text-sm font-semibold text-gray-900 text-right">${(item.price * item.quantity).toFixed(2)}</p></div>))}</div></div>
+                  <div className="border-b pb-4"><h3 className="text-sm font-semibold text-gray-900 mb-3">Exchange Items</h3><div className="space-y-2">{receipt.exchangeItems.map((item, idx) => (<div key={idx} className="flex justify-between items-start"><div className="flex-1"><p className="text-sm font-medium text-gray-900">{item.name}</p><p className="text-xs text-gray-600">{item.quantity} × ${item.price.toFixed(2)}</p></div><p className="text-sm font-semibold text-gray-900 text-right">${(item.price * item.quantity).toFixed(2)}</p></div>))}</div></div>
                 </>
               ) : (
-                <div className="border-b pb-4">
-                  <h3 className="text-sm font-semibold text-gray-900 mb-3">
-                    Items
-                  </h3>
-                  <div className="space-y-2">
-                    {receipt.items.map((item, idx) => (
-                      <div key={idx} className="flex justify-between items-start">
-                        <div className="flex-1">
-                          <p className="text-sm font-medium text-gray-900">
-                            {item.name}
-                          </p>
-                          <p className="text-xs text-gray-600">
-                            {item.quantity} × ${item.price.toFixed(2)}
-                          </p>
-                        </div>
-                        <p className="text-sm font-semibold text-gray-900 text-right">
-                          ${(item.price * item.quantity).toFixed(2)}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                <div className="border-b pb-4"><h3 className="text-sm font-semibold text-gray-900 mb-3">Items</h3><div className="space-y-2">{receipt.items.map((item, idx) => (<div key={idx} className="flex justify-between items-start"><div className="flex-1"><p className="text-sm font-medium text-gray-900">{item.name}</p><p className="text-xs text-gray-600">{item.quantity} × ${item.price.toFixed(2)}</p></div><p className="text-sm font-semibold text-gray-900 text-right">${(item.price * item.quantity).toFixed(2)}</p></div>))}</div></div>
               )}
-
               {receipt.payments && receipt.payments.length > 0 && (
-                <div className="border-b pb-4">
-                  <h3 className="text-sm font-semibold text-gray-900 mb-3">
-                    {receipt.isExchange ? "Payment Due" : "Payment"}
-                  </h3>
-                  <div className="space-y-2">
-                    {receipt.payments.map((payment, idx) => (
-                      <div key={idx} className="flex justify-between">
-                        <p className="text-sm text-gray-700 capitalize">
-                          {payment.method}
-                        </p>
-                        <p className="text-sm font-semibold text-gray-900">
-                          ${toNonNegativeAmount(payment.amount).toFixed(2)}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                <div className="border-b pb-4"><h3 className="text-sm font-semibold text-gray-900 mb-3">{receipt.isExchange ? "Payment Due" : "Payment"}</h3><div className="space-y-2">{receipt.payments.map((payment, idx) => (<div key={idx} className="flex justify-between"><p className="text-sm text-gray-700 capitalize">{payment.method}</p><p className="text-sm font-semibold text-gray-900">${toNonNegativeAmount(payment.amount).toFixed(2)}</p></div>))}</div></div>
               )}
-
               {receipt.deliveryInfo && (
-                <div className="border-b pb-4">
-                  <h3 className="text-sm font-semibold text-gray-900 mb-3">
-                    Delivery Information
-                  </h3>
-                  <div className="space-y-2">
-                    {receipt.trackingNumber && (
-                      <div className="flex justify-between">
-                        <p className="text-xs text-gray-600">Tracking #</p>
-                        <p className="text-sm font-mono font-semibold text-blue-600">
-                          {receipt.trackingNumber}
-                        </p>
-                      </div>
-                    )}
-                    <div className="flex justify-between">
-                      <p className="text-xs text-gray-600">Recipient</p>
-                      <p className="text-sm font-medium text-gray-900">
-                        {receipt.deliveryInfo.recipientName}
-                      </p>
-                    </div>
-                    <div className="flex justify-between">
-                      <p className="text-xs text-gray-600">Phone</p>
-                      <p className="text-sm font-medium text-gray-900">
-                        {receipt.deliveryInfo.recipientPhone}
-                      </p>
-                    </div>
-                    {receipt.deliveryInfo.deliveryAddress && (
-                      <div className="flex justify-between">
-                        <p className="text-xs text-gray-600">Address</p>
-                        <p className="text-sm font-medium text-gray-900 text-right">
-                          {receipt.deliveryInfo.deliveryAddress.street}<br />
-                          {receipt.deliveryInfo.deliveryAddress.city}
-                          {receipt.deliveryInfo.deliveryAddress.country && 
-                            `, ${receipt.deliveryInfo.deliveryAddress.country}`}
-                        </p>
-                      </div>
-                    )}
-                    {receipt.deliveryInfo.deliveryCategory && (
-                      <div className="flex justify-between">
-                        <p className="text-xs text-gray-600">Delivery Type</p>
-                        <p className="text-sm font-medium text-gray-900">
-                          {receipt.deliveryInfo.deliveryCategory} - {receipt.deliveryInfo.deliveryOption}
-                        </p>
-                      </div>
-                    )}
-                    {receipt.deliveryFee > 0 && (
-                      <div className="flex justify-between">
-                        <p className="text-xs text-gray-600">Delivery Fee</p>
-                        <p className="text-sm font-semibold text-gray-900">
-                          ${receipt.deliveryFee.toFixed(2)}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                </div>
+                <div className="border-b pb-4"><h3 className="text-sm font-semibold text-gray-900 mb-3">Delivery Information</h3><div className="space-y-2">{receipt.trackingNumber && <div className="flex justify-between"><p className="text-xs text-gray-600">Tracking #</p><p className="text-sm font-mono font-semibold text-blue-600">{receipt.trackingNumber}</p></div>}<div className="flex justify-between"><p className="text-xs text-gray-600">Recipient</p><p className="text-sm font-medium text-gray-900">{receipt.deliveryInfo.recipientName}</p></div><div className="flex justify-between"><p className="text-xs text-gray-600">Phone</p><p className="text-sm font-medium text-gray-900">{receipt.deliveryInfo.recipientPhone}</p></div>{receipt.deliveryInfo.deliveryAddress && <div className="flex justify-between"><p className="text-xs text-gray-600">Address</p><p className="text-sm font-medium text-gray-900 text-right">{receipt.deliveryInfo.deliveryAddress.street}<br />{receipt.deliveryInfo.deliveryAddress.city}{receipt.deliveryInfo.deliveryAddress.country && `, ${receipt.deliveryInfo.deliveryAddress.country}`}</p></div>}{receipt.deliveryInfo.deliveryCategory && <div className="flex justify-between"><p className="text-xs text-gray-600">Delivery Type</p><p className="text-sm font-medium text-gray-900">{receipt.deliveryInfo.deliveryCategory} - {receipt.deliveryInfo.deliveryOption}</p></div>}{receipt.deliveryFee > 0 && <div className="flex justify-between"><p className="text-xs text-gray-600">Delivery Fee</p><p className="text-sm font-semibold text-gray-900">${receipt.deliveryFee.toFixed(2)}</p></div>}</div></div>
               )}
-
               {(receipt.isReturn || receipt.isExchange) && receipt.returnReason && (
-                <div className="border-b pb-4">
-                  <h3 className="text-sm font-semibold text-gray-900 mb-2">
-                    Return Reason
-                  </h3>
-                  <p className="text-sm text-gray-700">
-                    {receipt.returnReason
-                      .replace(/-/g, " ")
-                      .replace(/\b\w/g, (l) => l.toUpperCase())}
-                  </p>
-                </div>
+                <div className="border-b pb-4"><h3 className="text-sm font-semibold text-gray-900 mb-2">Return Reason</h3><p className="text-sm text-gray-700">{receipt.returnReason.replace(/-/g, " ").replace(/\b\w/g, (l) => l.toUpperCase())}</p></div>
               )}
-
               {receipt.isExchange ? (
                 <div className="bg-indigo-50 rounded-lg p-4 space-y-2">
-                  <div className="flex justify-between items-center text-sm font-semibold">
-                    <span>Return Total</span>
-                    <span className="text-orange-600">
-                      ${receipt.returnTotal.toFixed(2)}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center text-sm font-semibold">
-                    <span>Exchange Total</span>
-                    <span className="text-indigo-600">
-                      ${receipt.exchangeTotal.toFixed(2)}
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <p className="text-lg font-bold text-gray-900">
-                      {receipt.netBalance > 0
-                        ? "Customer Pays"
-                        : receipt.netBalance < 0
-                          ? "Refund Due"
-                          : "Balanced"}
-                    </p>
-                    <p className="text-2xl font-bold text-gray-900">
-                      ${Math.abs(receipt.netBalance).toFixed(2)}
-                    </p>
-                  </div>
+                  <div className="flex justify-between items-center text-sm font-semibold"><span>Return Total</span><span className="text-orange-600">${receipt.returnTotal.toFixed(2)}</span></div>
+                  <div className="flex justify-between items-center text-sm font-semibold"><span>Exchange Total</span><span className="text-indigo-600">${receipt.exchangeTotal.toFixed(2)}</span></div>
+                  <div className="flex justify-between items-center"><p className="text-lg font-bold text-gray-900">{receipt.netBalance > 0 ? "Customer Pays" : receipt.netBalance < 0 ? "Refund Due" : "Balanced"}</p><p className="text-2xl font-bold text-gray-900">${Math.abs(receipt.netBalance).toFixed(2)}</p></div>
                 </div>
               ) : (
-                <div
-                  className={`${receipt.isReturn ? "bg-orange-50" : "bg-blue-50"} rounded-lg p-4`}
-                >
-                  <div className="flex justify-between items-center">
-                    <p className="text-lg font-bold text-gray-900">
-                      {receipt.isReturn ? "Refund Total" : "Total"}
-                    </p>
-                    <p
-                      className={`text-2xl font-bold ${receipt.isReturn ? "text-orange-600" : "text-blue-600"}`}
-                    >
-                      ${(receipt.subtotal + (receipt.deliveryFee || 0)).toFixed(2)}
-                    </p>
-                  </div>
+                <div className={`${receipt.isReturn ? "bg-orange-50" : "bg-blue-50"} rounded-lg p-4`}>
+                  <div className="flex justify-between items-center"><p className="text-lg font-bold text-gray-900">{receipt.isReturn ? "Refund Total" : "Total"}</p><p className={`text-2xl font-bold ${receipt.isReturn ? "text-orange-600" : "text-blue-600"}`}>${(receipt.subtotal + (receipt.deliveryFee || 0)).toFixed(2)}</p></div>
                   {isPartialReceipt && !receipt.isReturn && !receipt.isExchange && (
                     <div className="mt-3 pt-3 border-t border-blue-100 space-y-1">
-                      <div className="flex justify-between items-center text-sm">
-                        <p className="text-gray-700">Amount Paid</p>
-                        <p className="font-semibold text-gray-900">
-                          ${receiptAmountPaid.toFixed(2)}
-                        </p>
-                      </div>
-                      <div className="flex justify-between items-center text-sm">
-                        <p className="text-gray-700">Balance Due</p>
-                        <p className="font-semibold text-amber-700">
-                          ${receiptBalanceDue.toFixed(2)}
-                        </p>
-                      </div>
+                      <div className="flex justify-between items-center text-sm"><p className="text-gray-700">Amount Paid</p><p className="font-semibold text-gray-900">${receiptAmountPaid.toFixed(2)}</p></div>
+                      <div className="flex justify-between items-center text-sm"><p className="text-gray-700">Balance Due</p><p className="font-semibold text-amber-700">${receiptBalanceDue.toFixed(2)}</p></div>
                     </div>
                   )}
                 </div>
               )}
-
               {receipt.notes && (
-                <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
-                  <p className="text-xs text-gray-600 font-semibold mb-1">
-                    Notes
-                  </p>
-                  <p className="text-sm text-gray-900">{receipt.notes}</p>
-                </div>
+                <div className="bg-gray-50 rounded-lg p-3 border border-gray-200"><p className="text-xs text-gray-600 font-semibold mb-1">Notes</p><p className="text-sm text-gray-900">{receipt.notes}</p></div>
               )}
-
               <div className="border-t pt-4">
-                <p className="text-sm font-semibold text-gray-900 mb-3">
-                  Email Receipt
-                </p>
+                <p className="text-sm font-semibold text-gray-900 mb-3">Email Receipt</p>
                 <div className="flex gap-2 mb-2">
-                  <input
-                    type="email"
-                    placeholder="customer@example.com"
-                    value={emailInput}
-                    onChange={(e) => {
-                      setEmailInput(e.target.value);
-                      setEmailError("");
-                    }}
-                    className="flex-1 px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                  <button
-                    onClick={handleSendEmail}
-                    disabled={sendingEmail}
-                    className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-300 text-white rounded font-medium text-sm transition-colors"
-                  >
-                    {sendingEmail ? "..." : "Send"}
-                  </button>
+                  <input type="email" placeholder="customer@example.com" value={emailInput} onChange={(e) => { setEmailInput(e.target.value); setEmailError(""); }} className="flex-1 px-3 py-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  <button onClick={handleSendEmail} disabled={sendingEmail} className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-300 text-white rounded font-medium text-sm transition-colors">{sendingEmail ? "..." : "Send"}</button>
                 </div>
-                {emailError && (
-                  <p className="text-xs text-red-600 bg-red-50 rounded px-2 py-1">
-                    {emailError}
-                  </p>
-                )}
+                {emailError && <p className="text-xs text-red-600 bg-red-50 rounded px-2 py-1">{emailError}</p>}
               </div>
             </div>
-
             <div className="p-6 border-t border-gray-200 flex gap-3 sticky bottom-0 bg-white">
-              <button
-                onClick={handlePrintReceipt}
-                className="flex-1 px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold transition-colors flex items-center justify-center gap-2"
-              >
-                <span>🖨️</span> Print
-              </button>
-              <button
-                onClick={() => setShowReceipt(false)}
-                className="flex-1 px-4 py-3 bg-gray-200 hover:bg-gray-300 text-gray-900 rounded-lg font-semibold transition-colors"
-              >
-                Close
-              </button>
+              <button onClick={handlePrintReceipt} className="flex-1 px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold transition-colors flex items-center justify-center gap-2"><span>🖨️</span> Print</button>
+              <button onClick={() => setShowReceipt(false)} className="flex-1 px-4 py-3 bg-gray-200 hover:bg-gray-300 text-gray-900 rounded-lg font-semibold transition-colors">Close</button>
             </div>
           </div>
         </div>
