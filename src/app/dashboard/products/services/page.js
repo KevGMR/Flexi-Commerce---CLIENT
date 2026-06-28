@@ -14,7 +14,6 @@ const createEmptyForm = () => ({
   status: "active",
   serviceKind: "single",
   tags: "",
-  // NEW: commission fields
   commissionType: "percentage",
   commissionValue: "",
 });
@@ -117,7 +116,6 @@ function ServicesPageContent() {
       status: service.status || "active",
       serviceKind: service.serviceKind || "single",
       tags: Array.isArray(service.tags) ? service.tags.join(", ") : "",
-      // NEW: commission fields
       commissionType: service.commissionType || "percentage",
       commissionValue:
         service.commissionValue !== undefined && service.commissionValue !== null
@@ -279,7 +277,6 @@ function ServicesPageContent() {
           .map((tag) => tag.trim())
           .filter(Boolean),
         trackInventory: false,
-        // NEW: commission fields
         commissionType: form.commissionType,
         commissionValue: commissionValue,
       };
@@ -469,7 +466,6 @@ function ServicesPageContent() {
                         <div className="mt-2 text-sm text-zinc-600">
                           ${Number(service.price || 0).toFixed(2)}
                         </div>
-                        {/* Show commission preview */}
                         <div className="mt-1 text-xs text-zinc-500">
                           Commission: {service.commissionType === "percentage" ? `${service.commissionValue || 0}%` : `$${Number(service.commissionValue || 0).toFixed(2)}`}
                         </div>
@@ -585,11 +581,13 @@ function ServicesPageContent() {
                 <input
                   name="sku"
                   value={form.sku}
-                  onChange={handleFieldChange}
-                  className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
-                  placeholder="SERVICE-001"
-                  required
+                  disabled
+                  className="mt-1 w-full rounded border border-zinc-300 bg-gray-100 px-3 py-2 text-sm text-gray-500 cursor-not-allowed"
+                  placeholder="SKU (auto-generated)"
                 />
+                <p className="mt-1 text-[10px] text-zinc-500">
+                  SKU is generated at creation and cannot be changed.
+                </p>
               </div>
             </div>
 
@@ -653,7 +651,7 @@ function ServicesPageContent() {
               </div>
             </div>
 
-            {/* NEW: Commission section */}
+            {/* Commission section */}
             <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
               <h3 className="text-sm font-semibold text-zinc-900 mb-2">Commission Default</h3>
               <div className="grid gap-3 md:grid-cols-2">
