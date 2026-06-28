@@ -14,7 +14,6 @@ const createEmptyForm = () => ({
   status: "active",
   serviceKind: "single",
   tags: "",
-  // NEW: commission fields
   commissionType: "percentage",
   commissionValue: "",
 });
@@ -35,6 +34,16 @@ const toNumberOrZero = (value) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+// Helper to slugify a string for SKU
+const slugify = (text) => {
+  return text
+    .toLowerCase()
+    .trim()
+    .replace(/[^\w\s-]/g, "") // remove special chars
+    .replace(/[\s_-]+/g, "-") // replace spaces/underscores with hyphens
+    .replace(/^-+|-+$/g, ""); // trim hyphens
+};
+
 export default function NewServicePage() {
   const router = useRouter();
   const can = useSessionStore((s) => s.can);
@@ -45,6 +54,7 @@ export default function NewServicePage() {
   const [bundleRows, setBundleRows] = useState([createBundleRow()]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [skuManuallyEdited, setSkuManuallyEdited] = useState(false);
 
   const loadServices = async () => {
     try {
@@ -58,6 +68,50 @@ export default function NewServicePage() {
   useEffect(() => {
     loadServices();
   }, []);
+
+  // Auto-generate SKU when name changes (if not manually edited)
+  const generateUniqueSku = (name, existingServices) => {
+    if (!name.trim()) return "";
+    let base = slugify(name);
+    let sku = base;
+    let counter = 1;
+    while (existingServices.some((s) => s.sku === sku)) {
+      sku = `${base}-${counter}`;
+      counter++;
+    }
+    return sku;
+  };
+
+  const updateSkuFromName = (name) => {
+    if (!skuManuallyEdited) {
+      const newSku = generateUniqueSku(name, services);
+      setForm((prev) => ({ ...prev, sku: newSku }));
+    }
+  };
+
+  // When name changes, update SKU if not manually edited
+  const handleFieldChange = (e) => {
+    const { name, value } = e.target;
+    setForm((prev) => ({ ...prev, [name]: value }));
+    if (name === "name") {
+      updateSkuFromName(value);
+    }
+  };
+
+  // Regenerate SKU manually
+  const regenerateSku = () => {
+    setSkuManuallyEdited(false);
+    const newSku = generateUniqueSku(form.name, services);
+    setForm((prev) => ({ ...prev, sku: newSku }));
+  };
+
+  // When services load, update SKU if name is already set and not manually edited
+  useEffect(() => {
+    if (form.name && !skuManuallyEdited) {
+      const newSku = generateUniqueSku(form.name, services);
+      setForm((prev) => ({ ...prev, sku: newSku }));
+    }
+  }, [services]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const updateBundleRow = (index, field, value) => {
     setBundleRows((previous) =>
@@ -99,8 +153,6 @@ export default function NewServicePage() {
       const next = prev.filter((_, i) => i !== index);
       return next.length > 0 ? next : [createBundleRow()];
     });
-
-  const handleFieldChange = (e) => setForm((p) => ({ ...p, [e.target.name]: e.target.value }));
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -169,7 +221,6 @@ export default function NewServicePage() {
         status: form.status,
         tags: form.tags.split(",").map((t) => t.trim()).filter(Boolean),
         trackInventory: false,
-        // NEW: commission fields
         commissionType: form.commissionType,
         commissionValue: commissionValue,
       };
@@ -203,27 +254,75 @@ export default function NewServicePage() {
         <div className="grid gap-4 md:grid-cols-2">
           <div>
             <label className="text-xs font-medium text-zinc-700">Name *</label>
-            <input name="name" value={form.name} onChange={handleFieldChange} className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm" required />
+            <input
+              name="name"
+              value={form.name}
+              onChange={handleFieldChange}
+              className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+              required
+            />
           </div>
           <div>
             <label className="text-xs font-medium text-zinc-700">SKU *</label>
-            <input name="sku" value={form.sku} onChange={handleFieldChange} className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm" required />
+            <div className="relative mt-1">
+              <input
+                name="sku"
+                value={form.sku}
+                onChange={(e) => {
+                  setSkuManuallyEdited(true);
+                  setForm((prev) => ({ ...prev, sku: e.target.value }));
+                }}
+                className="w-full rounded border border-zinc-300 px-3 py-2 text-sm pr-8"
+                required
+              />
+              <button
+                type="button"
+                onClick={regenerateSku}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                title="Regenerate SKU from name"
+              >
+                🔁
+              </button>
+            </div>
+            <p className="mt-1 text-[10px] text-zinc-500">
+              Auto‑generated from the name. Click the 🔁 button to regenerate.
+            </p>
           </div>
         </div>
 
         <div>
           <label className="text-xs font-medium text-zinc-700">Description</label>
-          <textarea name="description" value={form.description} onChange={handleFieldChange} rows={3} className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm" />
+          <textarea
+            name="description"
+            value={form.description}
+            onChange={handleFieldChange}
+            rows={3}
+            className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+          />
         </div>
 
         <div className="grid gap-4 md:grid-cols-3">
           <div>
             <label className="text-xs font-medium text-zinc-700">Price *</label>
-            <input type="number" min="0" step="0.01" name="price" value={form.price} onChange={handleFieldChange} className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm" required />
+            <input
+              type="number"
+              min="0"
+              step="0.01"
+              name="price"
+              value={form.price}
+              onChange={handleFieldChange}
+              className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+              required
+            />
           </div>
           <div>
             <label className="text-xs font-medium text-zinc-700">Status</label>
-            <select name="status" value={form.status} onChange={handleFieldChange} className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm">
+            <select
+              name="status"
+              value={form.status}
+              onChange={handleFieldChange}
+              className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+            >
               <option value="active">Active</option>
               <option value="draft">Draft</option>
               <option value="archived">Archived</option>
@@ -231,14 +330,23 @@ export default function NewServicePage() {
           </div>
           <div>
             <label className="text-xs font-medium text-zinc-700">Service Type</label>
-            <select name="serviceKind" value={form.serviceKind} onChange={(e) => { setForm((p) => ({ ...p, serviceKind: e.target.value })); if (e.target.value !== 'bundle') setBundleRows([createBundleRow()]); }} className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm">
+            <select
+              name="serviceKind"
+              value={form.serviceKind}
+              onChange={(e) => {
+                const val = e.target.value;
+                setForm((p) => ({ ...p, serviceKind: val }));
+                if (val !== "bundle") setBundleRows([createBundleRow()]);
+              }}
+              className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+            >
               <option value="single">Single service</option>
               <option value="bundle">Bundle service</option>
             </select>
           </div>
         </div>
 
-        {/* NEW: Commission section */}
+        {/* Commission section */}
         <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
           <h3 className="text-sm font-semibold text-zinc-900 mb-2">Commission Default</h3>
           <div className="grid gap-3 md:grid-cols-2">
@@ -275,17 +383,25 @@ export default function NewServicePage() {
 
         <div>
           <label className="text-xs font-medium text-zinc-700">Tags</label>
-          <input name="tags" value={form.tags} onChange={handleFieldChange} className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm" placeholder="spa, premium" />
+          <input
+            name="tags"
+            value={form.tags}
+            onChange={handleFieldChange}
+            className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+            placeholder="spa, premium"
+          />
         </div>
 
-        {form.serviceKind === 'bundle' ? (
+        {form.serviceKind === "bundle" ? (
           <div className="space-y-4 rounded-lg border border-blue-200 bg-blue-50 p-4">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h3 className="text-sm font-semibold text-zinc-900">Bundle Editor</h3>
                 <p className="text-xs text-zinc-600">Group existing services into one sellable service line.</p>
               </div>
-              <button type="button" onClick={addBundleRow} className="rounded bg-blue-600 px-3 py-2 text-xs font-medium text-white hover:bg-blue-700">Add Component</button>
+              <button type="button" onClick={addBundleRow} className="rounded bg-blue-600 px-3 py-2 text-xs font-medium text-white hover:bg-blue-700">
+                Add Component
+              </button>
             </div>
 
             <div className="space-y-3">
@@ -294,7 +410,11 @@ export default function NewServicePage() {
                   <div className="grid gap-3 md:grid-cols-[1.1fr_100px_1fr_1fr_120px]">
                     <div>
                       <label className="text-[11px] font-medium text-zinc-700">Service</label>
-                      <select value={row.serviceProductId} onChange={(ev) => updateBundleRow(index, 'serviceProductId', ev.target.value)} className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm">
+                      <select
+                        value={row.serviceProductId}
+                        onChange={(ev) => updateBundleRow(index, "serviceProductId", ev.target.value)}
+                        className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                      >
                         <option value="">Select service</option>
                         {services.map((s) => {
                           const sid = s._id || s.id;
@@ -304,22 +424,53 @@ export default function NewServicePage() {
                     </div>
                     <div>
                       <label className="text-[11px] font-medium text-zinc-700">Qty</label>
-                      <input type="number" min="1" step="1" value={row.quantity} onChange={(ev) => updateBundleRow(index, 'quantity', ev.target.value)} className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm" />
+                      <input
+                        type="number"
+                        min="1"
+                        step="1"
+                        value={row.quantity}
+                        onChange={(ev) => updateBundleRow(index, "quantity", ev.target.value)}
+                        className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                      />
                     </div>
                     <div>
                       <label className="text-[11px] font-medium text-zinc-700">Name snapshot</label>
-                      <input value={row.nameSnapshot} onChange={(ev) => updateBundleRow(index, 'nameSnapshot', ev.target.value)} className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm" placeholder="Component name" />
+                      <input
+                        value={row.nameSnapshot}
+                        onChange={(ev) => updateBundleRow(index, "nameSnapshot", ev.target.value)}
+                        className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                        placeholder="Component name"
+                      />
                     </div>
                     <div>
                       <label className="text-[11px] font-medium text-zinc-700">SKU snapshot</label>
-                      <input value={row.skuSnapshot} onChange={(ev) => updateBundleRow(index, 'skuSnapshot', ev.target.value)} className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm" placeholder="Component SKU" />
+                      <input
+                        value={row.skuSnapshot}
+                        onChange={(ev) => updateBundleRow(index, "skuSnapshot", ev.target.value)}
+                        className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                        placeholder="Component SKU"
+                      />
                     </div>
                     <div className="flex items-end gap-2">
                       <div className="flex-1">
                         <label className="text-[11px] font-medium text-zinc-700">Price snapshot</label>
-                        <input type="number" min="0" step="0.01" value={row.priceSnapshot} onChange={(ev) => updateBundleRow(index, 'priceSnapshot', ev.target.value)} className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm" placeholder="0.00" />
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={row.priceSnapshot}
+                          onChange={(ev) => updateBundleRow(index, "priceSnapshot", ev.target.value)}
+                          className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                          placeholder="0.00"
+                        />
                       </div>
-                      <button type="button" onClick={() => removeBundleRow(index)} className="rounded border border-red-200 px-3 py-2 text-xs font-medium text-red-700 hover:bg-red-50">Remove</button>
+                      <button
+                        type="button"
+                        onClick={() => removeBundleRow(index)}
+                        className="rounded border border-red-200 px-3 py-2 text-xs font-medium text-red-700 hover:bg-red-50"
+                      >
+                        Remove
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -329,8 +480,20 @@ export default function NewServicePage() {
         ) : null}
 
         <div className="flex gap-2">
-          <button type="submit" disabled={saving || !canCreate} className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60">{saving ? 'Creating...' : 'Create Service'}</button>
-          <button type="button" onClick={() => router.push('/dashboard/products/services')} className="rounded border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50">Cancel</button>
+          <button
+            type="submit"
+            disabled={saving || !canCreate}
+            className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {saving ? "Creating..." : "Create Service"}
+          </button>
+          <button
+            type="button"
+            onClick={() => router.push("/dashboard/products/services")}
+            className="rounded border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+          >
+            Cancel
+          </button>
         </div>
       </form>
     </div>
