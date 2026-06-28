@@ -60,7 +60,7 @@ const PRODUCT_TABS = new Set(["flexi", "services", "shopify"]);
 const normalizeProductTab = (value) =>
   PRODUCT_TABS.has(value) ? value : DEFAULT_PRODUCT_TAB;
 
-// Helper to compute effective commission
+// Helper to compute effective commission (based on laborCost)
 const getEffectiveCommission = (product, user) => {
   const defaultType = product?.commissionType || "percentage";
   const defaultValue = Number(product?.commissionValue) || 0;
@@ -87,6 +87,16 @@ const getEffectiveCommission = (product, user) => {
     display: overrideType === "percentage" ? `${overrideValue}%` : `$${overrideValue.toFixed(2)}`,
     isDefault: !isOverride,
   };
+};
+
+// Compute commission amount based on laborCost
+const computeCommissionAmount = (laborCost, commissionType, commissionValue) => {
+  if (commissionType === "percentage") {
+    return (laborCost * commissionValue) / 100;
+  } else {
+    // fixed amount
+    return Math.min(commissionValue, laborCost);
+  }
 };
 
 export default function PosPage() {
@@ -156,6 +166,10 @@ export default function PosPage() {
   const [checkingPreviousDayShift, setCheckingPreviousDayShift] = useState(false);
   const [previousDayShiftError, setPreviousDayShiftError] = useState("");
   const [showPreviousDayShiftModal, setShowPreviousDayShiftModal] = useState(false);
+
+  // Location settings
+  const [locationSettings, setLocationSettings] = useState(null);
+  const [enableProductCost, setEnableProductCost] = useState(false);
 
   // State for service attachment, user assignment, commissions
   const [attachMode, setAttachMode] = useState(false);
@@ -305,6 +319,26 @@ export default function PosPage() {
     }
   }, [locationId, locations]);
 
+  // Fetch location settings when locationId changes
+  useEffect(() => {
+    if (!locationId) return;
+    const fetchLocationSettings = async () => {
+      try {
+        const res = await apiFetch(`/locations/${locationId}`);
+        const loc = res?.location;
+        if (loc) {
+          setLocationSettings(loc);
+          setEnableProductCost(loc.enableProductCost || false);
+        }
+      } catch (err) {
+        console.error("Failed to fetch location settings:", err);
+        // Default to false if error
+        setEnableProductCost(false);
+      }
+    };
+    fetchLocationSettings();
+  }, [locationId]);
+
   const checkPreviousDayOpenShift = useCallback(async (targetLocationId) => {
     if (!targetLocationId) return;
 
@@ -406,6 +440,8 @@ export default function PosPage() {
           commissionType: p.commissionType || "percentage",
           commissionValue: p.commissionValue || 0,
           name: p.name,
+          laborCost: p.laborCost || 0,
+          productCost: p.productCost || 0,
         };
       });
       setServiceProductMap(productMap);
@@ -558,6 +594,12 @@ export default function PosPage() {
             },
             user
           );
+          // Compute commission amount based on laborCost
+          const commissionAmount = computeCommissionAmount(
+            item.laborCost || 0,
+            commission.type,
+            commission.value
+          );
           return {
             ...item,
             assignedUser: saleAssignedUser,
@@ -565,6 +607,7 @@ export default function PosPage() {
             commissionValue: commission.value,
             commissionIsOverride: commission.isOverride,
             commissionDisplay: commission.display,
+            commissionAmount: commissionAmount,
           };
         }
         return { ...item, assignedUser: saleAssignedUser };
@@ -604,11 +647,25 @@ export default function PosPage() {
       isChild = true;
     }
 
+    const isService = product.type === "service";
+    // For services, get labor/product cost from product or default
+    let laborCost = 0;
+    let productCost = 0;
+    let price = product.price;
+    if (isService) {
+      const prodDefaults = serviceProductMap[product.id || product._id] || {};
+      laborCost = Number(prodDefaults.laborCost) || 0;
+      productCost = Number(prodDefaults.productCost) || 0;
+      // If product cost is disabled, we might ignore productCost but we'll still keep it.
+      // In POS, if enableProductCost is false, we'll only show labor cost editing.
+      price = laborCost + productCost; // total price
+    }
+
     const newItem = {
       type: product.type,
       variant: product.id || product._id,
       name: product.name,
-      price: isChild ? 0 : product.price,
+      price: isChild ? 0 : price, // total price
       originalPrice: isChild ? product.price : null,
       quantity: 1,
       discount: 0,
@@ -622,11 +679,16 @@ export default function PosPage() {
       commissionValue: null,
       commissionIsOverride: false,
       commissionDisplay: null,
+      commissionAmount: 0,
       defaultCommissionType: null,
       defaultCommissionValue: null,
+      // NEW: cost breakdown
+      laborCost: isService ? laborCost : 0,
+      productCost: isService ? productCost : 0,
     };
 
-    if (product.type === "service") {
+    // If it's a service, compute commission
+    if (isService) {
       const assignedUserId = saleAssignedUser || null;
       const assignedUser = assignedUserId
         ? users.find(u => u._id === assignedUserId)
@@ -646,10 +708,18 @@ export default function PosPage() {
         assignedUser
       );
 
+      // Compute commission amount based on laborCost
+      const commissionAmount = computeCommissionAmount(
+        newItem.laborCost,
+        commission.type,
+        commission.value
+      );
+
       newItem.commissionType = commission.type;
       newItem.commissionValue = commission.value;
       newItem.commissionIsOverride = commission.isOverride;
       newItem.commissionDisplay = commission.display;
+      newItem.commissionAmount = commissionAmount;
       newItem.defaultCommissionType = productDefaults.commissionType;
       newItem.defaultCommissionValue = Number(productDefaults.commissionValue) || 0;
       if (saleAssignedUser) {
@@ -666,6 +736,45 @@ export default function PosPage() {
       }
       upsertCartItem(cart, setCart, newItem);
     }
+  };
+
+  // Helper to update service costs in cart
+  const updateServiceCosts = (index, field, value) => {
+    const newCart = [...cart];
+    const item = newCart[index];
+    if (item.type !== "service") return;
+    const numVal = parseFloat(value) || 0;
+    if (field === "laborCost") {
+      item.laborCost = numVal;
+    } else if (field === "productCost") {
+      item.productCost = numVal;
+    }
+    // Update total price = labor + product (if product cost enabled, else just labor)
+    if (enableProductCost) {
+      item.price = item.laborCost + item.productCost;
+    } else {
+      item.price = item.laborCost;
+      item.productCost = 0; // ensure productCost is 0 when disabled
+    }
+    // Recalculate commission amount based on new laborCost
+    const commission = getEffectiveCommission(
+      {
+        _id: item.variant,
+        commissionType: item.defaultCommissionType || "percentage",
+        commissionValue: item.defaultCommissionValue || 0,
+      },
+      users.find(u => u._id === item.assignedUser)
+    );
+    item.commissionType = commission.type;
+    item.commissionValue = commission.value;
+    item.commissionIsOverride = commission.isOverride;
+    item.commissionDisplay = commission.display;
+    item.commissionAmount = computeCommissionAmount(
+      item.laborCost,
+      commission.type,
+      commission.value
+    );
+    setCart(newCart);
   };
 
   const splitAndAttachItem = (productIndex, serviceIndex, attachQty) => {
@@ -1559,12 +1668,15 @@ export default function PosPage() {
           baseItem.originalPrice = item.originalPrice;
         }
 
+        // Include labor/product cost for services
         if (item.type === "service") {
           return {
             ...baseItem,
             productId: item.variant,
             assignedUser: item.assignedUser || saleAssignedUser || null,
             parentItemIndex: null,
+            laborCost: item.laborCost || 0,
+            productCost: item.productCost || 0,
           };
         } else if (item.type === "shopify") {
           return {
@@ -1712,6 +1824,8 @@ export default function PosPage() {
               productId: item.variant,
               assignedUser: item.assignedUser || saleAssignedUser || null,
               parentItemIndex: null,
+              laborCost: item.laborCost || 0,
+              productCost: item.productCost || 0,
             };
           } else if (item.type === "shopify") {
             return {
@@ -1875,6 +1989,7 @@ export default function PosPage() {
         discount: 0,
         parentItemIndex: parentIndex,
         assignedUser: null,
+        // Shopify items don't have labor/product cost
       };
       if (exchangeMode) {
         upsertCartItem(exchangeCart, setExchangeCart, cartItem);
@@ -1989,9 +2104,6 @@ export default function PosPage() {
   const receiptAmountPaid = toNonNegativeAmount(receipt?.amountPaid);
   const receiptBalanceDue = toNonNegativeAmount(receipt?.balanceDue);
 
-  // --------------------------------------------------------------------
-  // RENDER
-  // --------------------------------------------------------------------
   return (
     <div className="flex flex-col bg-gray-50 min-h-0 h-full md:h-[calc(100vh-8rem)]">
       {/* Top Bar – unchanged */}
@@ -2277,7 +2389,6 @@ export default function PosPage() {
 
           {/* Product Grid – unchanged */}
           <div className="flex-1 overflow-auto p-4">
-            {/* ... same product grid ... */}
             {productTab === "services" &&
               filteredServiceProducts.length === 0 &&
               !serviceLoading && (
@@ -2374,7 +2485,7 @@ export default function PosPage() {
           </div>
         </div>
 
-        {/* ---------- CART SECTION (CLEANED) ---------- */}
+        {/* ---------- CART SECTION (UPDATED) ---------- */}
         <div className="w-96 bg-white border-l border-gray-200 flex flex-col min-h-0 overflow-auto">
           {exchangeMode ? (
             // Exchange cart (unchanged)
@@ -2604,6 +2715,10 @@ export default function PosPage() {
                     ))}
                   </select>
                 </div>
+                {/* Location settings indicator (optional) */}
+                <div className="mt-2 text-[10px] text-gray-500">
+                  {enableProductCost ? "Product cost enabled" : "Product cost disabled"}
+                </div>
               </div>
 
               {/* Cart Items */}
@@ -2625,20 +2740,63 @@ export default function PosPage() {
                               {isChild && <span className="text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded whitespace-nowrap">attached</span>}
                               {isService && <span className="text-[10px] bg-purple-100 text-purple-600 px-1.5 py-0.5 rounded whitespace-nowrap">service</span>}
                             </div>
-                            <div className="flex items-center gap-2 mt-1">
-                              {isChild && item.originalPrice ? (
-                                <div className="flex items-center gap-1">
-                                  <span className="text-xs text-gray-400 line-through">${item.originalPrice.toFixed(2)}</span>
-                                  <span className="text-xs text-green-600 font-medium">Included</span>
-                                </div>
-                              ) : editingPriceIndex === index ? (
-                                <input autoFocus type="number" step="0.01" value={editingPriceValue} onChange={(e) => setEditingPriceValue(e.target.value)} onBlur={() => savePriceEdit(index)} onKeyDown={(e) => e.key === "Enter" && savePriceEdit(index)} className="w-20 px-2 py-1 border border-blue-300 rounded text-sm" />
-                              ) : (
-                                <button onClick={() => handlePriceEdit(index)} className="text-sm text-gray-500 hover:text-blue-600 flex items-center gap-1" title="Click to edit price">
-                                  ${item.price.toFixed(2)} <span className="text-xs">✎</span>
-                                </button>
-                              )}
-                            </div>
+                            {/* Cost editing for services */}
+                            {isService && !isChild && (
+                              <div className="mt-1 space-y-1">
+                                {enableProductCost ? (
+                                  <>
+                                    <div className="flex items-center gap-1">
+                                      <label className="text-[10px] text-gray-500">Labor:</label>
+                                      <input
+                                        type="number"
+                                        step="0.01"
+                                        min="0"
+                                        value={item.laborCost || 0}
+                                        onChange={(e) => updateServiceCosts(index, "laborCost", e.target.value)}
+                                        className="w-16 px-1 py-0.5 text-xs border border-gray-300 rounded"
+                                      />
+                                      <label className="text-[10px] text-gray-500 ml-2">Product:</label>
+                                      <input
+                                        type="number"
+                                        step="0.01"
+                                        min="0"
+                                        value={item.productCost || 0}
+                                        onChange={(e) => updateServiceCosts(index, "productCost", e.target.value)}
+                                        className="w-16 px-1 py-0.5 text-xs border border-gray-300 rounded"
+                                      />
+                                    </div>
+                                    <div className="text-[10px] text-gray-500">
+                                      Total: ${item.price.toFixed(2)}
+                                    </div>
+                                  </>
+                                ) : (
+                                  <div className="flex items-center gap-1">
+                                    <label className="text-[10px] text-gray-500">Labor Cost:</label>
+                                    <input
+                                      type="number"
+                                      step="0.01"
+                                      min="0"
+                                      value={item.laborCost || 0}
+                                      onChange={(e) => updateServiceCosts(index, "laborCost", e.target.value)}
+                                      className="w-20 px-1 py-0.5 text-xs border border-gray-300 rounded"
+                                    />
+                                    <span className="text-[10px] text-gray-500">= ${item.price.toFixed(2)}</span>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                            {/* Price editing for non-services (or if not service) */}
+                            {!isService && (
+                              <div className="flex items-center gap-2 mt-1">
+                                {editingPriceIndex === index ? (
+                                  <input autoFocus type="number" step="0.01" value={editingPriceValue} onChange={(e) => setEditingPriceValue(e.target.value)} onBlur={() => savePriceEdit(index)} onKeyDown={(e) => e.key === "Enter" && savePriceEdit(index)} className="w-20 px-2 py-1 border border-blue-300 rounded text-sm" />
+                                ) : (
+                                  <button onClick={() => handlePriceEdit(index)} className="text-sm text-gray-500 hover:text-blue-600 flex items-center gap-1" title="Click to edit price">
+                                    ${item.price.toFixed(2)} <span className="text-xs">✎</span>
+                                  </button>
+                                )}
+                              </div>
+                            )}
                             {/* Discount UI (only on non-child) */}
                             {useSessionStore.getState().can(PERMISSIONS.POS_APPLY_DISCOUNT) && !isChild && (
                               <div className="mt-1">
@@ -2685,6 +2843,12 @@ export default function PosPage() {
                                       newCart[index].commissionValue = commission.value;
                                       newCart[index].commissionIsOverride = commission.isOverride;
                                       newCart[index].commissionDisplay = commission.display;
+                                      // Recalculate commission amount
+                                      newCart[index].commissionAmount = computeCommissionAmount(
+                                        newCart[index].laborCost || 0,
+                                        commission.type,
+                                        commission.value
+                                      );
                                     }
                                     setCart(newCart);
                                   }}
@@ -2700,7 +2864,13 @@ export default function PosPage() {
                             {/* Commission display */}
                             {isService && (
                               <div className="text-xs mt-1 flex items-center gap-2">
-                                <span className="text-gray-500">Commission: <span className="font-medium text-gray-700">{item.commissionDisplay || "0%"}</span></span>
+                                <span className="text-gray-500">
+                                  Commission: <span className="font-medium text-gray-700">
+                                    {item.commissionType === "percentage"
+                                      ? `${item.commissionValue}% ($${item.commissionAmount?.toFixed(2) || "0.00"})`
+                                      : `$${item.commissionValue?.toFixed(2)}`}
+                                  </span>
+                                </span>
                                 {item.commissionIsOverride ? (
                                   <span className="text-[10px] bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded font-medium">Override</span>
                                 ) : (

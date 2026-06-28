@@ -10,12 +10,14 @@ const createEmptyForm = () => ({
   name: "",
   sku: "",
   description: "",
-  price: "",
   status: "active",
   serviceKind: "single",
   tags: "",
   commissionType: "percentage",
   commissionValue: "",
+  laborCost: "",
+  productCost: "",
+  price: "", // auto-calculated, read-only
 });
 
 const createBundleRow = (initial = {}) => ({
@@ -39,9 +41,9 @@ const slugify = (text) => {
   return text
     .toLowerCase()
     .trim()
-    .replace(/[^\w\s-]/g, "") // remove special chars
-    .replace(/[\s_-]+/g, "-") // replace spaces/underscores with hyphens
-    .replace(/^-+|-+$/g, ""); // trim hyphens
+    .replace(/[^\w\s-]/g, "")
+    .replace(/[\s_-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 };
 
 export default function NewServicePage() {
@@ -89,12 +91,24 @@ export default function NewServicePage() {
     }
   };
 
+  // Auto-calculate price from labor + product
+  const recalcPrice = (labor, product) => {
+    const total = toNumberOrZero(labor) + toNumberOrZero(product);
+    setForm((prev) => ({ ...prev, price: total.toString() }));
+  };
+
   // When name changes, update SKU if not manually edited
   const handleFieldChange = (e) => {
     const { name, value } = e.target;
     setForm((prev) => ({ ...prev, [name]: value }));
     if (name === "name") {
       updateSkuFromName(value);
+    }
+    if (name === "laborCost" || name === "productCost") {
+      // Recalculate price
+      const labor = name === "laborCost" ? value : form.laborCost;
+      const product = name === "productCost" ? value : form.productCost;
+      recalcPrice(labor, product);
     }
   };
 
@@ -111,7 +125,12 @@ export default function NewServicePage() {
       const newSku = generateUniqueSku(form.name, services);
       setForm((prev) => ({ ...prev, sku: newSku }));
     }
-  }, [services]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [services]);
+
+  // Initial price calculation when component mounts
+  useEffect(() => {
+    recalcPrice(form.laborCost, form.productCost);
+  }, []); // eslint-disable-line
 
   const updateBundleRow = (index, field, value) => {
     setBundleRows((previous) =>
@@ -163,12 +182,24 @@ export default function NewServicePage() {
       return;
     }
 
-    if (!form.name.trim() || !form.sku.trim() || toNumberOrZero(form.price) <= 0) {
+    const name = form.name.trim();
+    const sku = form.sku.trim();
+    const price = toNumberOrZero(form.price);
+    const labor = toNumberOrZero(form.laborCost);
+    const product = toNumberOrZero(form.productCost);
+
+    if (!name || !sku || price <= 0) {
       setError("Name, SKU, and price are required.");
       return;
     }
 
-    // Validate commission
+    // Validate labor and product costs
+    if (labor < 0 || product < 0) {
+      setError("Labor cost and product cost cannot be negative.");
+      return;
+    }
+    // No need to check sum, price is derived
+
     const commissionValue = toNumberOrZero(form.commissionValue);
     if (commissionValue < 0) {
       setError("Commission value cannot be negative.");
@@ -211,10 +242,10 @@ export default function NewServicePage() {
     setSaving(true);
     try {
       const payload = {
-        name: form.name.trim(),
-        sku: form.sku.trim(),
+        name,
+        sku,
         description: form.description.trim(),
-        price: toNumberOrZero(form.price),
+        price,
         type: "service",
         serviceKind: form.serviceKind,
         serviceBundleComponents: normalizedRows,
@@ -223,6 +254,8 @@ export default function NewServicePage() {
         trackInventory: false,
         commissionType: form.commissionType,
         commissionValue: commissionValue,
+        laborCost: labor,
+        productCost: product,
       };
 
       const response = await apiFetch("/products", { method: "POST", body: payload });
@@ -301,20 +334,7 @@ export default function NewServicePage() {
           />
         </div>
 
-        <div className="grid gap-4 md:grid-cols-3">
-          <div>
-            <label className="text-xs font-medium text-zinc-700">Price *</label>
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              name="price"
-              value={form.price}
-              onChange={handleFieldChange}
-              className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
-              required
-            />
-          </div>
+        <div className="grid gap-4 md:grid-cols-1">
           <div>
             <label className="text-xs font-medium text-zinc-700">Status</label>
             <select
@@ -328,6 +348,56 @@ export default function NewServicePage() {
               <option value="archived">Archived</option>
             </select>
           </div>
+        </div>
+
+        {/* Cost breakdown with auto-calculated total price */}
+        <div className="rounded-lg border border-purple-200 bg-purple-50 p-4">
+          <h3 className="text-sm font-semibold text-zinc-900 mb-2">Cost Breakdown</h3>
+          <div className="grid gap-3 md:grid-cols-3">
+            <div>
+              <label className="text-xs font-medium text-zinc-700">Labor Cost</label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                name="laborCost"
+                value={form.laborCost}
+                onChange={handleFieldChange}
+                className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                placeholder="0.00"
+                required
+              />
+              <p className="mt-1 text-[10px] text-zinc-500">Commission is calculated on this value.</p>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-zinc-700">Product Cost</label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                name="productCost"
+                value={form.productCost}
+                onChange={handleFieldChange}
+                className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                placeholder="0.00"
+                required
+              />
+              <p className="mt-1 text-[10px] text-zinc-500">Materials or product component cost.</p>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-zinc-700">Total Price</label>
+              <input
+                type="text"
+                value={form.price}
+                disabled
+                className="mt-1 w-full rounded border border-zinc-300 bg-gray-100 px-3 py-2 text-sm text-gray-700 cursor-not-allowed"
+              />
+              <p className="mt-1 text-[10px] text-zinc-500">Auto-calculated as Labor + Product.</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-1">
           <div>
             <label className="text-xs font-medium text-zinc-700">Service Type</label>
             <select
@@ -375,7 +445,7 @@ export default function NewServicePage() {
                 placeholder={form.commissionType === "percentage" ? "e.g., 10" : "e.g., 5.00"}
               />
               <p className="mt-1 text-[10px] text-zinc-500">
-                {form.commissionType === "percentage" ? "Percentage of service price (e.g. 10 = 10%)" : "Fixed dollar amount per service"}
+                {form.commissionType === "percentage" ? "Percentage of labor cost" : "Fixed amount per service"}
               </p>
             </div>
           </div>

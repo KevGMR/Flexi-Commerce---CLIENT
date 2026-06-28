@@ -10,12 +10,14 @@ const createEmptyForm = () => ({
   name: "",
   sku: "",
   description: "",
-  price: "",
   status: "active",
   serviceKind: "single",
   tags: "",
   commissionType: "percentage",
   commissionValue: "",
+  laborCost: "",
+  productCost: "",
+  price: "",
 });
 
 const createBundleRow = (initial = {}) => ({
@@ -105,14 +107,23 @@ function ServicesPageContent() {
     [services, selectedServiceId],
   );
 
+  // Auto-calculate price from labor + product
+  const recalcPrice = (labor, product) => {
+    const total = toNumberOrZero(labor) + toNumberOrZero(product);
+    setForm((prev) => ({ ...prev, price: total.toString() }));
+  };
+
   const applyServiceToForm = (service) => {
     const serviceId = service._id || service.id || "";
     setSelectedServiceId(serviceId);
+    // Fallback: if laborCost is undefined, use price (old service), productCost = 0
+    const labor = service.laborCost ?? service.price ?? 0;
+    const product = service.productCost ?? 0;
+    const total = labor + product;
     setForm({
       name: service.name || "",
       sku: service.sku || "",
       description: service.description || "",
-      price: service.price !== undefined && service.price !== null ? String(service.price) : "",
       status: service.status || "active",
       serviceKind: service.serviceKind || "single",
       tags: Array.isArray(service.tags) ? service.tags.join(", ") : "",
@@ -121,6 +132,9 @@ function ServicesPageContent() {
         service.commissionValue !== undefined && service.commissionValue !== null
           ? String(service.commissionValue)
           : "",
+      laborCost: String(labor),
+      productCost: String(product),
+      price: String(total),
     });
 
     const existingRows = Array.isArray(service.serviceBundleComponents)
@@ -143,6 +157,11 @@ function ServicesPageContent() {
   const handleFieldChange = (event) => {
     const { name, value } = event.target;
     setForm((previous) => ({ ...previous, [name]: value }));
+    if (name === "laborCost" || name === "productCost") {
+      const labor = name === "laborCost" ? value : form.laborCost;
+      const product = name === "productCost" ? value : form.productCost;
+      recalcPrice(labor, product);
+    }
   };
 
   const updateBundleRow = (index, field, value) => {
@@ -216,12 +235,23 @@ function ServicesPageContent() {
     setError("");
     setStatusMessage("");
 
-    if (!form.name.trim() || !form.sku.trim() || toNumberOrZero(form.price) <= 0) {
+    const name = form.name.trim();
+    const sku = form.sku.trim();
+    const price = toNumberOrZero(form.price);
+    const labor = toNumberOrZero(form.laborCost);
+    const product = toNumberOrZero(form.productCost);
+
+    if (!name || !sku || price <= 0) {
       setError("Name, SKU, and price are required.");
       return;
     }
 
-    // Validate commission
+    if (labor < 0 || product < 0) {
+      setError("Labor cost and product cost cannot be negative.");
+      return;
+    }
+    // No need to check sum, price is derived
+
     const commissionValue = toNumberOrZero(form.commissionValue);
     if (commissionValue < 0) {
       setError("Commission value cannot be negative.");
@@ -264,10 +294,10 @@ function ServicesPageContent() {
     setSaving(true);
     try {
       const payload = {
-        name: form.name.trim(),
-        sku: form.sku.trim(),
+        name,
+        sku,
         description: form.description.trim(),
-        price: toNumberOrZero(form.price),
+        price,
         type: "service",
         serviceKind: form.serviceKind,
         serviceBundleComponents: normalizedRows,
@@ -279,6 +309,8 @@ function ServicesPageContent() {
         trackInventory: false,
         commissionType: form.commissionType,
         commissionValue: commissionValue,
+        laborCost: labor,
+        productCost: product,
       };
 
       let response;
@@ -467,6 +499,9 @@ function ServicesPageContent() {
                           ${Number(service.price || 0).toFixed(2)}
                         </div>
                         <div className="mt-1 text-xs text-zinc-500">
+                          Labor: ${Number(service.laborCost ?? service.price ?? 0).toFixed(2)} | Product: ${Number(service.productCost || 0).toFixed(2)}
+                        </div>
+                        <div className="mt-1 text-xs text-zinc-500">
                           Commission: {service.commissionType === "percentage" ? `${service.commissionValue || 0}%` : `$${Number(service.commissionValue || 0).toFixed(2)}`}
                         </div>
                         {service.description ? (
@@ -553,15 +588,11 @@ function ServicesPageContent() {
             </div>
 
             {error ? (
-              <div className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-                {error}
-              </div>
+              <div className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>
             ) : null}
 
             {statusMessage ? (
-              <div className="rounded border border-green-200 bg-green-50 p-3 text-sm text-green-700">
-                {statusMessage}
-              </div>
+              <div className="rounded border border-green-200 bg-green-50 p-3 text-sm text-green-700">{statusMessage}</div>
             ) : null}
 
             <div className="grid gap-4 md:grid-cols-2">
@@ -572,7 +603,6 @@ function ServicesPageContent() {
                   value={form.name}
                   onChange={handleFieldChange}
                   className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
-                  placeholder="Service name"
                   required
                 />
               </div>
@@ -583,11 +613,8 @@ function ServicesPageContent() {
                   value={form.sku}
                   disabled
                   className="mt-1 w-full rounded border border-zinc-300 bg-gray-100 px-3 py-2 text-sm text-gray-500 cursor-not-allowed"
-                  placeholder="SKU (auto-generated)"
                 />
-                <p className="mt-1 text-[10px] text-zinc-500">
-                  SKU is generated at creation and cannot be changed.
-                </p>
+                <p className="mt-1 text-[10px] text-zinc-500">SKU is generated at creation and cannot be changed.</p>
               </div>
             </div>
 
@@ -599,56 +626,87 @@ function ServicesPageContent() {
                 onChange={handleFieldChange}
                 rows={3}
                 className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
-                placeholder="Describe the service, scope, or inclusions"
               />
             </div>
 
-            <div className="grid gap-4 md:grid-cols-3">
-              <div>
-                <label className="text-xs font-medium text-zinc-700">Price *</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  name="price"
-                  value={form.price}
-                  onChange={handleFieldChange}
-                  className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
-                  placeholder="0.00"
-                  required
-                />
+            <div>
+              <label className="text-xs font-medium text-zinc-700">Status</label>
+              <select
+                name="status"
+                value={form.status}
+                onChange={handleFieldChange}
+                className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+              >
+                <option value="active">Active</option>
+                <option value="draft">Draft</option>
+                <option value="archived">Archived</option>
+              </select>
+            </div>
+
+            {/* Cost breakdown with auto-calculated total price */}
+            <div className="rounded-lg border border-purple-200 bg-purple-50 p-4">
+              <h3 className="text-sm font-semibold text-zinc-900 mb-2">Cost Breakdown</h3>
+              <div className="grid gap-3 md:grid-cols-3">
+                <div>
+                  <label className="text-xs font-medium text-zinc-700">Labor Cost</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    name="laborCost"
+                    value={form.laborCost}
+                    onChange={handleFieldChange}
+                    className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                    placeholder="0.00"
+                    required
+                  />
+                  <p className="mt-1 text-[10px] text-zinc-500">Commission is calculated on this value.</p>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-zinc-700">Product Cost</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    name="productCost"
+                    value={form.productCost}
+                    onChange={handleFieldChange}
+                    className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                    placeholder="0.00"
+                    required
+                  />
+                  <p className="mt-1 text-[10px] text-zinc-500">Materials or product component cost.</p>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-zinc-700">Total Price</label>
+                  <input
+                    type="text"
+                    value={form.price}
+                    disabled
+                    className="mt-1 w-full rounded border border-zinc-300 bg-gray-100 px-3 py-2 text-sm text-gray-700 cursor-not-allowed"
+                  />
+                  <p className="mt-1 text-[10px] text-zinc-500">Auto-calculated as Labor + Product.</p>
+                </div>
               </div>
-              <div>
-                <label className="text-xs font-medium text-zinc-700">Status</label>
-                <select
-                  name="status"
-                  value={form.status}
-                  onChange={handleFieldChange}
-                  className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
-                >
-                  <option value="active">Active</option>
-                  <option value="draft">Draft</option>
-                  <option value="archived">Archived</option>
-                </select>
-              </div>
-              <div>
-                <label className="text-xs font-medium text-zinc-700">Service Type</label>
-                <select
-                  name="serviceKind"
-                  value={form.serviceKind}
-                  onChange={(event) => {
-                    const nextKind = event.target.value;
-                    setForm((previous) => ({ ...previous, serviceKind: nextKind }));
-                    if (nextKind !== "bundle") {
-                      setBundleRows([createBundleRow()]);
-                    }
-                  }}
-                  className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
-                >
-                  <option value="single">Single service</option>
-                  <option value="bundle">Bundle service</option>
-                </select>
-              </div>
+            </div>
+
+            <div>
+              <label className="text-xs font-medium text-zinc-700">Service Type</label>
+              <select
+                name="serviceKind"
+                value={form.serviceKind}
+                onChange={(event) => {
+                  const nextKind = event.target.value;
+                  setForm((previous) => ({ ...previous, serviceKind: nextKind }));
+                  if (nextKind !== "bundle") {
+                    setBundleRows([createBundleRow()]);
+                  }
+                }}
+                className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+              >
+                <option value="single">Single service</option>
+                <option value="bundle">Bundle service</option>
+              </select>
             </div>
 
             {/* Commission section */}
@@ -680,7 +738,7 @@ function ServicesPageContent() {
                     placeholder={form.commissionType === "percentage" ? "e.g., 10" : "e.g., 5.00"}
                   />
                   <p className="mt-1 text-[10px] text-zinc-500">
-                    {form.commissionType === "percentage" ? "Percentage of service price (e.g. 10 = 10%)" : "Fixed dollar amount per service"}
+                    {form.commissionType === "percentage" ? "Percentage of labor cost" : "Fixed amount per service"}
                   </p>
                 </div>
               </div>
@@ -702,9 +760,7 @@ function ServicesPageContent() {
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <h3 className="text-sm font-semibold text-zinc-900">Bundle Editor</h3>
-                    <p className="text-xs text-zinc-600">
-                      Group existing services into one sellable service line.
-                    </p>
+                    <p className="text-xs text-zinc-600">Group existing services into one sellable service line.</p>
                   </div>
                   <button
                     type="button"
