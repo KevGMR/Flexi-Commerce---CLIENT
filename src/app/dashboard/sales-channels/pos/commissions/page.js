@@ -8,11 +8,14 @@ import { PERMISSIONS } from "@/lib/permissions";
 
 const getDefaultDateRange = () => {
   const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), 1);
-  const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  const year = now.getFullYear();
+  const month = now.getMonth();
+  const start = new Date(year, month, 1);
+  const end = new Date(year, month + 1, 0);
+  const pad = (n) => String(n).padStart(2, "0");
   return {
-    startDate: start.toISOString().split("T")[0],
-    endDate: end.toISOString().split("T")[0],
+    startDate: `${start.getFullYear()}-${pad(start.getMonth() + 1)}-${pad(start.getDate())}`,
+    endDate: `${end.getFullYear()}-${pad(end.getMonth() + 1)}-${pad(end.getDate())}`,
   };
 };
 
@@ -46,8 +49,8 @@ export default function CommissionsPage() {
     setError("");
     try {
       const params = new URLSearchParams({
-        startDate: new Date(startDate).toISOString(),
-        endDate: new Date(endDate).toISOString(),
+        startDate,
+        endDate,
       });
       if (locationId) params.append("locationId", locationId);
 
@@ -62,6 +65,25 @@ export default function CommissionsPage() {
       setLoading(false);
     }
   }, [startDate, endDate, locationId]);
+
+  const downloadCSV = () => {
+    if (usersData.length === 0) return;
+    const headers = ["User", "Email", "Total Commission", "Sales Count"];
+    const rows = usersData.map((item) => [
+      item.user?.fullname || "Unknown User",
+      item.user?.email || "",
+      item.totalCommission.toFixed(2),
+      item.salesCount,
+    ]);
+    const csvContent = [headers.join(","), ...rows.map((row) => row.join(","))].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `commissions_${startDate}_${endDate}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   useEffect(() => {
     if (canView) {
@@ -137,6 +159,14 @@ export default function CommissionsPage() {
           className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
         >
           {loading ? "Loading..." : "Apply Filters"}
+        </button>
+        <button
+          type="button"
+          onClick={downloadCSV}
+          disabled={loading || usersData.length === 0}
+          className="rounded bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
+        >
+          Download CSV
         </button>
       </div>
 

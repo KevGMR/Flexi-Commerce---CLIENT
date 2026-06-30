@@ -6,16 +6,82 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { navItems } from "@/lib/nav";
 import { useSessionStore } from "@/store/session";
 
-function NavLink({ item, depth = 0, isActive }) {
+// Import icons from @heroicons/react/24/outline
+import {
+  HomeIcon,
+  ShoppingBagIcon,
+  DocumentTextIcon,
+  ShoppingCartIcon,
+  CubeIcon,
+  WrenchIcon,
+  FolderIcon,
+  ClipboardIcon,
+  ArrowsRightLeftIcon,
+  GiftIcon,
+  UsersIcon,
+  ChartBarIcon,
+  BanknotesIcon,
+  ListBulletIcon,
+  PlusCircleIcon,
+  TruckIcon,
+  UserIcon,
+  CreditCardIcon,
+  ComputerDesktopIcon,
+  ClockIcon,
+  ReceiptRefundIcon,
+  CurrencyDollarIcon, // FIXED: CoinsIcon → CurrencyDollarIcon
+  CogIcon,
+  EnvelopeIcon,
+  MapPinIcon,
+  TagIcon,
+  ShieldCheckIcon,
+} from "@heroicons/react/24/outline";
+
+// Map icon names to components
+const iconMap = {
+  Home: HomeIcon,
+  ShoppingBag: ShoppingBagIcon,
+  DocumentText: DocumentTextIcon,
+  ShoppingCart: ShoppingCartIcon,
+  Cube: CubeIcon,
+  Wrench: WrenchIcon,
+  Folder: FolderIcon,
+  Clipboard: ClipboardIcon,
+  ArrowsRightLeft: ArrowsRightLeftIcon,
+  Gift: GiftIcon,
+  Users: UsersIcon,
+  ChartBar: ChartBarIcon,
+  Banknotes: BanknotesIcon,
+  ListBullet: ListBulletIcon,
+  PlusCircle: PlusCircleIcon,
+  Truck: TruckIcon,
+  User: UserIcon,
+  CreditCard: CreditCardIcon,
+  ComputerDesktop: ComputerDesktopIcon,
+  Clock: ClockIcon,
+  ReceiptRefund: ReceiptRefundIcon,
+  CurrencyDollar: CurrencyDollarIcon, // FIXED: Coins → CurrencyDollar
+  Cog: CogIcon,
+  Envelope: EnvelopeIcon,
+  MapPin: MapPinIcon,
+  Tag: TagIcon,
+  ShieldCheck: ShieldCheckIcon,
+};
+
+function NavLink({ item, depth = 0, isActive, collapsed }) {
+  const IconComponent = iconMap[item.icon];
+
   return (
     <Link
       href={item.href}
-      className={`flex items-center justify-between rounded-md px-3 py-2 text-[11px] font-medium transition hover:bg-zinc-100 ${
+      className={`flex items-center gap-3 rounded-md px-3 py-2 text-[11px] font-medium transition hover:bg-zinc-100 ${
         isActive ? "bg-zinc-200 text-zinc-900" : "text-zinc-700"
-      }`}
-      style={{ paddingLeft: 12 + depth * 12 }}
+      } ${collapsed ? "justify-center" : ""}`}
+      style={{ paddingLeft: collapsed ? 12 : 12 + depth * 12 }}
+      title={collapsed ? item.label : ""}
     >
-      <span>{item.label}</span>
+      {IconComponent && <IconComponent className="h-5 w-5 flex-shrink-0" />}
+      {!collapsed && <span className="truncate">{item.label}</span>}
     </Link>
   );
 }
@@ -27,12 +93,11 @@ export function Sidebar({ isOpen, onClose }) {
   const [expandedParent, setExpandedParent] = useState(null);
   const [touchStart, setTouchStart] = useState(null);
   const sidebarRef = useRef(null);
+  const [isHovered, setIsHovered] = useState(false);
 
-  // Split settings out so it can be pinned at the bottom
   const mainNavItems = navItems.filter((item) => item.label !== "Settings");
   const settingsNav = navItems.find((item) => item.label === "Settings");
 
-  // Check if any child path is currently active
   const isChildActive = (item) => {
     if (!item.children) return false;
     return item.children.some((child) => pathname === child.href);
@@ -55,7 +120,6 @@ export function Sidebar({ isOpen, onClose }) {
     return findParentForPath(navItems);
   }, [pathname]);
 
-  // Handle escape key to close sidebar on mobile
   useEffect(() => {
     const handleEscape = (e) => {
       if (e.key === "Escape" && isOpen) {
@@ -67,7 +131,6 @@ export function Sidebar({ isOpen, onClose }) {
     return () => document.removeEventListener("keydown", handleEscape);
   }, [isOpen, onClose]);
 
-  // Handle swipe to close
   const handleTouchStart = (e) => {
     setTouchStart(e.touches[0].clientX);
   };
@@ -77,23 +140,21 @@ export function Sidebar({ isOpen, onClose }) {
     const touchEnd = e.changedTouches[0].clientX;
     const swipeDistance = touchStart - touchEnd;
 
-    // Swiped left > 50px
     if (swipeDistance > 50) {
       onClose?.();
     }
     setTouchStart(null);
   };
 
-  const renderItems = (items, depth = 0, parentHref = null) =>
+  const renderItems = (items, depth = 0, parentHref = null, collapsed = false) =>
     items
       .filter((item) => {
-        // Don't filter by permissions until session is hydrated
         if (!hydrated) return true;
         return !item.permission || can(item.permission);
       })
       .map((item) => {
-        // Render section headings
         if (item.isSection) {
+          if (collapsed) return null;
           return (
             <div
               key={item.label}
@@ -110,7 +171,7 @@ export function Sidebar({ isOpen, onClose }) {
         const isExpanded =
           expandedParent === item.href ||
           childActive ||
-          autoExpandedParent === item.href; // Auto-expand if child is active
+          autoExpandedParent === item.href;
 
         return (
           <div key={item.href} className="space-y-1">
@@ -120,7 +181,6 @@ export function Sidebar({ isOpen, onClose }) {
                   setExpandedParent(item.href);
                 }
                 if (!hasChildren) {
-                  // Clicking a leaf collapses other parents unless this item is under a parent
                   if (parentHref) {
                     setExpandedParent(parentHref);
                   } else {
@@ -129,30 +189,42 @@ export function Sidebar({ isOpen, onClose }) {
                 }
               }}
             >
-              <NavLink item={item} depth={depth} isActive={isActive} />
+              <NavLink
+                item={item}
+                depth={depth}
+                isActive={isActive}
+                collapsed={collapsed}
+              />
             </div>
             {hasChildren &&
               isExpanded &&
-              renderItems(item.children, depth + 1, item.href)}
+              !collapsed &&
+              renderItems(item.children, depth + 1, item.href, collapsed)}
           </div>
         );
       });
+
+  const collapsed = !isHovered;
 
   return (
     <aside
       ref={sidebarRef}
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
-      className={`fixed md:sticky top-0 md:top-16 left-0 z-40 flex h-[calc(100vh-4rem)] md:h-[calc(100vh-4rem)] w-64 shrink-0 flex-col border-r border-zinc-200 bg-white px-3 py-4 transform transition-transform duration-300 ${
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+      className={`fixed md:sticky top-0 md:top-16 left-0 z-40 flex h-[calc(100vh-4rem)] md:h-[calc(100vh-4rem)] flex-col border-r border-zinc-200 bg-white px-3 py-4 transform transition-all duration-300 ${
         isOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
-      }`}
+      } ${collapsed ? "w-16" : "w-64"}`}
     >
       <nav className="space-y-1 overflow-y-auto pb-4">
-        {renderItems(mainNavItems)}
+        {renderItems(mainNavItems, 0, null, collapsed)}
       </nav>
       {settingsNav ? (
         <div className="mt-auto pt-3 border-t border-zinc-200">
-          <nav className="space-y-1">{renderItems([settingsNav])}</nav>
+          <nav className="space-y-1">
+            {renderItems([settingsNav], 0, null, collapsed)}
+          </nav>
         </div>
       ) : null}
     </aside>

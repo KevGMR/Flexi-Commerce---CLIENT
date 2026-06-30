@@ -12,7 +12,7 @@ import { mapSaleToReceipt } from "@/lib/receipt/receiptMappers";
 export default function SaleDetailPage() {
   const router = useRouter();
   const params = useParams();
-  const { permissions, locationsMeta, user, activeOrganization } = useSessionStore();
+  const { permissions, locationsMeta, user, activeOrganization, users: storeUsers } = useSessionStore();
   const [sale, setSale] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -43,6 +43,7 @@ export default function SaleDetailPage() {
   const [shopifyLoading, setShopifyLoading] = useState(false);
   const [selectedShopifyVariant, setSelectedShopifyVariant] = useState(null);
   const [copyReceiptStatus, setCopyReceiptStatus] = useState("");
+  const [userCache, setUserCache] = useState({});
   const [reallocationForm, setReallocationForm] = useState({
     fromAllocations: [{ paymentIndex: "", amount: "" }],
     toAllocations: [{ method: "mpesa", amount: "", reference: "", cardLast4: "", cardBrand: "" }],
@@ -265,6 +266,69 @@ export default function SaleDetailPage() {
     return location?.name || "Unknown Location";
   };
 
+  // Helper to get user name by ID from store or fallback
+  const getUserFullName = (userId) => {
+    if (!userId) return "Unassigned";
+    const cached = userCache[userId];
+    if (cached) return cached.fullname || cached.email || userId;
+    const fromStore = storeUsers?.find((u) => u._id === userId);
+    if (fromStore) return fromStore.fullname || fromStore.email || userId;
+    return userId;
+  };
+
+  // Compute commission summary per user
+  const commissionSummary = useMemo(() => {
+    const summary = {};
+    saleItems.forEach((item) => {
+      if (item.type === "service" && item.commissionAmount > 0) {
+        const userId = item.assignedUser;
+        if (!userId) return;
+        if (!summary[userId]) {
+          summary[userId] = {
+            userId,
+            totalCommission: 0,
+            services: [],
+          };
+        }
+        summary[userId].totalCommission += item.commissionAmount;
+        summary[userId].services.push({
+          productName: item.productName,
+          commissionAmount: item.commissionAmount,
+          commissionType: item.commissionType,
+          commissionValue: item.commissionValue,
+        });
+      }
+    });
+    return Object.values(summary);
+  }, [saleItems]);
+
+  // Fetch user details for commission summary users
+useEffect(() => {
+  const userIds = commissionSummary.map((entry) => entry.userId).filter(Boolean);
+  if (userIds.length === 0) return;
+
+  const missingUserIds = userIds.filter((id) => !userCache[id]);
+  if (missingUserIds.length === 0) return;
+
+  const fetchMissingUsers = async () => {
+    try {
+      const results = await Promise.all(
+        missingUserIds.map((id) =>
+          apiFetch(`/users/${id}`).then((res) => ({ id, user: res?.user || res?.data?.user }))
+        )
+      );
+      const newCache = { ...userCache };
+      results.forEach(({ id, user }) => {
+        if (user) newCache[id] = user;
+      });
+      setUserCache(newCache);
+    } catch (err) {
+      console.error("Failed to fetch user details:", err);
+    }
+  };
+  fetchMissingUsers();
+}, [commissionSummary]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const buildTimeline = () => {
     const events = [];
 
@@ -335,7 +399,6 @@ export default function SaleDetailPage() {
     e.preventDefault();
     setDeliveryFormError("");
 
-    // Validate sale has recipient info
     if (!sale?.recipientName || !sale?.recipientPhone) {
       setDeliveryFormError("Sale must have recipient name and phone number");
       return;
@@ -693,6 +756,8 @@ export default function SaleDetailPage() {
 
     setSearchResults(filtered.slice(0, 50));
   }, [reservationSearchQuery, reservationSourceTab, reservationSourceProducts, showEditReservationModal]);
+
+
 
   const handleReservationEditFieldChange = (field, value) => {
     setReservationEditForm((prev) => ({
@@ -1074,29 +1139,119 @@ export default function SaleDetailPage() {
             </div>
           </div>
 
-          {/* Items Section */}
+          {/* ======== UPDATED ITEMS SECTION ======== */}
           <div className="rounded-lg border border-zinc-200 bg-white p-6 shadow-sm">
             <h2 className="mb-4 text-lg font-semibold text-zinc-900">Items ({sale.items?.length || 0})</h2>
             <div className="divide-y divide-zinc-200">
-              {sale.items?.map((item, idx) => (
-                <div key={idx} className="flex items-center justify-between py-4 first:pt-0 last:pb-0">
-                  <div className="flex-1">
-                    <p className="font-medium text-zinc-900">{item.productName}</p>
-                    {item.sku && <p className="text-xs text-zinc-500">SKU: {item.sku}</p>}
-                    <p className="mt-1 text-sm text-zinc-600">
-                      {item.quantity} × {formatCurrency(item.unitPrice)}
-                      {item.type === "shopify" && " (Shopify)"}
-                      {item.type === "flexi" && " (FLEXI)"}
-                    </p>
-                    {item.discount > 0 && <p className="text-xs text-green-600">Discount: {formatCurrency(item.discount)}</p>}
+              {saleItems.map((item, idx) => {
+                const isChild = item.parentItemIndex !== null && item.parentItemIndex !== undefined;
+                const isService = item.type === "service";
+                const parentService = isChild ? saleItems[item.parentItemIndex] : null;
+                const assignedUser = isService ? item.assignedUser : null;
+                const commissionAmount = isService ? item.commissionAmount : null;
+                const commissionType = isService ? item.commissionType : null;
+                const commissionValue = isService ? item.commissionValue : null;
+
+                return (
+                  <div
+                    key={idx}
+                    className={`flex items-start justify-between py-4 first:pt-0 last:pb-0 ${isChild ? "ml-6 border-l-2 border-blue-200 pl-4" : ""}`}
+                  >
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <p className="font-medium text-zinc-900">
+                          {item.productName || "Unnamed Item"}
+                        </p>
+                        {isChild && (
+                          <span className="inline-block rounded bg-blue-100 px-2 py-0.5 text-[10px] font-medium text-blue-700">
+                            Attached to: {parentService?.productName || "Service"}
+                          </span>
+                        )}
+                        {item.type === "service" && (
+                          <span className="inline-block rounded bg-purple-100 px-2 py-0.5 text-[10px] font-medium text-purple-700">
+                            Service
+                          </span>
+                        )}
+                      </div>
+                      {item.sku && <p className="text-xs text-zinc-500">SKU: {item.sku}</p>}
+                      <p className="mt-1 text-sm text-zinc-600">
+                        {item.quantity} × {formatCurrency(item.unitPrice)}
+                        {item.type === "shopify" && " (Shopify)"}
+                        {item.type === "flexi" && " (FLEXI)"}
+                        {item.discount > 0 && (
+                          <span className="ml-2 text-green-600">Discount: {formatCurrency(item.discount)}</span>
+                        )}
+                      </p>
+                      {isService && (
+                        <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+                          {assignedUser && (
+                            <span className="flex items-center gap-1 text-zinc-600">
+                              <span className="font-medium">Assigned:</span>
+                              {getUserFullName(assignedUser)}
+                            </span>
+                          )}
+                          {commissionAmount > 0 && (
+                            <span className="flex items-center gap-1 text-blue-600">
+                              <span className="font-medium">Commission:</span>
+                              {formatCurrency(commissionAmount)}
+                              {commissionType === "percentage"
+                                ? ` (${commissionValue}%)`
+                                : ` ($${commissionValue} fixed)`}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      {isChild && item.originalPrice && (
+                        <p className="text-xs text-zinc-400">
+                          Original price: {formatCurrency(item.originalPrice)}
+                        </p>
+                      )}
+                    </div>
+                    <div className="text-right">
+                      <p className="text-lg font-semibold text-zinc-900">
+                        {formatCurrency(item.lineTotal)}
+                      </p>
+                    </div>
                   </div>
-                  <div className="text-right">
-                    <p className="text-lg font-semibold text-zinc-900">{formatCurrency(item.lineTotal)}</p>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
+
+          {/* ======== NEW: COMMISSION SUMMARY SECTION ======== */}
+          {commissionSummary.length > 0 && (
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-6 shadow-sm">
+              <h2 className="mb-4 text-lg font-semibold text-blue-900">Commission Summary</h2>
+              <div className="space-y-3">
+                {commissionSummary.map((entry) => (
+                  <div key={entry.userId} className="rounded-lg bg-white p-4 shadow-sm">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-medium text-zinc-900">{getUserFullName(entry.userId)}</p>
+                        <p className="text-xs text-zinc-500">User ID: {entry.userId}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-lg font-semibold text-blue-600">
+                          {formatCurrency(entry.totalCommission)}
+                        </p>
+                        <p className="text-xs text-zinc-500">{entry.services.length} service(s)</p>
+                      </div>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {entry.services.map((svc, idx) => (
+                        <span
+                          key={idx}
+                          className="rounded-full bg-blue-100 px-3 py-1 text-xs font-medium text-blue-800"
+                        >
+                          {svc.productName}: {formatCurrency(svc.commissionAmount)}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Pricing Section */}
           <div className="rounded-lg border border-zinc-200 bg-white p-6 shadow-sm">
@@ -1224,7 +1379,7 @@ export default function SaleDetailPage() {
           )}
         </div>
 
-        {/* Right Column (Sidebar) */}
+        {/* Right Column (Sidebar) - unchanged */}
         <div className="space-y-6">
           {/* Customer Section */}
           <div className="rounded-lg border border-zinc-200 bg-white p-6 shadow-sm">

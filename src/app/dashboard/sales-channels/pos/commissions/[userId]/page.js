@@ -8,11 +8,14 @@ import { PERMISSIONS } from "@/lib/permissions";
 
 const getDefaultDateRange = () => {
   const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), 1);
-  const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  const year = now.getFullYear();
+  const month = now.getMonth();
+  const start = new Date(year, month, 1);
+  const end = new Date(year, month + 1, 0);
+  const pad = (n) => String(n).padStart(2, "0");
   return {
-    startDate: start.toISOString().split("T")[0],
-    endDate: end.toISOString().split("T")[0],
+    startDate: `${start.getFullYear()}-${pad(start.getMonth() + 1)}-${pad(start.getDate())}`,
+    endDate: `${end.getFullYear()}-${pad(end.getMonth() + 1)}-${pad(end.getDate())}`,
   };
 };
 
@@ -61,8 +64,8 @@ export default function UserCommissionBreakdown() {
     setError("");
     try {
       const params = new URLSearchParams({
-        startDate: new Date(startDate).toISOString(),
-        endDate: new Date(endDate).toISOString(),
+        startDate,
+        endDate,
         userId,
         page: String(page),
         limit: "50",
@@ -80,6 +83,31 @@ export default function UserCommissionBreakdown() {
       setLoading(false);
     }
   }, [userId, startDate, endDate, locationId]);
+
+  const downloadCSV = () => {
+    if (salesData.length === 0) return;
+    const headers = ["Sale ID", "Date", "Receipt", "Total Commission", "Service Breakdown"];
+    const rows = salesData.map((sale) => {
+      const serviceStr = sale.serviceItems
+        .map((svc) => `${svc.serviceName}: $${svc.commissionAmount.toFixed(2)}`)
+        .join("; ");
+      return [
+        sale.saleId,
+        new Date(sale.saleDate).toLocaleDateString(),
+        sale.receiptNumber,
+        sale.totalCommission.toFixed(2),
+        serviceStr,
+      ];
+    });
+    const csvContent = [headers.join(","), ...rows.map((row) => row.join(","))].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `user_commission_${userId}_${startDate}_${endDate}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   useEffect(() => {
     if (canView && userId) {
@@ -176,6 +204,14 @@ export default function UserCommissionBreakdown() {
           className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
         >
           {loading ? "Loading..." : "Apply Filters"}
+        </button>
+        <button
+          type="button"
+          onClick={downloadCSV}
+          disabled={loading || salesData.length === 0}
+          className="rounded bg-green-600 px-4 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
+        >
+          Download CSV
         </button>
       </div>
 
