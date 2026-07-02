@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { Sidebar } from "@/components/Sidebar";
 import { TopbarNew } from "@/components/topbar/TopbarNew";
 import { useSessionStore } from "@/store/session";
@@ -10,6 +10,7 @@ import { refreshActiveOrganizationContext } from "@/lib/orgs";
 
 export default function DashboardLayout({ children }) {
   const router = useRouter();
+  const pathname = usePathname();
   const hydrate = useSessionStore((s) => s.hydrate);
   const accessToken = useSessionStore((s) => s.accessToken);
   const hydrated = useSessionStore((s) => s.hydrated);
@@ -21,6 +22,8 @@ export default function DashboardLayout({ children }) {
     activeOrganization?.id ||
     activeOrganization?.organizationId ||
     "no-org";
+
+  const isPosPage = pathname === "/dashboard/sales-channels/pos";
 
   useEffect(() => {
     hydrate();
@@ -57,18 +60,16 @@ export default function DashboardLayout({ children }) {
       key={organizationKey}
       className="flex flex-col min-h-screen bg-zinc-50 text-zinc-900"
     >
-      {/* Full-width Topbar */}
+      {/* Topbar */}
       <TopbarNew
         sidebarOpen={sidebarOpen}
         onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
       />
 
-      {/* Content area with Sidebar and Main */}
-      <div className="flex flex-1">
-        {/* Sidebar */}
+      {/* Content area */}
+      <div className="flex flex-1 min-h-0">
         <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
-        {/* Overlay for mobile */}
         {sidebarOpen && (
           <div
             className="fixed inset-0 bg-black/50 z-30 md:hidden transition-opacity duration-300 opacity-100"
@@ -76,8 +77,11 @@ export default function DashboardLayout({ children }) {
           />
         )}
 
-        {/* Main content */}
-        <main className="flex-1 bg-zinc-50 p-6">
+        <main
+          className={`flex-1 bg-zinc-50 overflow-hidden min-h-0 ${
+            isPosPage ? "p-0 h-[calc(100vh-64px)]" : "p-6"
+          }`}
+        >
           {!isAuthed ? (
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
               You are not signed in. Provide access/refresh tokens via a login
@@ -85,12 +89,16 @@ export default function DashboardLayout({ children }) {
             </div>
           ) : null}
           {isAuthed && !activeOrganization ? (
-            <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">
+            <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800">
               Select an organization to continue. If you belong to only one
               organization, it will auto-select when loaded.
             </div>
           ) : null}
-          <div className="mt-4">{children}</div>
+          <div
+            className={`${isPosPage ? "h-full overflow-hidden" : "mt-4"}`}
+          >
+            {children}
+          </div>
         </main>
       </div>
     </div>
