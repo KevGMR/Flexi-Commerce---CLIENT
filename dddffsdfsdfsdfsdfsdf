@@ -1,0 +1,10 @@
+  backup-before-rollback                               [m 38fdd12 feat(reports): prefer subtotalExclCreditAndDiscount and update label to exclude discounts
+* [32mbackup-not-ready                                     [m 72d4914 client
+  feature/checkout-cart-breakdown                      [m 110225e Add grouped checkout cart breakdown
+  feature/permissions-seed-and-propagation             [m 8bbeedc fix(client): wrap services page search params in suspense
+  feature/pos-total-expenses-client                    [m 36d6b83 feat(dashboard): display total expenses KPI and operating expenses; fix lint and grid classes
+  feature/pos/reports-enhancements                     [m 5fe9fcb Show services in POS product source
+  feature/pos/subtotal-exclude-credit-discount-frontend[m 3dcb747 fix(reports): remove duplicate use client directive
+  feature/sale-reservation-edit                        [m a653ab4 update
+  fix/shift-till-visibility                            [m 3c27977 Show cashier names in reconciliation detail
+  main                                                 [m a1ba364 Revert "fix: POS panel scrolling and viewport height"

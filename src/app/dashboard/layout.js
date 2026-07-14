@@ -14,6 +14,8 @@ export default function DashboardLayout({ children }) {
   const accessToken = useSessionStore((s) => s.accessToken);
   const hydrated = useSessionStore((s) => s.hydrated);
   const activeOrganization = useSessionStore((s) => s.activeOrganization);
+  const permissionsRefreshed = useSessionStore((s) => s.permissionsRefreshed);
+  const refreshPermissions = useSessionStore((s) => s.refreshPermissions);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const lastRefreshedOrgId = useRef(null);
   const organizationKey =
@@ -50,6 +52,13 @@ export default function DashboardLayout({ children }) {
     });
   }, [hydrated, accessToken, activeOrganization]);
 
+  // Refresh permissions when organization changes or after login
+  useEffect(() => {
+    if (accessToken && activeOrganization && !permissionsRefreshed) {
+      refreshPermissions();
+    }
+  }, [accessToken, activeOrganization, permissionsRefreshed, refreshPermissions]);
+
   const isAuthed = Boolean(accessToken);
 
   return (
@@ -57,15 +66,12 @@ export default function DashboardLayout({ children }) {
       key={organizationKey}
       className="flex flex-col min-h-screen bg-zinc-50 text-zinc-900"
     >
-      {/* Full-width Topbar */}
       <TopbarNew
         sidebarOpen={sidebarOpen}
         onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
       />
 
-      {/* Content area with Sidebar and Main */}
-      <div className="flex flex-1">
-        {/* Sidebar */}
+      <div className="flex flex-1 min-h-0">
         <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
         {/* Overlay for mobile */}
@@ -90,7 +96,9 @@ export default function DashboardLayout({ children }) {
               organization, it will auto-select when loaded.
             </div>
           ) : null}
-          <div className="mt-4">{children}</div>
+          <div className={`${isPosPage ? "h-full overflow-hidden" : "mt-4"}`}>
+            {children}
+          </div>
         </main>
       </div>
     </div>

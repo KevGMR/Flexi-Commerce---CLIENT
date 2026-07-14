@@ -122,6 +122,8 @@ export default function UsersPage() {
                   <th className="py-3 pr-4">Name</th>
                   <th className="py-3 pr-4">Email</th>
                   <th className="py-3 pr-4">Status</th>
+                  <th className="py-3 pr-4">Role</th>
+                  <th className="py-3 pr-4">Custom Permissions</th>
                   <th className="py-3 pr-4">Joined</th>
                   <th className="py-3 pr-4">Actions</th>
                 </tr>
@@ -145,6 +147,30 @@ export default function UsersPage() {
                       >
                         {user.status}
                       </span>
+                    </td>
+                    <td className="py-3 pr-4 text-zinc-600">
+                      {user.role || "Employee"}
+                    </td>
+                    <td className="py-3 pr-4">
+                      {user.customPermissions && user.customPermissions.length > 0 ? (
+                        <div className="flex flex-wrap gap-1">
+                          {user.customPermissions.slice(0, 3).map((perm) => (
+                            <span
+                              key={perm}
+                              className="inline-block rounded bg-blue-100 px-2 py-0.5 text-[10px] font-medium text-blue-700"
+                            >
+                              {perm}
+                            </span>
+                          ))}
+                          {user.customPermissions.length > 3 && (
+                            <span className="inline-block rounded bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-600">
+                              +{user.customPermissions.length - 3}
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-zinc-400">—</span>
+                      )}
                     </td>
                     <td className="py-3 pr-4 text-zinc-500">
                       {new Date(user.createdAt).toLocaleDateString()}

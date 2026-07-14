@@ -211,6 +211,9 @@ export default function PosPage() {
     useState(false);
   const [pendingCheckoutData, setPendingCheckoutData] = useState(null);
 
+  // Delivery modal state
+  const [showDeliveryModal, setShowDeliveryModal] = useState(false);
+
   const [exchangeEditingPriceIndex, setExchangeEditingPriceIndex] =
     useState(null);
   const [exchangeEditingPriceValue, setExchangeEditingPriceValue] =
@@ -228,6 +231,59 @@ export default function PosPage() {
   const [exchangeEditingDiscountIndex, setExchangeEditingDiscountIndex] = useState(null);
   const [exchangeDiscountType, setExchangeDiscountType] = useState("fixed");
   const [exchangeDiscountValue, setExchangeDiscountValue] = useState("");
+
+  // Customer state
+  const [selectedCustomer, setSelectedCustomer] = useState(null);
+
+  // Delivery state
+  const [deliveryEnabled, setDeliveryEnabled] = useState(false);
+  const [deliveryInfo, setDeliveryInfo] = useState({
+    recipientName: "",
+    recipientPhone: "",
+    recipientEmail: "",
+    deliveryCategory: "",
+    deliveryOption: "",
+    deliveryAddress: {
+      street: "",
+      city: "",
+      state: "",
+      postalCode: "",
+      country: "Kenya",
+      landmark: "",
+    },
+    notes: "",
+  });
+
+  // NEW: Update customer modal state
+  const [updatingCustomer, setUpdatingCustomer] = useState(false);
+  const [showUpdateCustomerModal, setShowUpdateCustomerModal] = useState(false);
+  const [customerUpdateData, setCustomerUpdateData] = useState({
+    fullname: "",
+    email: "",
+    phone: "",
+    address: {
+      street: "",
+      city: "",
+      state: "",
+      postalCode: "",
+      country: "Kenya",
+    },
+  });
+
+  const cartContainerRef = useRef(null);
+
+  // Helper to calculate delivery fee from current delivery info
+  const calculateDeliveryFee = useCallback(() => {
+    if (!deliveryEnabled || !deliveryInfo.deliveryCategory) return 0;
+    
+    const category = locationSettings?.deliveryCategories?.find(
+      c => c.categoryName === deliveryInfo.deliveryCategory
+    );
+    const option = category?.childOptions?.find(
+      o => o.optionName === deliveryInfo.deliveryOption
+    );
+    return option?.price || 0;
+  }, [deliveryEnabled, deliveryInfo, locationSettings]);
 
   const getLocationLabel = (id) => {
     if (!id) return "";
@@ -338,6 +394,90 @@ export default function PosPage() {
     };
     fetchLocationSettings();
   }, [locationId]);
+
+  // Click outside overlay to close
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (showSearchOverlay && cartContainerRef.current && !cartContainerRef.current.contains(event.target)) {
+        handleCloseSearch();
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showSearchOverlay]);
+
+  // Escape key closes overlay
+  useEffect(() => {
+    const handleEscape = (e) => {
+      if (e.key === "Escape" && showSearchOverlay) {
+        handleCloseSearch();
+      }
+    };
+    document.addEventListener("keydown", handleEscape);
+    return () => document.removeEventListener("keydown", handleEscape);
+  }, [showSearchOverlay]);
+
+  // Auto-fill delivery info from selected customer
+  useEffect(() => {
+    if (!selectedCustomer) return;
+
+    // 1. When toggle is ON, fill/update delivery info from customer
+    if (deliveryEnabled) {
+      const address = selectedCustomer.address || {};
+      setDeliveryInfo((prev) => ({
+        ...prev,
+        recipientName: selectedCustomer.fullname || prev.recipientName,
+        recipientPhone: selectedCustomer.phone || prev.recipientPhone,
+        recipientEmail: selectedCustomer.email || prev.recipientEmail,
+        deliveryAddress: {
+          street: address.street || prev.deliveryAddress?.street || "",
+          city: address.city || prev.deliveryAddress?.city || "",
+          state: address.state || prev.deliveryAddress?.state || "",
+          postalCode: address.postalCode || prev.deliveryAddress?.postalCode || "",
+          country: address.country || prev.deliveryAddress?.country || "Kenya",
+          landmark: address.landmark || prev.deliveryAddress?.landmark || "",
+        },
+      }));
+      return;
+    }
+
+    // 2. When customer has address and toggle is OFF, auto-enable and fill
+    const address = selectedCustomer.address;
+    if (!address) return;
+
+    const hasAddressInfo =
+      address.street || address.city || address.state || address.postalCode || address.country;
+    if (!hasAddressInfo) return;
+
+    // Only fill if delivery fields are empty (no user input yet)
+    const hasUserEntered =
+      deliveryInfo.recipientName ||
+      deliveryInfo.recipientPhone ||
+      deliveryInfo.deliveryAddress.street ||
+      deliveryInfo.deliveryAddress.city;
+
+    if (hasUserEntered) return;
+
+    setDeliveryInfo((prev) => ({
+      ...prev,
+      recipientName: selectedCustomer.fullname || prev.recipientName,
+      recipientPhone: selectedCustomer.phone || prev.recipientPhone,
+      recipientEmail: selectedCustomer.email || prev.recipientEmail,
+      deliveryAddress: {
+        street: address.street || "",
+        city: address.city || "",
+        state: address.state || "",
+        postalCode: address.postalCode || "",
+        country: address.country || "Kenya",
+        landmark: address.landmark || "",
+      },
+    }));
+
+    if (!deliveryEnabled && (address.street || address.city)) {
+      setDeliveryEnabled(true);
+    }
+  }, [selectedCustomer, deliveryEnabled]);
+
 
   const checkPreviousDayOpenShift = useCallback(async (targetLocationId) => {
     if (!targetLocationId) return;
@@ -1090,6 +1230,74 @@ export default function PosPage() {
     setAttachMode(false);
     setAttachingServiceIndex(null);
     setSaleAssignedUser(null);
+    setSelectedCustomer(null);
+    setDeliveryEnabled(false);
+    setDeliveryInfo({
+      recipientName: "",
+      recipientPhone: "",
+      recipientEmail: "",
+      deliveryCategory: "",
+      deliveryOption: "",
+      deliveryAddress: {
+        street: "",
+        city: "",
+        state: "",
+        postalCode: "",
+        country: "Kenya",
+        landmark: "",
+      },
+      notes: "",
+    });
+  };
+
+  // NEW: Update customer handler
+  const handleUpdateCustomer = async () => {
+    if (!selectedCustomer) return;
+    setUpdatingCustomer(true);
+    setError("");
+    try {
+      const payload = {
+        fullname: customerUpdateData.fullname,
+        email: customerUpdateData.email || undefined,
+        phone: customerUpdateData.phone || undefined,
+        address: customerUpdateData.address,
+      };
+      const res = await apiFetch(`/customers/${selectedCustomer._id}`, {
+        method: "PUT",
+        body: payload,
+      });
+      const updated = res?.customer;
+      if (updated) {
+        // Update the selected customer with new data
+        setSelectedCustomer(updated);
+        
+        // Update delivery info with new address if delivery is enabled
+        if (deliveryEnabled && updated.address) {
+          setDeliveryInfo((prev) => ({
+            ...prev,
+            recipientName: updated.fullname || prev.recipientName,
+            recipientPhone: updated.phone || prev.recipientPhone,
+            recipientEmail: updated.email || prev.recipientEmail,
+            deliveryAddress: {
+              street: updated.address.street || "",
+              city: updated.address.city || "",
+              state: updated.address.state || "",
+              postalCode: updated.address.postalCode || "",
+              country: updated.address.country || "Kenya",
+              landmark: updated.address.landmark || "",
+            },
+          }));
+        }
+        
+        setShowUpdateCustomerModal(false);
+        setStatus("Customer updated successfully!");
+        setTimeout(() => setStatus(""), 3000);
+      }
+    } catch (err) {
+      setError(err?.message || "Failed to update customer");
+    } finally {
+      setUpdatingCustomer(false);
+    }
   };
 
   const handlePrintReceipt = () => {
@@ -1124,6 +1332,32 @@ export default function PosPage() {
     } finally {
       setSendingEmail(false);
     }
+  };
+
+  // ========== DELIVERY CHECKOUT HANDLERS ==========
+  const handleDeliveryConfirm = (deliveryData, fee) => {
+    // Update delivery info with data from modal
+    setDeliveryInfo({
+      recipientName: deliveryData.recipientName,
+      recipientPhone: deliveryData.recipientPhone,
+      recipientEmail: deliveryData.recipientEmail || "",
+      deliveryCategory: deliveryData.deliveryCategory,
+      deliveryOption: deliveryData.deliveryOption,
+      deliveryAddress: deliveryData.deliveryAddress,
+      notes: deliveryData.notes || "",
+    });
+    
+    // Close delivery modal
+    setShowDeliveryModal(false);
+    
+    // Now open checkout modal
+    setShowCompleteCheckoutModal(true);
+  };
+
+  const handleDeliverySkip = () => {
+    setShowDeliveryModal(false);
+    // Optionally disable delivery
+    setDeliveryEnabled(false);
   };
 
   // ========== RETURNS MODE HANDLERS ==========
@@ -1621,6 +1855,19 @@ export default function PosPage() {
       return;
     }
 
+    // Check if delivery is enabled but delivery info is incomplete
+    if (deliveryEnabled) {
+      const hasRecipientInfo = deliveryInfo.recipientName && deliveryInfo.recipientPhone;
+      const hasAddress = deliveryInfo.deliveryAddress?.street && deliveryInfo.deliveryAddress?.city;
+      const hasDeliveryOptions = deliveryInfo.deliveryCategory && deliveryInfo.deliveryOption;
+
+      if (!hasRecipientInfo || !hasAddress || !hasDeliveryOptions) {
+        // Show delivery modal to complete delivery info
+        setShowDeliveryModal(true);
+        return;
+      }
+    }
+
     setShowCompleteCheckoutModal(true);
   };
 
@@ -1639,6 +1886,9 @@ export default function PosPage() {
       (payment) => payment.amount > 0,
     );
 
+    // Use delivery fee from calculation if not provided
+    const finalDeliveryFee = deliveryFee !== undefined ? deliveryFee : calculateDeliveryFee();
+
     setStatus("Processing...");
     setError("");
 
@@ -1648,7 +1898,7 @@ export default function PosPage() {
           (sum, payment) => sum + payment.amount,
           0,
         );
-        if (totalAmount <= 0 || totalAmount > cartTotal + deliveryFee) {
+        if (totalAmount <= 0 || totalAmount > cartTotal + finalDeliveryFee) {
           setError("Split payment total must be between 0 and cart total.");
           return;
         }
@@ -1705,15 +1955,34 @@ export default function PosPage() {
           locationId,
         }),
         assignedUser: saleAssignedUser || undefined,
+        customerId: selectedCustomer?._id || undefined,
+        customerName: selectedCustomer?.fullname || undefined,
+        customerEmail: selectedCustomer?.email || undefined,
+        customerPhone: selectedCustomer?.phone || undefined,
       };
+
+      if (deliveryEnabled) {
+        payload.requiresDelivery = true;
+        payload.deliveryInfo = {
+          requiresDelivery: true,
+          recipientName: deliveryInfo.recipientName,
+          recipientPhone: deliveryInfo.recipientPhone,
+          recipientEmail: deliveryInfo.recipientEmail,
+          deliveryAddress: deliveryInfo.deliveryAddress,
+          deliveryCategory: deliveryInfo.deliveryCategory,
+          deliveryOption: deliveryInfo.deliveryOption,
+          deliveryFee: finalDeliveryFee || 0,
+          notes: deliveryInfo.notes,
+        };
+      }
 
       const paidAmount = isSplitPayment
         ? positiveSplitPayments.reduce(
             (sum, payment) => sum + payment.amount,
             0,
           )
-        : cartTotal + deliveryFee;
-      const balanceDue = Math.max(0, cartTotal + deliveryFee - paidAmount);
+        : cartTotal + (deliveryEnabled ? (finalDeliveryFee || 0) : 0);
+      const balanceDue = Math.max(0, cartTotal + (deliveryEnabled ? (finalDeliveryFee || 0) : 0) - paidAmount);
       const isReservationSale = Boolean(isReservation || balanceDue > 0.01);
 
       payload.paymentStatus = isReservationSale ? "partial" : "completed";
@@ -1761,10 +2030,10 @@ export default function PosPage() {
         })),
         payments: isSplitPayment
           ? positiveSplitPayments
-          : [{ method: paymentMethod, amount: cartTotal + deliveryFee }],
+          : [{ method: paymentMethod, amount: cartTotal + (deliveryEnabled ? (finalDeliveryFee || 0) : 0) }],
         subtotal: cartTotal,
-        deliveryFee: deliveryFee || 0,
-        deliveryInfo: deliveryInfo || undefined,
+        deliveryFee: deliveryEnabled ? (finalDeliveryFee || 0) : 0,
+        deliveryInfo: deliveryEnabled ? deliveryInfo : undefined,
         deliveryFeeId: receiptData?.deliveryFeeId,
         trackingNumber: receiptData?.trackingNumber,
         totalDiscount: cartLineItemDiscounts + transactionDiscount,
@@ -1849,17 +2118,36 @@ export default function PosPage() {
           items: formattedItems,
           notes: checkoutNotes || undefined,
           assignedUser: saleAssignedUser || undefined,
+          customerId: selectedCustomer?._id || undefined,
+          customerName: selectedCustomer?.fullname || undefined,
+          customerEmail: selectedCustomer?.email || undefined,
+          customerPhone: selectedCustomer?.phone || undefined,
         };
+
+        if (deliveryEnabled) {
+          offlinePayload.requiresDelivery = true;
+          offlinePayload.deliveryInfo = {
+            requiresDelivery: true,
+            recipientName: deliveryInfo.recipientName,
+            recipientPhone: deliveryInfo.recipientPhone,
+            recipientEmail: deliveryInfo.recipientEmail,
+            deliveryAddress: deliveryInfo.deliveryAddress,
+            deliveryCategory: deliveryInfo.deliveryCategory,
+            deliveryOption: deliveryInfo.deliveryOption,
+            deliveryFee: finalDeliveryFee || 0,
+            notes: deliveryInfo.notes,
+          };
+        }
 
         const offlinePaidAmount = isSplitPayment
           ? positiveSplitPayments.reduce(
               (sum, payment) => sum + payment.amount,
               0,
             )
-          : cartTotal + deliveryFee;
+          : cartTotal + (deliveryEnabled ? (finalDeliveryFee || 0) : 0);
         const offlineBalanceDue = Math.max(
           0,
-          cartTotal + deliveryFee - offlinePaidAmount,
+          cartTotal + (deliveryEnabled ? (finalDeliveryFee || 0) : 0) - offlinePaidAmount,
         );
         const isOfflineReservation = offlineBalanceDue > 0.01;
 
@@ -1917,14 +2205,14 @@ export default function PosPage() {
             price: item.customPrice ?? item.price,
           })),
           subtotal: cartTotal,
-          deliveryFee: deliveryFee || 0,
+          deliveryFee: deliveryEnabled ? (finalDeliveryFee || 0) : 0,
           payments: isSplitPayment
             ? positiveSplitPayments
                 .map((payment) => ({
                   method: payment.method,
                   amount: payment.amount,
                 }))
-            : [{ method: paymentMethod, amount: cartTotal + deliveryFee }],
+            : [{ method: paymentMethod, amount: cartTotal + (deliveryEnabled ? (finalDeliveryFee || 0) : 0) }],
           notes: checkoutNotes,
           amountPaid: offlinePaidAmount,
           balanceDue: offlineBalanceDue,
@@ -2071,39 +2359,46 @@ export default function PosPage() {
     return matchesSearch && matchesTab;
   });
 
-  const scheduleProductRefresh = () => {
+  // --- Updated customer handlers ---
+  const handleCustomerSelect = (customer) => {
+    setSelectedCustomer(customer);
+  };
+
+  const handleCustomerClear = () => {
+    setSelectedCustomer(null);
+    setDeliveryEnabled(false);
+    setDeliveryInfo({
+      recipientName: "",
+      recipientPhone: "",
+      recipientEmail: "",
+      deliveryCategory: "",
+      deliveryOption: "",
+      deliveryAddress: {
+        street: "",
+        city: "",
+        state: "",
+        postalCode: "",
+        country: "Kenya",
+        landmark: "",
+      },
+      notes: "",
+    });
+  };
+
+  // Schedule product refresh (debounced)
+  const scheduleProductRefresh = useCallback(() => {
     if (refreshDebounceTimer) {
       clearTimeout(refreshDebounceTimer);
     }
-
-    const timer = setTimeout(async () => {
-      if (navigator.onLine && shopifyConnection?.status === "active") {
-        console.log(
-          "[POS] Background refresh: Fetching updated Shopify products",
-        );
-        try {
-          await loadShopifyProductsData();
-          setLastSyncTimestamp(new Date().toISOString());
-        } catch (error) {
-          console.error("[POS] Background refresh failed:", error);
-        }
+    const timer = setTimeout(() => {
+      if (shopifyConnection?.status === "active" && locationId) {
+        loadShopifyProductsData();
       }
     }, 2000);
-
     setRefreshDebounceTimer(timer);
-  };
+  }, [shopifyConnection?.status, locationId, loadShopifyProductsData]);
 
-  const filteredProducts = mockProducts.filter((p) => {
-    const matchesSearch = p.name
-      .toLowerCase()
-      .includes(searchQuery.toLowerCase());
-    const matchesTab = p.type === productTab;
-    return matchesSearch && matchesTab;
-  });
-  const isPartialReceipt = hasPartialPaymentSignal(receipt);
-  const receiptAmountPaid = toNonNegativeAmount(receipt?.amountPaid);
-  const receiptBalanceDue = toNonNegativeAmount(receipt?.balanceDue);
-
+  // --- Render ---
   return (
     <div className="flex flex-col bg-gray-50 min-h-0 h-full md:h-[calc(100vh-8rem)]">
       {/* Top Bar – unchanged */}
@@ -2200,7 +2495,7 @@ export default function PosPage() {
         </div>
       </div>
 
-      {/* Location Picker Modal – unchanged */}
+      {/* Location Picker Modal */}
       {showLocationPicker && locations && locations.length > 1 && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
@@ -2319,71 +2614,71 @@ export default function PosPage() {
         onClose={() => setShowCompleteCheckoutModal(false)}
         status={status}
         error={error}
+        selectedCustomer={selectedCustomer}
+        deliveryInfo={deliveryInfo}
+        deliveryFee={calculateDeliveryFee()}
+        deliveryEnabled={deliveryEnabled}
       />
 
-      {/* Main Content */}
-      <div className="flex-1 flex overflow-hidden min-h-0">
-        {/* Products Section – unchanged */}
-        <div className="flex-1 flex flex-col overflow-hidden min-h-0">
-          <div className="bg-white border-b border-gray-200 p-4">
-            <div className="relative mb-3">
-              <input
-                type="text"
-                placeholder="Search products..."
-                value={searchQuery}
-                onChange={(e) => handleSearch(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-              <svg
-                className="absolute left-3 top-2.5 w-5 h-5 text-gray-400"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+      {/* Delivery Checkout Modal */}
+      {showDeliveryModal && (
+        <DeliveryCheckoutModal
+          isOpen={showDeliveryModal}
+          locationId={locationId}
+          cartSubtotal={cartSubtotal}
+          cartDiscount={cartLineItemDiscounts}
+          onConfirm={handleDeliveryConfirm}
+          onSkip={handleDeliverySkip}
+          onClose={() => setShowDeliveryModal(false)}
+        />
+      )}
+
+      {/* Main Content - New Layout */}
+      <div className="flex-1 flex overflow-hidden min-h-0 w-full max-w-full">
+        {/* LEFT: Cart Area with Search */}
+        <div
+          ref={cartContainerRef}
+          className="flex-1 min-w-0 bg-white border-r border-gray-200 flex flex-col min-h-0 h-full max-h-full overflow-hidden"
+        >
+          {/* Search Bar (always visible) */}
+          <div className="p-3 border-b border-gray-200 bg-white z-10 flex-shrink-0">
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1">
+                <input
+                  type="text"
+                  placeholder="Search products..."
+                  value={searchQuery}
+                  onChange={(e) => handleSearchInput(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
                 />
-              </svg>
-              {isSearching && (
-                <div className="absolute right-3 top-2.5">
-                  <div className="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-                </div>
-              )}
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setProductTab("flexi")}
-                className={`px-4 py-2 rounded-lg font-medium ${productTab === "flexi" ? "bg-blue-500 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}
-              >
-                FLEXI
-              </button>
-              <button
-                onClick={() => setProductTab("services")}
-                className={`px-4 py-2 rounded-lg font-medium ${productTab === "services" ? "bg-blue-500 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}
-              >
-                Services
-                {serviceProducts.length > 0 && (
-                  <span className="ml-2 px-2 py-0.5 text-xs bg-blue-100 text-blue-600 rounded-full">
-                    {serviceProducts.length}
-                  </span>
-                )}
-              </button>
-              {shopifyConnection && (
-                <button
-                  onClick={() => setProductTab("shopify")}
-                  className={`px-4 py-2 rounded-lg font-medium ${productTab === "shopify" ? "bg-blue-500 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}`}
+                <svg
+                  className="absolute left-3 top-2.5 w-5 h-5 text-gray-400"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
                 >
-                  Shopify
-                  {shopifyProducts.length > 0 && (
-                    <span className="ml-2 px-2 py-0.5 text-xs bg-blue-100 text-blue-600 rounded-full">
-                      {shopifyProducts.length}
-                    </span>
-                  )}
-                </button>
-              )}
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                  />
+                </svg>
+                {searchQuery && (
+                  <button
+                    onClick={() => handleSearchInput("")}
+                    className="absolute right-2 top-2.5 text-gray-400 hover:text-gray-600"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+              <button
+                onClick={() => setShowPendingSales(!showPendingSales)}
+                className="px-3 py-1 bg-amber-100 text-amber-700 rounded-full text-xs font-medium whitespace-nowrap hover:bg-amber-200"
+              >
+                {pendingSalesCount} pending
+              </button>
             </div>
           </div>
 
@@ -2925,6 +3220,210 @@ export default function PosPage() {
                   })
                 )}
               </div>
+            )}
+          </div>
+        </div>
+
+        {/* RIGHT: Checkout Panel */}
+        <div className="w-[380px] bg-white border-l border-gray-200 flex flex-col min-h-0 h-full max-h-full overflow-hidden">
+          {/* Header */}
+          <div className="p-4 border-b border-gray-200 flex-shrink-0">
+            <h2 className="text-lg font-semibold text-gray-900">Checkout</h2>
+          </div>
+
+          {/* Scrollable Content */}
+          <div className="flex-1 min-h-0 overflow-auto p-4 space-y-4">
+            {/* Customer Section */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-semibold text-gray-700">Customer</h3>
+                {selectedCustomer && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCustomerUpdateData({
+                        fullname: selectedCustomer.fullname || "",
+                        email: selectedCustomer.email || "",
+                        phone: selectedCustomer.phone || "",
+                        address: selectedCustomer.address || {
+                          street: "",
+                          city: "",
+                          state: "",
+                          postalCode: "",
+                          country: "Kenya",
+                        },
+                      });
+                      setShowUpdateCustomerModal(true);
+                    }}
+                    className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+                  >
+                    Update Customer
+                  </button>
+                )}
+              </div>
+              <CustomerSelector
+                selectedCustomer={selectedCustomer}
+                onSelectCustomer={handleCustomerSelect}
+                onClearCustomer={handleCustomerClear}
+              />
+            </div>
+
+            {/* Delivery Section (toggle + form) */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-semibold text-gray-700">Delivery</h3>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={deliveryEnabled}
+                    onChange={(e) => setDeliveryEnabled(e.target.checked)}
+                    className="sr-only peer"
+                  />
+                  <div className="w-9 h-5 bg-gray-200 peer-focus:ring-2 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                </label>
+              </div>
+              {deliveryEnabled && (
+                <div className="mt-2 bg-gray-50 p-3 rounded-lg">
+                  <DeliveryForm
+                    value={deliveryInfo}
+                    onChange={setDeliveryInfo}
+                    locationId={locationId}
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Sale Summary */}
+            <div>
+              <h3 className="text-sm font-semibold text-gray-700 mb-2">Summary</h3>
+              <div className="space-y-1 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Subtotal</span>
+                  <span className="font-medium">${cartSubtotal.toFixed(2)}</span>
+                </div>
+                {cartLineItemDiscounts > 0 && (
+                  <div className="flex justify-between text-green-600">
+                    <span>Item Discounts</span>
+                    <span>-${cartLineItemDiscounts.toFixed(2)}</span>
+                  </div>
+                )}
+                {deliveryEnabled && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Delivery Fee</span>
+                    <span className="font-medium">
+                      ${calculateDeliveryFee().toFixed(2)}
+                    </span>
+                  </div>
+                )}
+                {transactionDiscount > 0 && (
+                  <div className="flex justify-between text-green-600">
+                    <span>Transaction Discount</span>
+                    <span>-${transactionDiscount.toFixed(2)}</span>
+                  </div>
+                )}
+                <div className="border-t pt-2 mt-2">
+                  <div className="flex justify-between text-lg font-bold">
+                    <span>Total</span>
+                    <span className="text-blue-600">
+                      ${(cartTotal + (deliveryEnabled ? calculateDeliveryFee() : 0)).toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Transaction Discount */}
+            <div>
+              <h3 className="text-sm font-semibold text-gray-700 mb-2">Discount</h3>
+              {!showTransactionDiscount ? (
+                <button
+                  onClick={() => setShowTransactionDiscount(true)}
+                  className="text-sm text-green-600 hover:text-green-700 font-medium"
+                >
+                  + Apply Transaction Discount
+                </button>
+              ) : (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={transactionDiscountType}
+                      onChange={(e) => setTransactionDiscountType(e.target.value)}
+                      className="px-2 py-1 border border-green-300 rounded text-sm flex-1"
+                    >
+                      <option value="fixed">$ Fixed Amount</option>
+                      <option value="percentage">% Percentage</option>
+                    </select>
+                    <input
+                      type="number"
+                      placeholder="0"
+                      value={transactionDiscount > 0 ? (transactionDiscountType === "percentage" ? ((transactionDiscount / (cartSubtotal - cartLineItemDiscounts)) * 100) : transactionDiscount) : ""}
+                      onChange={(e) => {
+                        const inputValue = parseFloat(e.target.value) || 0;
+                        const availableAmount = cartSubtotal - cartLineItemDiscounts;
+                        let finalDiscount = 0;
+                        if (transactionDiscountType === "percentage") {
+                          finalDiscount = Math.min((inputValue / 100) * availableAmount, availableAmount);
+                        } else {
+                          finalDiscount = Math.min(inputValue, availableAmount);
+                        }
+                        setTransactionDiscount(Math.max(0, finalDiscount));
+                      }}
+                      className="w-20 px-2 py-1 border border-green-300 rounded text-sm"
+                    />
+                    <button
+                      onClick={() => { setTransactionDiscount(0); setShowTransactionDiscount(false); setDiscountReason(""); }}
+                      className="text-sm text-gray-500 hover:text-gray-700"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="Discount reason (optional)"
+                    value={discountReason}
+                    onChange={(e) => setDiscountReason(e.target.value)}
+                    className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Notes */}
+            <div>
+              <h3 className="text-sm font-semibold text-gray-700 mb-2">Notes</h3>
+              <input
+                type="text"
+                placeholder="Add note (optional)"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm"
+              />
+            </div>
+          </div>
+
+          {/* Footer (fixed) */}
+          <div className="border-t border-gray-200 p-4 space-y-2 flex-shrink-0">
+            <button
+              onClick={handleCheckout}
+              disabled={cart.length === 0 || checkingPreviousDayShift}
+              className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 text-white font-bold py-3 rounded-lg text-sm transition-colors"
+            >
+              Add Payments
+            </button>
+            <button
+              onClick={() => {
+                setShowCompleteCheckoutModal(true);
+              }}
+              disabled={cart.length === 0 || checkingPreviousDayShift}
+              className="w-full bg-amber-600 hover:bg-amber-700 disabled:bg-gray-300 text-white font-bold py-3 rounded-lg text-sm transition-colors"
+            >
+              Create Reservation
+            </button>
+            {checkingPreviousDayShift && <p className="mt-2 text-xs text-gray-500">Checking whether a previous-day shift is still open...</p>}
+            {previousDayShiftError && !checkingPreviousDayShift && <p className="mt-2 text-xs text-amber-700">{previousDayShiftError}</p>}
+          </div>
+        </div>
+      </div>
 
               {/* Attach Modal (block second service) */}
               {showAttachModal && (
@@ -3012,148 +3511,7 @@ export default function PosPage() {
                 </div>
               )}
 
-              {/* Cart Footer */}
-              {cart.length > 0 && (
-                <div className="border-t border-gray-200 p-4 space-y-4">
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between text-sm text-gray-600">
-                      <span>Subtotal</span>
-                      <span>${cartSubtotal.toFixed(2)}</span>
-                    </div>
-                    {cartLineItemDiscounts > 0 && (
-                      <div className="flex items-center justify-between text-sm text-green-600">
-                        <span>Item Discounts</span>
-                        <span>-${cartLineItemDiscounts.toFixed(2)}</span>
-                      </div>
-                    )}
-                    {transactionDiscount > 0 && (
-                      <div className="flex items-center justify-between text-sm text-green-600">
-                        <span>Transaction Discount</span>
-                        <span>-${transactionDiscount.toFixed(2)}</span>
-                      </div>
-                    )}
-                    {(cartLineItemDiscounts > 0 || transactionDiscount > 0) && (
-                      <div className="flex items-center justify-between text-sm font-medium text-green-700 bg-green-50 px-2 py-1 rounded">
-                        <span>💰 Total Savings</span>
-                        <span>${(cartLineItemDiscounts + transactionDiscount).toFixed(2)}</span>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="flex items-center justify-between text-xl font-bold border-t pt-2">
-                    <span>Total</span>
-                    <span className="text-blue-600">${cartTotal.toFixed(2)}</span>
-                  </div>
-
-                  {useSessionStore.getState().can(PERMISSIONS.POS_APPLY_DISCOUNT) && (
-                    <div className="border-t pt-2">
-                      {!showTransactionDiscount ? (
-                        <button onClick={() => setShowTransactionDiscount(true)} className="text-sm text-green-600 hover:text-green-700 font-medium">+ Apply Transaction Discount</button>
-                      ) : (
-                        <div className="space-y-2">
-                          <div className="flex items-center gap-2">
-                            <select value={transactionDiscountType} onChange={(e) => setTransactionDiscountType(e.target.value)} className="px-2 py-1 border border-green-300 rounded text-sm">
-                              <option value="fixed">$ Fixed Amount</option>
-                              <option value="percentage">% Percentage</option>
-                            </select>
-                            <input
-                              type="number"
-                              placeholder="0"
-                              value={transactionDiscount > 0 ? (transactionDiscountType === "percentage" ? ((transactionDiscount / (cartSubtotal - cartLineItemDiscounts)) * 100) : transactionDiscount) : ""}
-                              onChange={(e) => {
-                                const inputValue = parseFloat(e.target.value) || 0;
-                                const availableAmount = cartSubtotal - cartLineItemDiscounts;
-                                let finalDiscount = 0;
-                                if (transactionDiscountType === "percentage") {
-                                  finalDiscount = Math.min((inputValue / 100) * availableAmount, availableAmount);
-                                } else {
-                                  finalDiscount = Math.min(inputValue, availableAmount);
-                                }
-                                setTransactionDiscount(Math.max(0, finalDiscount));
-                              }}
-                              className="flex-1 px-2 py-1 border border-green-300 rounded text-sm"
-                            />
-                            <button onClick={() => { setTransactionDiscount(0); setShowTransactionDiscount(false); setDiscountReason(""); }} className="text-sm text-gray-500 hover:text-gray-700">✕</button>
-                          </div>
-                          <input type="text" placeholder="Discount reason (optional)" value={discountReason} onChange={(e) => setDiscountReason(e.target.value)} className="w-full px-2 py-1 border border-gray-300 rounded text-xs" />
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  <button
-                    onClick={handleCheckout}
-                    disabled={cart.length === 0 || checkingPreviousDayShift}
-                    className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 text-white font-bold py-4 rounded-lg text-lg transition-colors"
-                  >
-                    Add Payments
-                  </button>
-                  {checkingPreviousDayShift && <p className="mt-2 text-xs text-gray-500">Checking whether a previous-day shift is still open...</p>}
-                  {previousDayShiftError && !checkingPreviousDayShift && <p className="mt-2 text-xs text-amber-700">{previousDayShiftError}</p>}
-                </div>
-              )}
-            </>
-          ) : (
-            // ---------- RETURNS MODE ----------
-            <>
-              <div className="p-4 border-b border-gray-200 bg-orange-50">
-                <h2 className="text-lg font-bold text-orange-900">Process Return</h2>
-                <p className="text-sm text-orange-700 mt-1">Receipt: {originalSale.receiptNumber}</p>
-              </div>
-              <div className="flex-1 p-4 space-y-2 overflow-auto">
-                {originalSale.items.map((item, idx) => {
-                  const returnItem = returnItems[idx];
-                  if (!returnItem) return null;
-                  const maxQty = returnItem.maxQuantity;
-                  if (maxQty <= 0) return null;
-                  return (
-                    <div key={idx} className={`rounded-lg p-3 border-2 transition-all ${returnItem.selected ? "border-orange-500 bg-orange-50" : "border-gray-200 bg-gray-50"}`}>
-                      <div className="flex items-start gap-3">
-                        <input type="checkbox" checked={returnItem.selected} onChange={() => toggleReturnItem(idx)} className="mt-1" />
-                        <div className="flex-1">
-                          <h4 className="font-medium text-gray-900">{item.productName || item.product?.name || "Unknown Product"}</h4>
-                          <p className="text-sm text-gray-600">${item.unitPrice.toFixed(2)} each</p>
-                          <p className="text-xs text-gray-500">Available to return: {maxQty}</p>
-                        </div>
-                      </div>
-                      {returnItem.selected && (
-                        <div className="mt-3 flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <button onClick={() => updateReturnQty(idx, returnItem.quantity - 1)} className="w-8 h-8 bg-white border border-gray-300 rounded hover:bg-gray-100 font-bold">−</button>
-                            <span className="w-12 text-center font-medium">{returnItem.quantity}</span>
-                            <button onClick={() => updateReturnQty(idx, returnItem.quantity + 1)} className="w-8 h-8 bg-white border border-gray-300 rounded hover:bg-gray-100 font-bold">+</button>
-                          </div>
-                          <p className="font-bold text-orange-600">${(item.unitPrice * returnItem.quantity).toFixed(2)}</p>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-              <div className="border-t border-gray-200 p-4 space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Return Reason</label>
-                  <select value={returnReason} onChange={(e) => setReturnReason(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm">
-                    {returnReasons.map((reason) => <option key={reason.value} value={reason.value}>{reason.label}</option>)}
-                  </select>
-                </div>
-                <input type="text" placeholder="Add note (optional)" value={notes} onChange={(e) => setNotes(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm" />
-                <div className="flex items-center justify-between text-xl font-bold">
-                  <span>Refund Total</span>
-                  <span className="text-orange-600">${calculateReturnTotal().toFixed(2)}</span>
-                </div>
-                {status && <div className="text-sm text-green-700 bg-green-50 px-3 py-2 rounded">{status}</div>}
-                {error && <div className="text-sm text-red-700 bg-red-50 px-3 py-2 rounded">{error}</div>}
-                <button onClick={processReturn} disabled={processingReturn || calculateReturnTotal() === 0} className="w-full bg-orange-500 hover:bg-orange-600 disabled:bg-gray-300 text-white font-bold py-4 rounded-lg text-lg transition-colors">
-                  {processingReturn ? "Processing..." : "Process Return"}
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-
-      {/* Variant Picker Modal – unchanged */}
+      {/* Variant Picker Modal */}
       {showVariantPicker && variantPickerProduct && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
@@ -3191,7 +3549,7 @@ export default function PosPage() {
         </div>
       )}
 
-      {/* Receipt Lookup Modal – unchanged */}
+      {/* Receipt Lookup Modal */}
       {showReturnLookup && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg max-w-md w-full p-6">
@@ -3209,14 +3567,153 @@ export default function PosPage() {
         </div>
       )}
 
-      {/* Receipt Modal – unchanged */}
+      {/* Update Customer Modal */}
+      {showUpdateCustomerModal && selectedCustomer && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl max-h-[90vh] overflow-y-auto">
+            <h2 className="text-xl font-semibold mb-4">Update Customer</h2>
+            <form onSubmit={(e) => { e.preventDefault(); handleUpdateCustomer(); }} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-zinc-700">Full Name *</label>
+                <input
+                  type="text"
+                  required
+                  value={customerUpdateData.fullname}
+                  onChange={(e) => setCustomerUpdateData({ ...customerUpdateData, fullname: e.target.value })}
+                  className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-zinc-700">Email</label>
+                <input
+                  type="email"
+                  value={customerUpdateData.email}
+                  onChange={(e) => setCustomerUpdateData({ ...customerUpdateData, email: e.target.value })}
+                  className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-zinc-700">Phone</label>
+                <input
+                  type="tel"
+                  value={customerUpdateData.phone}
+                  onChange={(e) => setCustomerUpdateData({ ...customerUpdateData, phone: e.target.value })}
+                  className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                />
+              </div>
+
+              {/* Address */}
+              <div className="border-t border-zinc-200 pt-4">
+                <div className="flex items-center justify-between mb-3">
+                  <label className="text-sm font-medium text-zinc-700">Delivery Address</label>
+                </div>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-700">Street</label>
+                    <input
+                      type="text"
+                      value={customerUpdateData.address?.street || ""}
+                      onChange={(e) =>
+                        setCustomerUpdateData({
+                          ...customerUpdateData,
+                          address: { ...customerUpdateData.address, street: e.target.value },
+                        })
+                      }
+                      className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-zinc-700">City</label>
+                      <input
+                        type="text"
+                        value={customerUpdateData.address?.city || ""}
+                        onChange={(e) =>
+                          setCustomerUpdateData({
+                            ...customerUpdateData,
+                            address: { ...customerUpdateData.address, city: e.target.value },
+                          })
+                        }
+                        className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-zinc-700">State/Province</label>
+                      <input
+                        type="text"
+                        value={customerUpdateData.address?.state || ""}
+                        onChange={(e) =>
+                          setCustomerUpdateData({
+                            ...customerUpdateData,
+                            address: { ...customerUpdateData.address, state: e.target.value },
+                          })
+                        }
+                        className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-zinc-700">Postal Code</label>
+                      <input
+                        type="text"
+                        value={customerUpdateData.address?.postalCode || ""}
+                        onChange={(e) =>
+                          setCustomerUpdateData({
+                            ...customerUpdateData,
+                            address: { ...customerUpdateData.address, postalCode: e.target.value },
+                          })
+                        }
+                        className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-zinc-700">Country</label>
+                      <input
+                        type="text"
+                        value={customerUpdateData.address?.country || "Kenya"}
+                        onChange={(e) =>
+                          setCustomerUpdateData({
+                            ...customerUpdateData,
+                            address: { ...customerUpdateData.address, country: e.target.value },
+                          })
+                        }
+                        className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setShowUpdateCustomerModal(false)}
+                  className="rounded border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={updatingCustomer || !customerUpdateData.fullname.trim()}
+                  className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {updatingCustomer ? "Updating..." : "Update Customer"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Receipt Modal */}
       {showReceipt && receipt && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg max-w-md w-full max-h-[90vh] overflow-auto">
             <div className="p-6 border-b border-gray-200 sticky top-0 bg-white">
               <div className="flex items-center gap-2">
                 <h2 className="text-2xl font-bold text-gray-900">{receipt.isExchange ? "Exchange Slip" : receipt.isReturn ? "Return Receipt" : "Receipt"}</h2>
-                {isPartialReceipt && <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-xs font-semibold">Partial</span>}
+                {receipt.isReservation && <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-xs font-semibold">Partial</span>}
               </div>
               <p className="text-sm text-gray-600 font-mono">#{receipt.receiptNumber}</p>
               <p className="text-xs text-gray-500 mt-1">{new Date(receipt.timestamp).toLocaleString()}</p>
@@ -3253,10 +3750,10 @@ export default function PosPage() {
               ) : (
                 <div className={`${receipt.isReturn ? "bg-orange-50" : "bg-blue-50"} rounded-lg p-4`}>
                   <div className="flex justify-between items-center"><p className="text-lg font-bold text-gray-900">{receipt.isReturn ? "Refund Total" : "Total"}</p><p className={`text-2xl font-bold ${receipt.isReturn ? "text-orange-600" : "text-blue-600"}`}>${(receipt.subtotal + (receipt.deliveryFee || 0)).toFixed(2)}</p></div>
-                  {isPartialReceipt && !receipt.isReturn && !receipt.isExchange && (
+                  {receipt.isReservation && !receipt.isReturn && !receipt.isExchange && (
                     <div className="mt-3 pt-3 border-t border-blue-100 space-y-1">
-                      <div className="flex justify-between items-center text-sm"><p className="text-gray-700">Amount Paid</p><p className="font-semibold text-gray-900">${receiptAmountPaid.toFixed(2)}</p></div>
-                      <div className="flex justify-between items-center text-sm"><p className="text-gray-700">Balance Due</p><p className="font-semibold text-amber-700">${receiptBalanceDue.toFixed(2)}</p></div>
+                      <div className="flex justify-between items-center text-sm"><p className="text-gray-700">Amount Paid</p><p className="font-semibold text-gray-900">${receipt.amountPaid.toFixed(2)}</p></div>
+                      <div className="flex justify-between items-center text-sm"><p className="text-gray-700">Balance Due</p><p className="font-semibold text-amber-700">${receipt.balanceDue.toFixed(2)}</p></div>
                     </div>
                   )}
                 </div>
