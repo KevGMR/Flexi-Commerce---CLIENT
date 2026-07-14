@@ -24,6 +24,11 @@ import {
   toNonNegativeAmount,
 } from "@/lib/receipt/receiptPrintTemplate";
 
+// ===== ADDED IMPORTS =====
+import CustomerSelector from "@/components/pos/CustomerSelector";
+import DeliveryForm from "@/components/pos/DeliveryForm";
+// =========================
+
 // Mock product catalog - replace with real product fetch
 const mockProducts = [];
 
@@ -270,6 +275,11 @@ export default function PosPage() {
     },
   });
 
+  // ========== ADDED: Search overlay state and handlers ==========
+  const [showSearchOverlay, setShowSearchOverlay] = useState(false);
+  const [flexiProducts, setFlexiProducts] = useState([]); // Placeholder for FLEXI products
+  // =========================================================
+
   const cartContainerRef = useRef(null);
 
   // Helper to calculate delivery fee from current delivery info
@@ -296,6 +306,12 @@ export default function PosPage() {
     if (typeof match === "string") return match;
     return match.name || match.shopifyLocationName || id;
   };
+
+  // ========== ADDED: handleCloseSearch (used by effects) ==========
+  const handleCloseSearch = useCallback(() => {
+    setShowSearchOverlay(false);
+  }, []);
+  // ================================================================
 
   // Load locations from API on mount
   useEffect(() => {
@@ -404,7 +420,7 @@ export default function PosPage() {
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [showSearchOverlay]);
+  }, [showSearchOverlay, handleCloseSearch]);
 
   // Escape key closes overlay
   useEffect(() => {
@@ -415,7 +431,7 @@ export default function PosPage() {
     };
     document.addEventListener("keydown", handleEscape);
     return () => document.removeEventListener("keydown", handleEscape);
-  }, [showSearchOverlay]);
+  }, [showSearchOverlay, handleCloseSearch]);
 
   // Auto-fill delivery info from selected customer
   useEffect(() => {
@@ -684,6 +700,14 @@ export default function PosPage() {
       loadShopifyProductsData();
     }
   }, [shopifyConnection?.status, locationId, loadShopifyProductsData]);
+
+  // Fetch FLEXI products (placeholder – you may implement actual fetch)
+  useEffect(() => {
+    // For now, we keep an empty array; replace with real fetch if needed.
+    // Example: apiFetch("/products?type=flexi&status=active&limit=100")
+    // .then(res => setFlexiProducts(res?.data?.products || []))
+    setFlexiProducts([]);
+  }, [activeOrganization]);
 
   // Fetch users for assignment
   useEffect(() => {
@@ -2319,6 +2343,7 @@ export default function PosPage() {
     setVariantPickerProduct(null);
   };
 
+  // ========== define handleSearch before handleSearchInput ==========
   const handleSearch = async (query) => {
     setSearchQuery(query);
 
@@ -2345,6 +2370,13 @@ export default function PosPage() {
 
     setSearchDebounceTimer(timer);
   };
+
+  // ========== define handleSearchInput now that handleSearch exists ==========
+  const handleSearchInput = useCallback((value) => {
+    setSearchQuery(value);
+    handleSearch(value);
+  }, [handleSearch]);
+  // =====================================================================
 
   const handleLoadProducts = async () => {
     await loadShopifyProductsData();
@@ -2731,12 +2763,13 @@ export default function PosPage() {
 
             {((productTab === "shopify" && searchResults.length > 0) || productTab !== "shopify") && (
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                {/* FIXED: use flexiProducts instead of filteredProducts */}
                 {productTab === "flexi" &&
-                  filteredProducts.map((product) => (
-                    <button key={product.id} onClick={() => addToCart(product)} className="bg-white rounded-lg border-2 border-gray-200 hover:border-blue-500 p-4 flex flex-col items-center gap-2 transition-all hover:shadow-lg">
+                  flexiProducts.map((product) => (
+                    <button key={product.id || product._id} onClick={() => addToCart(product)} className="bg-white rounded-lg border-2 border-gray-200 hover:border-blue-500 p-4 flex flex-col items-center gap-2 transition-all hover:shadow-lg">
                       <div className="w-full aspect-square bg-gray-100 rounded-lg flex items-center justify-center text-4xl">📦</div>
                       <h3 className="font-medium text-gray-900 text-center text-sm">{product.name}</h3>
-                      <p className="text-lg font-bold text-blue-600">${product.price.toFixed(2)}</p>
+                      <p className="text-lg font-bold text-blue-600">${(product.price || 0).toFixed(2)}</p>
                     </button>
                   ))}
 
@@ -2780,10 +2813,10 @@ export default function PosPage() {
           </div>
         </div>
 
-        {/* ---------- CART SECTION (UPDATED) ---------- */}
+        {/* ---------- CART SECTION ---------- */}
         <div className="w-96 bg-white border-l border-gray-200 flex flex-col min-h-0 overflow-auto">
           {exchangeMode ? (
-            // Exchange cart (unchanged)
+            // Exchange cart
             <>
               <div className="p-4 border-b border-gray-200 bg-indigo-50">
                 <div className="flex items-center justify-between">
@@ -2985,243 +3018,273 @@ export default function PosPage() {
                 )}
               </div>
             </>
-          ) : (!returnMode && !exchangeMode) || (returnMode && !originalSale) ? (
-            // ---------- NORMAL CART ----------
-            <>
-              {/* Cart Header */}
-              <div className="p-4 border-b border-gray-200">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-lg font-bold text-gray-900">Cart ({cartCount})</h2>
-                  {cart.length > 0 && (
-                    <button onClick={clearCart} className="text-sm text-red-600 hover:text-red-700 font-medium">Clear</button>
-                  )}
-                </div>
-                {/* Sale-level User Assignment */}
-                <div className="mt-3">
-                  <label className="block text-xs font-medium text-gray-700 mb-1">Sale Assigned User</label>
-                  <select
-                    value={saleAssignedUser || ""}
-                    onChange={(e) => setSaleAssignedUser(e.target.value || null)}
-                    className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
-                  >
-                    <option value="">None</option>
-                    {users.map((user) => (
-                      <option key={user._id} value={user._id}>{user.fullname || user.email}</option>
-                    ))}
-                  </select>
-                </div>
-                {/* Location settings indicator (optional) */}
-                <div className="mt-2 text-[10px] text-gray-500">
-                  {enableProductCost ? "Product cost enabled" : "Product cost disabled"}
-                </div>
-              </div>
+          ) : (
+            // Normal cart (when not in exchange or return mode)
+            (() => {
+              // Only render normal cart if not in return lookup mode
+              if (returnMode && !originalSale) {
+                // In return mode but no sale loaded yet – show a placeholder
+                return (
+                  <div className="flex-1 flex items-center justify-center p-4 text-gray-500">
+                    <div className="text-center">
+                      <p className="text-3xl mb-2">🔍</p>
+                      <p className="text-sm">Look up a receipt to process a return</p>
+                    </div>
+                  </div>
+                );
+              }
+              if (returnMode && originalSale) {
+                // Already handled above in the exchange branch? Actually returns without exchange are handled separately.
+                // But we can also render something for pure returns here.
+                // However, the main cart should be empty or show a message.
+                return (
+                  <div className="flex-1 flex items-center justify-center p-4 text-gray-500">
+                    <div className="text-center">
+                      <p className="text-3xl mb-2">🔄</p>
+                      <p className="text-sm">Processing a return</p>
+                    </div>
+                  </div>
+                );
+              }
+              // Normal cart (no special mode)
+              return (
+                <>
+                  {/* Cart Header */}
+                  <div className="p-4 border-b border-gray-200">
+                    <div className="flex items-center justify-between">
+                      <h2 className="text-lg font-bold text-gray-900">Cart ({cartCount})</h2>
+                      {cart.length > 0 && (
+                        <button onClick={clearCart} className="text-sm text-red-600 hover:text-red-700 font-medium">Clear</button>
+                      )}
+                    </div>
+                    {/* Sale-level User Assignment */}
+                    <div className="mt-3">
+                      <label className="block text-xs font-medium text-gray-700 mb-1">Sale Assigned User</label>
+                      <select
+                        value={saleAssignedUser || ""}
+                        onChange={(e) => setSaleAssignedUser(e.target.value || null)}
+                        className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
+                      >
+                        <option value="">None</option>
+                        {users.map((user) => (
+                          <option key={user._id} value={user._id}>{user.fullname || user.email}</option>
+                        ))}
+                      </select>
+                    </div>
+                    {/* Location settings indicator (optional) */}
+                    <div className="mt-2 text-[10px] text-gray-500">
+                      {enableProductCost ? "Product cost enabled" : "Product cost disabled"}
+                    </div>
+                  </div>
 
-              {/* Cart Items */}
-              <div className="flex-1 p-4 space-y-2 overflow-auto">
-                {cart.length === 0 ? (
-                  <div className="text-center text-gray-400 mt-12"><p className="text-4xl mb-2">🛒</p><p>Cart is empty</p></div>
-                ) : (
-                  cart.map((item, index) => {
-                    const isService = item.type === "service";
-                    const isChild = item.parentItemIndex !== null && item.parentItemIndex !== undefined;
-                    const isAttachActive = attachMode && attachingServiceIndex === index;
+                  {/* Cart Items */}
+                  <div className="flex-1 p-4 space-y-2 overflow-auto">
+                    {cart.length === 0 ? (
+                      <div className="text-center text-gray-400 mt-12"><p className="text-4xl mb-2">🛒</p><p>Cart is empty</p></div>
+                    ) : (
+                      cart.map((item, index) => {
+                        const isService = item.type === "service";
+                        const isChild = item.parentItemIndex !== null && item.parentItemIndex !== undefined;
+                        const isAttachActive = attachMode && attachingServiceIndex === index;
 
-                    return (
-                      <div key={index} className={`bg-gray-50 rounded-lg p-3 ${isChild ? "ml-4 border-l-2 border-blue-300" : ""}`}>
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <h4 className="font-medium text-gray-900 text-sm truncate">{item.name}</h4>
-                              {isChild && <span className="text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded whitespace-nowrap">attached</span>}
-                              {isService && <span className="text-[10px] bg-purple-100 text-purple-600 px-1.5 py-0.5 rounded whitespace-nowrap">service</span>}
-                            </div>
-                            {/* Cost editing for services */}
-                            {isService && !isChild && (
-                              <div className="mt-1 space-y-1">
-                                {enableProductCost ? (
-                                  <>
-                                    <div className="flex items-center gap-1">
-                                      <label className="text-[10px] text-gray-500">Labor:</label>
-                                      <input
-                                        type="number"
-                                        step="0.01"
-                                        min="0"
-                                        value={item.laborCost || 0}
-                                        onChange={(e) => updateServiceCosts(index, "laborCost", e.target.value)}
-                                        className="w-16 px-1 py-0.5 text-xs border border-gray-300 rounded"
-                                      />
-                                      <label className="text-[10px] text-gray-500 ml-2">Product:</label>
-                                      <input
-                                        type="number"
-                                        step="0.01"
-                                        min="0"
-                                        value={item.productCost || 0}
-                                        onChange={(e) => updateServiceCosts(index, "productCost", e.target.value)}
-                                        className="w-16 px-1 py-0.5 text-xs border border-gray-300 rounded"
-                                      />
-                                    </div>
-                                    <div className="text-[10px] text-gray-500">
-                                      Total: ${item.price.toFixed(2)}
-                                    </div>
-                                  </>
-                                ) : (
-                                  <div className="flex items-center gap-1">
-                                    <label className="text-[10px] text-gray-500">Labor Cost:</label>
-                                    <input
-                                      type="number"
-                                      step="0.01"
-                                      min="0"
-                                      value={item.laborCost || 0}
-                                      onChange={(e) => updateServiceCosts(index, "laborCost", e.target.value)}
-                                      className="w-20 px-1 py-0.5 text-xs border border-gray-300 rounded"
-                                    />
-                                    <span className="text-[10px] text-gray-500">= ${item.price.toFixed(2)}</span>
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                            {/* Price editing for non-services (or if not service) */}
-                            {!isService && (
-                              <div className="flex items-center gap-2 mt-1">
-                                {editingPriceIndex === index ? (
-                                  <input autoFocus type="number" step="0.01" value={editingPriceValue} onChange={(e) => setEditingPriceValue(e.target.value)} onBlur={() => savePriceEdit(index)} onKeyDown={(e) => e.key === "Enter" && savePriceEdit(index)} className="w-20 px-2 py-1 border border-blue-300 rounded text-sm" />
-                                ) : (
-                                  <button onClick={() => handlePriceEdit(index)} className="text-sm text-gray-500 hover:text-blue-600 flex items-center gap-1" title="Click to edit price">
-                                    ${item.price.toFixed(2)} <span className="text-xs">✎</span>
-                                  </button>
-                                )}
-                              </div>
-                            )}
-                            {/* Discount UI (only on non-child) */}
-                            {useSessionStore.getState().can(PERMISSIONS.POS_APPLY_DISCOUNT) && !isChild && (
-                              <div className="mt-1">
-                                {editingDiscountIndex === index ? (
-                                  <div className="flex items-center gap-2">
-                                    <select value={discountType} onChange={(e) => setDiscountType(e.target.value)} className="px-2 py-1 border border-green-300 rounded text-xs">
-                                      <option value="fixed">$</option>
-                                      <option value="percentage">%</option>
-                                    </select>
-                                    <input autoFocus type="number" step="0.01" placeholder="0" value={discountValue} onChange={(e) => setDiscountValue(e.target.value)} onBlur={() => saveDiscountEdit(index)} onKeyDown={(e) => e.key === "Enter" && saveDiscountEdit(index)} className="w-20 px-2 py-1 border border-green-300 rounded text-xs" />
-                                    <button onClick={() => { setEditingDiscountIndex(null); setDiscountValue(""); }} className="text-xs text-gray-500">✕</button>
-                                  </div>
-                                ) : (
-                                  <button onClick={() => handleDiscountEdit(index)} className="text-xs text-green-600 hover:text-green-700 flex items-center gap-1" title="Click to apply discount">
-                                    {item.discount > 0 ? (
+                        return (
+                          <div key={index} className={`bg-gray-50 rounded-lg p-3 ${isChild ? "ml-4 border-l-2 border-blue-300" : ""}`}>
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <h4 className="font-medium text-gray-900 text-sm truncate">{item.name}</h4>
+                                  {isChild && <span className="text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded whitespace-nowrap">attached</span>}
+                                  {isService && <span className="text-[10px] bg-purple-100 text-purple-600 px-1.5 py-0.5 rounded whitespace-nowrap">service</span>}
+                                </div>
+                                {/* Cost editing for services */}
+                                {isService && !isChild && (
+                                  <div className="mt-1 space-y-1">
+                                    {enableProductCost ? (
                                       <>
-                                        <span className="line-through text-gray-400">${(item.price * item.quantity).toFixed(2)}</span>
-                                        <span className="font-medium">-${item.discount.toFixed(2)} 🏷️</span>
+                                        <div className="flex items-center gap-1">
+                                          <label className="text-[10px] text-gray-500">Labor:</label>
+                                          <input
+                                            type="number"
+                                            step="0.01"
+                                            min="0"
+                                            value={item.laborCost || 0}
+                                            onChange={(e) => updateServiceCosts(index, "laborCost", e.target.value)}
+                                            className="w-16 px-1 py-0.5 text-xs border border-gray-300 rounded"
+                                          />
+                                          <label className="text-[10px] text-gray-500 ml-2">Product:</label>
+                                          <input
+                                            type="number"
+                                            step="0.01"
+                                            min="0"
+                                            value={item.productCost || 0}
+                                            onChange={(e) => updateServiceCosts(index, "productCost", e.target.value)}
+                                            className="w-16 px-1 py-0.5 text-xs border border-gray-300 rounded"
+                                          />
+                                        </div>
+                                        <div className="text-[10px] text-gray-500">
+                                          Total: ${item.price.toFixed(2)}
+                                        </div>
                                       </>
                                     ) : (
-                                      <span>+ Add Discount</span>
+                                      <div className="flex items-center gap-1">
+                                        <label className="text-[10px] text-gray-500">Labor Cost:</label>
+                                        <input
+                                          type="number"
+                                          step="0.01"
+                                          min="0"
+                                          value={item.laborCost || 0}
+                                          onChange={(e) => updateServiceCosts(index, "laborCost", e.target.value)}
+                                          className="w-20 px-1 py-0.5 text-xs border border-gray-300 rounded"
+                                        />
+                                        <span className="text-[10px] text-gray-500">= ${item.price.toFixed(2)}</span>
+                                      </div>
                                     )}
+                                  </div>
+                                )}
+                                {/* Price editing for non-services (or if not service) */}
+                                {!isService && (
+                                  <div className="flex items-center gap-2 mt-1">
+                                    {editingPriceIndex === index ? (
+                                      <input autoFocus type="number" step="0.01" value={editingPriceValue} onChange={(e) => setEditingPriceValue(e.target.value)} onBlur={() => savePriceEdit(index)} onKeyDown={(e) => e.key === "Enter" && savePriceEdit(index)} className="w-20 px-2 py-1 border border-blue-300 rounded text-sm" />
+                                    ) : (
+                                      <button onClick={() => handlePriceEdit(index)} className="text-sm text-gray-500 hover:text-blue-600 flex items-center gap-1" title="Click to edit price">
+                                        ${item.price.toFixed(2)} <span className="text-xs">✎</span>
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
+                                {/* Discount UI (only on non-child) */}
+                                {useSessionStore.getState().can(PERMISSIONS.POS_APPLY_DISCOUNT) && !isChild && (
+                                  <div className="mt-1">
+                                    {editingDiscountIndex === index ? (
+                                      <div className="flex items-center gap-2">
+                                        <select value={discountType} onChange={(e) => setDiscountType(e.target.value)} className="px-2 py-1 border border-green-300 rounded text-xs">
+                                          <option value="fixed">$</option>
+                                          <option value="percentage">%</option>
+                                        </select>
+                                        <input autoFocus type="number" step="0.01" placeholder="0" value={discountValue} onChange={(e) => setDiscountValue(e.target.value)} onBlur={() => saveDiscountEdit(index)} onKeyDown={(e) => e.key === "Enter" && saveDiscountEdit(index)} className="w-20 px-2 py-1 border border-green-300 rounded text-xs" />
+                                        <button onClick={() => { setEditingDiscountIndex(null); setDiscountValue(""); }} className="text-xs text-gray-500">✕</button>
+                                      </div>
+                                    ) : (
+                                      <button onClick={() => handleDiscountEdit(index)} className="text-xs text-green-600 hover:text-green-700 flex items-center gap-1" title="Click to apply discount">
+                                        {item.discount > 0 ? (
+                                          <>
+                                            <span className="line-through text-gray-400">${(item.price * item.quantity).toFixed(2)}</span>
+                                            <span className="font-medium">-${item.discount.toFixed(2)} 🏷️</span>
+                                          </>
+                                        ) : (
+                                          <span>+ Add Discount</span>
+                                        )}
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
+                                {/* User assignment for service */}
+                                {isService && (
+                                  <div className="mt-1">
+                                    <select
+                                      value={item.assignedUser || ""}
+                                      onChange={(e) => {
+                                        const userId = e.target.value || null;
+                                        const newCart = [...cart];
+                                        newCart[index].assignedUser = userId;
+                                        const productDefaults = serviceProductMap[item.variant];
+                                        if (productDefaults) {
+                                          const user = userId ? users.find(u => u._id === userId) : null;
+                                          const commission = getEffectiveCommission(
+                                            { _id: item.variant, commissionType: productDefaults.commissionType, commissionValue: productDefaults.commissionValue },
+                                            user
+                                          );
+                                          newCart[index].commissionType = commission.type;
+                                          newCart[index].commissionValue = commission.value;
+                                          newCart[index].commissionIsOverride = commission.isOverride;
+                                          newCart[index].commissionDisplay = commission.display;
+                                          // Recalculate commission amount
+                                          newCart[index].commissionAmount = computeCommissionAmount(
+                                            newCart[index].laborCost || 0,
+                                            commission.type,
+                                            commission.value
+                                          );
+                                        }
+                                        setCart(newCart);
+                                      }}
+                                      className="text-xs border border-gray-300 rounded px-1 py-0.5 w-full max-w-[120px]"
+                                    >
+                                      <option value="">Assign user</option>
+                                      {users.map((user) => (
+                                        <option key={user._id} value={user._id}>{user.fullname || user.email}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                )}
+                                {/* Commission display */}
+                                {isService && (
+                                  <div className="text-xs mt-1 flex items-center gap-2">
+                                    <span className="text-gray-500">
+                                      Commission: <span className="font-medium text-gray-700">
+                                        {item.commissionType === "percentage"
+                                          ? `${item.commissionValue}% ($${item.commissionAmount?.toFixed(2) || "0.00"})`
+                                          : `$${item.commissionValue?.toFixed(2)}`}
+                                      </span>
+                                    </span>
+                                    {item.commissionIsOverride ? (
+                                      <span className="text-[10px] bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded font-medium">Override</span>
+                                    ) : (
+                                      <span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">Default</span>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Right side actions */}
+                              <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                                <button onClick={() => removeFromCart(index)} className="text-red-500 hover:text-red-700">✕</button>
+                                {!isService && !isChild && (
+                                  <button onClick={() => openAttachQuantityModal(index)} className="text-[10px] text-blue-600 hover:text-blue-800 whitespace-nowrap">
+                                    Attach
                                   </button>
                                 )}
-                              </div>
-                            )}
-                            {/* User assignment for service */}
-                            {isService && (
-                              <div className="mt-1">
-                                <select
-                                  value={item.assignedUser || ""}
-                                  onChange={(e) => {
-                                    const userId = e.target.value || null;
-                                    const newCart = [...cart];
-                                    newCart[index].assignedUser = userId;
-                                    const productDefaults = serviceProductMap[item.variant];
-                                    if (productDefaults) {
-                                      const user = userId ? users.find(u => u._id === userId) : null;
-                                      const commission = getEffectiveCommission(
-                                        { _id: item.variant, commissionType: productDefaults.commissionType, commissionValue: productDefaults.commissionValue },
-                                        user
-                                      );
-                                      newCart[index].commissionType = commission.type;
-                                      newCart[index].commissionValue = commission.value;
-                                      newCart[index].commissionIsOverride = commission.isOverride;
-                                      newCart[index].commissionDisplay = commission.display;
-                                      // Recalculate commission amount
-                                      newCart[index].commissionAmount = computeCommissionAmount(
-                                        newCart[index].laborCost || 0,
-                                        commission.type,
-                                        commission.value
-                                      );
-                                    }
-                                    setCart(newCart);
-                                  }}
-                                  className="text-xs border border-gray-300 rounded px-1 py-0.5 w-full max-w-[120px]"
-                                >
-                                  <option value="">Assign user</option>
-                                  {users.map((user) => (
-                                    <option key={user._id} value={user._id}>{user.fullname || user.email}</option>
-                                  ))}
-                                </select>
-                              </div>
-                            )}
-                            {/* Commission display */}
-                            {isService && (
-                              <div className="text-xs mt-1 flex items-center gap-2">
-                                <span className="text-gray-500">
-                                  Commission: <span className="font-medium text-gray-700">
-                                    {item.commissionType === "percentage"
-                                      ? `${item.commissionValue}% ($${item.commissionAmount?.toFixed(2) || "0.00"})`
-                                      : `$${item.commissionValue?.toFixed(2)}`}
-                                  </span>
-                                </span>
-                                {item.commissionIsOverride ? (
-                                  <span className="text-[10px] bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded font-medium">Override</span>
-                                ) : (
-                                  <span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">Default</span>
+                                {isChild && (
+                                  <button onClick={() => detachFromService(index)} className="text-[10px] text-red-500 hover:text-red-700 whitespace-nowrap">
+                                    Detach
+                                  </button>
+                                )}
+                                {isService && (
+                                  <button
+                                    onClick={() => toggleAttachMode(index)}
+                                    className={`text-[10px] p-1 rounded-full border ${isAttachActive ? "border-blue-500 bg-blue-100 text-blue-700" : "border-gray-300 bg-gray-100 text-gray-500 hover:bg-gray-200"}`}
+                                    title={isAttachActive ? "Stop attaching" : "Start attaching"}
+                                  >
+                                    📎
+                                  </button>
+                                )}
+                                {isService && isAttachActive && (
+                                  <span className="text-[9px] text-blue-600 whitespace-nowrap">Attaching...</span>
                                 )}
                               </div>
-                            )}
-                          </div>
+                            </div>
 
-                          {/* Right side actions */}
-                          <div className="flex flex-col items-end gap-1 flex-shrink-0">
-                            <button onClick={() => removeFromCart(index)} className="text-red-500 hover:text-red-700">✕</button>
-                            {!isService && !isChild && (
-                              <button onClick={() => openAttachQuantityModal(index)} className="text-[10px] text-blue-600 hover:text-blue-800 whitespace-nowrap">
-                                Attach
-                              </button>
-                            )}
-                            {isChild && (
-                              <button onClick={() => detachFromService(index)} className="text-[10px] text-red-500 hover:text-red-700 whitespace-nowrap">
-                                Detach
-                              </button>
-                            )}
-                            {isService && (
-                              <button
-                                onClick={() => toggleAttachMode(index)}
-                                className={`text-[10px] p-1 rounded-full border ${isAttachActive ? "border-blue-500 bg-blue-100 text-blue-700" : "border-gray-300 bg-gray-100 text-gray-500 hover:bg-gray-200"}`}
-                                title={isAttachActive ? "Stop attaching" : "Start attaching"}
-                              >
-                                📎
-                              </button>
-                            )}
-                            {isService && isAttachActive && (
-                              <span className="text-[9px] text-blue-600 whitespace-nowrap">Attaching...</span>
-                            )}
+                            {/* Quantity controls and item total */}
+                            <div className="flex items-center justify-between mt-2">
+                              <div className="flex items-center gap-2">
+                                <button onClick={() => updateQuantity(index, item.quantity - 1)} className="w-8 h-8 bg-white border border-gray-300 rounded hover:bg-gray-100 font-bold">−</button>
+                                <span className="w-12 text-center font-medium">{item.quantity}</span>
+                                <button onClick={() => updateQuantity(index, item.quantity + 1)} className="w-8 h-8 bg-white border border-gray-300 rounded hover:bg-gray-100 font-bold">+</button>
+                              </div>
+                              <div className="text-right">
+                                <p className="font-bold text-gray-900">${((item.price * item.quantity) - (item.discount || 0)).toFixed(2)}</p>
+                                {item.discount > 0 && <p className="text-xs text-green-600">Saved ${item.discount.toFixed(2)}</p>}
+                              </div>
+                            </div>
                           </div>
-                        </div>
-
-                        {/* Quantity controls and item total */}
-                        <div className="flex items-center justify-between mt-2">
-                          <div className="flex items-center gap-2">
-                            <button onClick={() => updateQuantity(index, item.quantity - 1)} className="w-8 h-8 bg-white border border-gray-300 rounded hover:bg-gray-100 font-bold">−</button>
-                            <span className="w-12 text-center font-medium">{item.quantity}</span>
-                            <button onClick={() => updateQuantity(index, item.quantity + 1)} className="w-8 h-8 bg-white border border-gray-300 rounded hover:bg-gray-100 font-bold">+</button>
-                          </div>
-                          <div className="text-right">
-                            <p className="font-bold text-gray-900">${((item.price * item.quantity) - (item.discount || 0)).toFixed(2)}</p>
-                            {item.discount > 0 && <p className="text-xs text-green-600">Saved ${item.discount.toFixed(2)}</p>}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            )}
-          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </>
+              );
+            })()
+          )}
         </div>
 
         {/* RIGHT: Checkout Panel */}
@@ -3425,91 +3488,91 @@ export default function PosPage() {
         </div>
       </div>
 
-              {/* Attach Modal (block second service) */}
-              {showAttachModal && (
-                <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
-                  <div className="bg-white rounded-lg p-6 max-w-sm w-full">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-2">Cannot Add Service</h3>
-                    <p className="text-sm text-gray-600 mb-4">You are currently attaching products to another service. Please stop attaching before adding a new service.</p>
-                    <div className="flex gap-3">
-                      <button onClick={() => { setShowAttachModal(false); setPendingServiceProduct(null); stopAttach(); }} className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">Stop Attach</button>
-                      <button onClick={() => { setShowAttachModal(false); setPendingServiceProduct(null); }} className="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300">Cancel</button>
-                    </div>
-                  </div>
-                </div>
-              )}
+      {/* Attach Modal (block second service) */}
+      {showAttachModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-sm w-full">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Cannot Add Service</h3>
+            <p className="text-sm text-gray-600 mb-4">You are currently attaching products to another service. Please stop attaching before adding a new service.</p>
+            <div className="flex gap-3">
+              <button onClick={() => { setShowAttachModal(false); setPendingServiceProduct(null); stopAttach(); }} className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">Stop Attach</button>
+              <button onClick={() => { setShowAttachModal(false); setPendingServiceProduct(null); }} className="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300">Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
 
-              {/* Attach with Quantity Modal */}
-              {showAttachQuantityModal && attachQuantityProductIndex !== null && (
-                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                  <div className="bg-white rounded-lg p-6 max-w-md w-full">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-2">Attach to Service</h3>
-                    <p className="text-sm text-gray-600 mb-4">
-                      Attach a quantity of <strong>{cart[attachQuantityProductIndex]?.name}</strong> to a service.
-                    </p>
-                    <div className="space-y-4">
-                      <div>
-                        <label className="block text-xs font-medium text-gray-700 mb-1">Service</label>
-                        <select
-                          value={attachModalSelectedServiceIndex ?? ""}
-                          onChange={(e) => setAttachModalSelectedServiceIndex(Number(e.target.value))}
-                          className="w-full rounded border border-gray-300 px-3 py-2 text-sm"
-                        >
-                          {cart.map((item, idx) => {
-                            if (item.type === "service") {
-                              return <option key={idx} value={idx}>{item.name}</option>;
-                            }
-                            return null;
-                          })}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium text-gray-700 mb-1">Quantity to Attach</label>
-                        <input
-                          type="number"
-                          min="1"
-                          max={cart[attachQuantityProductIndex]?.quantity || 1}
-                          value={attachQuantityValue}
-                          onChange={(e) => {
-                            const val = parseInt(e.target.value) || 1;
-                            const max = cart[attachQuantityProductIndex]?.quantity || 1;
-                            setAttachQuantityValue(Math.min(Math.max(1, val), max));
-                          }}
-                          className="w-full rounded border border-gray-300 px-3 py-2 text-sm"
-                        />
-                        <p className="text-xs text-gray-500 mt-1">Available: {cart[attachQuantityProductIndex]?.quantity}</p>
-                      </div>
-                    </div>
-                    <div className="mt-6 flex gap-3">
-                      <button
-                        onClick={() => {
-                          if (attachModalSelectedServiceIndex === null) {
-                            setError("Please select a service.");
-                            return;
-                          }
-                          splitAndAttachItem(
-                            attachQuantityProductIndex,
-                            attachModalSelectedServiceIndex,
-                            attachQuantityValue
-                          );
-                        }}
-                        className="flex-1 rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-                      >
-                        Attach
-                      </button>
-                      <button
-                        onClick={() => {
-                          setShowAttachQuantityModal(false);
-                          setAttachQuantityProductIndex(null);
-                        }}
-                        className="flex-1 rounded border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
+      {/* Attach with Quantity Modal */}
+      {showAttachQuantityModal && attachQuantityProductIndex !== null && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Attach to Service</h3>
+            <p className="text-sm text-gray-600 mb-4">
+              Attach a quantity of <strong>{cart[attachQuantityProductIndex]?.name}</strong> to a service.
+            </p>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Service</label>
+                <select
+                  value={attachModalSelectedServiceIndex ?? ""}
+                  onChange={(e) => setAttachModalSelectedServiceIndex(Number(e.target.value))}
+                  className="w-full rounded border border-gray-300 px-3 py-2 text-sm"
+                >
+                  {cart.map((item, idx) => {
+                    if (item.type === "service") {
+                      return <option key={idx} value={idx}>{item.name}</option>;
+                    }
+                    return null;
+                  })}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Quantity to Attach</label>
+                <input
+                  type="number"
+                  min="1"
+                  max={cart[attachQuantityProductIndex]?.quantity || 1}
+                  value={attachQuantityValue}
+                  onChange={(e) => {
+                    const val = parseInt(e.target.value) || 1;
+                    const max = cart[attachQuantityProductIndex]?.quantity || 1;
+                    setAttachQuantityValue(Math.min(Math.max(1, val), max));
+                  }}
+                  className="w-full rounded border border-gray-300 px-3 py-2 text-sm"
+                />
+                <p className="text-xs text-gray-500 mt-1">Available: {cart[attachQuantityProductIndex]?.quantity}</p>
+              </div>
+            </div>
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => {
+                  if (attachModalSelectedServiceIndex === null) {
+                    setError("Please select a service.");
+                    return;
+                  }
+                  splitAndAttachItem(
+                    attachQuantityProductIndex,
+                    attachModalSelectedServiceIndex,
+                    attachQuantityValue
+                  );
+                }}
+                className="flex-1 rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+              >
+                Attach
+              </button>
+              <button
+                onClick={() => {
+                  setShowAttachQuantityModal(false);
+                  setAttachQuantityProductIndex(null);
+                }}
+                className="flex-1 rounded border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Variant Picker Modal */}
       {showVariantPicker && variantPickerProduct && (

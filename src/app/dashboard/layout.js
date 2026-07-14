@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { Sidebar } from "@/components/Sidebar";
 import { TopbarNew } from "@/components/topbar/TopbarNew";
 import { useSessionStore } from "@/store/session";
@@ -10,6 +10,7 @@ import { refreshActiveOrganizationContext } from "@/lib/orgs";
 
 export default function DashboardLayout({ children }) {
   const router = useRouter();
+  const pathname = usePathname();
   const hydrate = useSessionStore((s) => s.hydrate);
   const accessToken = useSessionStore((s) => s.accessToken);
   const hydrated = useSessionStore((s) => s.hydrated);
@@ -23,6 +24,9 @@ export default function DashboardLayout({ children }) {
     activeOrganization?.id ||
     activeOrganization?.organizationId ||
     "no-org";
+
+  // Check if current page is POS (needs full height & overflow hidden)
+  const isPosPage = pathname?.includes("/sales-channels/pos") || false;
 
   useEffect(() => {
     hydrate();
@@ -96,7 +100,7 @@ export default function DashboardLayout({ children }) {
               organization, it will auto-select when loaded.
             </div>
           ) : null}
-          <div className={`${isPosPage ? "h-full overflow-hidden" : "mt-4"}`}>
+          <div className={isPosPage ? "h-full overflow-hidden" : "mt-4"}>
             {children}
           </div>
         </main>
