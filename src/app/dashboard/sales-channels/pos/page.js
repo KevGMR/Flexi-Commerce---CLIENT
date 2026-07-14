@@ -215,6 +215,9 @@ export default function PosPage() {
     useState(false);
   const [pendingCheckoutData, setPendingCheckoutData] = useState(null);
 
+  // Delivery modal state
+  const [showDeliveryModal, setShowDeliveryModal] = useState(false);
+
   const [exchangeEditingPriceIndex, setExchangeEditingPriceIndex] =
     useState(null);
   const [exchangeEditingPriceValue, setExchangeEditingPriceValue] =
@@ -233,10 +236,10 @@ export default function PosPage() {
   const [exchangeDiscountType, setExchangeDiscountType] = useState("fixed");
   const [exchangeDiscountValue, setExchangeDiscountValue] = useState("");
 
-  // NEW: Customer state
+  // Customer state
   const [selectedCustomer, setSelectedCustomer] = useState(null);
 
-  // NEW: Delivery state
+  // Delivery state
   const [deliveryEnabled, setDeliveryEnabled] = useState(false);
   const [deliveryInfo, setDeliveryInfo] = useState({
     recipientName: "",
@@ -255,7 +258,36 @@ export default function PosPage() {
     notes: "",
   });
 
+  // NEW: Update customer modal state
+  const [updatingCustomer, setUpdatingCustomer] = useState(false);
+  const [showUpdateCustomerModal, setShowUpdateCustomerModal] = useState(false);
+  const [customerUpdateData, setCustomerUpdateData] = useState({
+    fullname: "",
+    email: "",
+    phone: "",
+    address: {
+      street: "",
+      city: "",
+      state: "",
+      postalCode: "",
+      country: "Kenya",
+    },
+  });
+
   const cartContainerRef = useRef(null);
+
+  // Helper to calculate delivery fee from current delivery info
+  const calculateDeliveryFee = useCallback(() => {
+    if (!deliveryEnabled || !deliveryInfo.deliveryCategory) return 0;
+    
+    const category = locationSettings?.deliveryCategories?.find(
+      c => c.categoryName === deliveryInfo.deliveryCategory
+    );
+    const option = category?.childOptions?.find(
+      o => o.optionName === deliveryInfo.deliveryOption
+    );
+    return option?.price || 0;
+  }, [deliveryEnabled, deliveryInfo, locationSettings]);
 
   const getLocationLabel = (id) => {
     if (!id) return "";
@@ -387,6 +419,68 @@ export default function PosPage() {
     document.addEventListener("keydown", handleEscape);
     return () => document.removeEventListener("keydown", handleEscape);
   }, [showSearchOverlay]);
+
+  // Auto-fill delivery info from selected customer
+  useEffect(() => {
+    if (!selectedCustomer) return;
+
+    // 1. When toggle is ON, fill/update delivery info from customer
+    if (deliveryEnabled) {
+      const address = selectedCustomer.address || {};
+      setDeliveryInfo((prev) => ({
+        ...prev,
+        recipientName: selectedCustomer.fullname || prev.recipientName,
+        recipientPhone: selectedCustomer.phone || prev.recipientPhone,
+        recipientEmail: selectedCustomer.email || prev.recipientEmail,
+        deliveryAddress: {
+          street: address.street || prev.deliveryAddress?.street || "",
+          city: address.city || prev.deliveryAddress?.city || "",
+          state: address.state || prev.deliveryAddress?.state || "",
+          postalCode: address.postalCode || prev.deliveryAddress?.postalCode || "",
+          country: address.country || prev.deliveryAddress?.country || "Kenya",
+          landmark: address.landmark || prev.deliveryAddress?.landmark || "",
+        },
+      }));
+      return;
+    }
+
+    // 2. When customer has address and toggle is OFF, auto-enable and fill
+    const address = selectedCustomer.address;
+    if (!address) return;
+
+    const hasAddressInfo =
+      address.street || address.city || address.state || address.postalCode || address.country;
+    if (!hasAddressInfo) return;
+
+    // Only fill if delivery fields are empty (no user input yet)
+    const hasUserEntered =
+      deliveryInfo.recipientName ||
+      deliveryInfo.recipientPhone ||
+      deliveryInfo.deliveryAddress.street ||
+      deliveryInfo.deliveryAddress.city;
+
+    if (hasUserEntered) return;
+
+    setDeliveryInfo((prev) => ({
+      ...prev,
+      recipientName: selectedCustomer.fullname || prev.recipientName,
+      recipientPhone: selectedCustomer.phone || prev.recipientPhone,
+      recipientEmail: selectedCustomer.email || prev.recipientEmail,
+      deliveryAddress: {
+        street: address.street || "",
+        city: address.city || "",
+        state: address.state || "",
+        postalCode: address.postalCode || "",
+        country: address.country || "Kenya",
+        landmark: address.landmark || "",
+      },
+    }));
+
+    if (!deliveryEnabled && (address.street || address.city)) {
+      setDeliveryEnabled(true);
+    }
+  }, [selectedCustomer, deliveryEnabled]);
+
 
   const checkPreviousDayOpenShift = useCallback(async (targetLocationId) => {
     if (!targetLocationId) return;
@@ -1152,6 +1246,56 @@ export default function PosPage() {
     });
   };
 
+  // NEW: Update customer handler
+  const handleUpdateCustomer = async () => {
+    if (!selectedCustomer) return;
+    setUpdatingCustomer(true);
+    setError("");
+    try {
+      const payload = {
+        fullname: customerUpdateData.fullname,
+        email: customerUpdateData.email || undefined,
+        phone: customerUpdateData.phone || undefined,
+        address: customerUpdateData.address,
+      };
+      const res = await apiFetch(`/customers/${selectedCustomer._id}`, {
+        method: "PUT",
+        body: payload,
+      });
+      const updated = res?.customer;
+      if (updated) {
+        // Update the selected customer with new data
+        setSelectedCustomer(updated);
+        
+        // Update delivery info with new address if delivery is enabled
+        if (deliveryEnabled && updated.address) {
+          setDeliveryInfo((prev) => ({
+            ...prev,
+            recipientName: updated.fullname || prev.recipientName,
+            recipientPhone: updated.phone || prev.recipientPhone,
+            recipientEmail: updated.email || prev.recipientEmail,
+            deliveryAddress: {
+              street: updated.address.street || "",
+              city: updated.address.city || "",
+              state: updated.address.state || "",
+              postalCode: updated.address.postalCode || "",
+              country: updated.address.country || "Kenya",
+              landmark: updated.address.landmark || "",
+            },
+          }));
+        }
+        
+        setShowUpdateCustomerModal(false);
+        setStatus("Customer updated successfully!");
+        setTimeout(() => setStatus(""), 3000);
+      }
+    } catch (err) {
+      setError(err?.message || "Failed to update customer");
+    } finally {
+      setUpdatingCustomer(false);
+    }
+  };
+
   const handlePrintReceipt = () => {
     if (!receipt) return;
     printReceiptInBrowser({
@@ -1184,6 +1328,32 @@ export default function PosPage() {
     } finally {
       setSendingEmail(false);
     }
+  };
+
+  // ========== DELIVERY CHECKOUT HANDLERS ==========
+  const handleDeliveryConfirm = (deliveryData, fee) => {
+    // Update delivery info with data from modal
+    setDeliveryInfo({
+      recipientName: deliveryData.recipientName,
+      recipientPhone: deliveryData.recipientPhone,
+      recipientEmail: deliveryData.recipientEmail || "",
+      deliveryCategory: deliveryData.deliveryCategory,
+      deliveryOption: deliveryData.deliveryOption,
+      deliveryAddress: deliveryData.deliveryAddress,
+      notes: deliveryData.notes || "",
+    });
+    
+    // Close delivery modal
+    setShowDeliveryModal(false);
+    
+    // Now open checkout modal
+    setShowCompleteCheckoutModal(true);
+  };
+
+  const handleDeliverySkip = () => {
+    setShowDeliveryModal(false);
+    // Optionally disable delivery
+    setDeliveryEnabled(false);
   };
 
   // ========== RETURNS MODE HANDLERS ==========
@@ -1681,6 +1851,19 @@ export default function PosPage() {
       return;
     }
 
+    // Check if delivery is enabled but delivery info is incomplete
+    if (deliveryEnabled) {
+      const hasRecipientInfo = deliveryInfo.recipientName && deliveryInfo.recipientPhone;
+      const hasAddress = deliveryInfo.deliveryAddress?.street && deliveryInfo.deliveryAddress?.city;
+      const hasDeliveryOptions = deliveryInfo.deliveryCategory && deliveryInfo.deliveryOption;
+
+      if (!hasRecipientInfo || !hasAddress || !hasDeliveryOptions) {
+        // Show delivery modal to complete delivery info
+        setShowDeliveryModal(true);
+        return;
+      }
+    }
+
     setShowCompleteCheckoutModal(true);
   };
 
@@ -1699,6 +1882,9 @@ export default function PosPage() {
       (payment) => payment.amount > 0,
     );
 
+    // Use delivery fee from calculation if not provided
+    const finalDeliveryFee = deliveryFee !== undefined ? deliveryFee : calculateDeliveryFee();
+
     setStatus("Processing...");
     setError("");
 
@@ -1708,7 +1894,7 @@ export default function PosPage() {
           (sum, payment) => sum + payment.amount,
           0,
         );
-        if (totalAmount <= 0 || totalAmount > cartTotal + deliveryFee) {
+        if (totalAmount <= 0 || totalAmount > cartTotal + finalDeliveryFee) {
           setError("Split payment total must be between 0 and cart total.");
           return;
         }
@@ -1780,7 +1966,7 @@ export default function PosPage() {
           deliveryAddress: deliveryInfo.deliveryAddress,
           deliveryCategory: deliveryInfo.deliveryCategory,
           deliveryOption: deliveryInfo.deliveryOption,
-          deliveryFee: deliveryFee || 0,
+          deliveryFee: finalDeliveryFee || 0,
           notes: deliveryInfo.notes,
         };
       }
@@ -1790,8 +1976,8 @@ export default function PosPage() {
             (sum, payment) => sum + payment.amount,
             0,
           )
-        : cartTotal + (deliveryEnabled ? (deliveryFee || 0) : 0);
-      const balanceDue = Math.max(0, cartTotal + (deliveryEnabled ? (deliveryFee || 0) : 0) - paidAmount);
+        : cartTotal + (deliveryEnabled ? (finalDeliveryFee || 0) : 0);
+      const balanceDue = Math.max(0, cartTotal + (deliveryEnabled ? (finalDeliveryFee || 0) : 0) - paidAmount);
       const isReservationSale = Boolean(isReservation || balanceDue > 0.01);
 
       payload.paymentStatus = isReservationSale ? "partial" : "completed";
@@ -1826,9 +2012,9 @@ export default function PosPage() {
         })),
         payments: isSplitPayment
           ? positiveSplitPayments
-          : [{ method: paymentMethod, amount: cartTotal + (deliveryEnabled ? (deliveryFee || 0) : 0) }],
+          : [{ method: paymentMethod, amount: cartTotal + (deliveryEnabled ? (finalDeliveryFee || 0) : 0) }],
         subtotal: cartTotal,
-        deliveryFee: deliveryEnabled ? (deliveryFee || 0) : 0,
+        deliveryFee: deliveryEnabled ? (finalDeliveryFee || 0) : 0,
         deliveryInfo: deliveryEnabled ? deliveryInfo : undefined,
         deliveryFeeId: receiptData?.deliveryFeeId,
         trackingNumber: receiptData?.trackingNumber,
@@ -1930,7 +2116,7 @@ export default function PosPage() {
             deliveryAddress: deliveryInfo.deliveryAddress,
             deliveryCategory: deliveryInfo.deliveryCategory,
             deliveryOption: deliveryInfo.deliveryOption,
-            deliveryFee: deliveryFee || 0,
+            deliveryFee: finalDeliveryFee || 0,
             notes: deliveryInfo.notes,
           };
         }
@@ -1940,10 +2126,10 @@ export default function PosPage() {
               (sum, payment) => sum + payment.amount,
               0,
             )
-          : cartTotal + (deliveryEnabled ? (deliveryFee || 0) : 0);
+          : cartTotal + (deliveryEnabled ? (finalDeliveryFee || 0) : 0);
         const offlineBalanceDue = Math.max(
           0,
-          cartTotal + (deliveryEnabled ? (deliveryFee || 0) : 0) - offlinePaidAmount,
+          cartTotal + (deliveryEnabled ? (finalDeliveryFee || 0) : 0) - offlinePaidAmount,
         );
         const isOfflineReservation = offlineBalanceDue > 0.01;
 
@@ -1985,14 +2171,14 @@ export default function PosPage() {
             price: item.customPrice ?? item.price,
           })),
           subtotal: cartTotal,
-          deliveryFee: deliveryEnabled ? (deliveryFee || 0) : 0,
+          deliveryFee: deliveryEnabled ? (finalDeliveryFee || 0) : 0,
           payments: isSplitPayment
             ? positiveSplitPayments
                 .map((payment) => ({
                   method: payment.method,
                   amount: payment.amount,
                 }))
-            : [{ method: paymentMethod, amount: cartTotal + (deliveryEnabled ? (deliveryFee || 0) : 0) }],
+            : [{ method: paymentMethod, amount: cartTotal + (deliveryEnabled ? (finalDeliveryFee || 0) : 0) }],
           notes: checkoutNotes,
           amountPaid: offlinePaidAmount,
           balanceDue: offlineBalanceDue,
@@ -2119,13 +2305,44 @@ export default function PosPage() {
     handleCloseSearch();
   };
 
+  // --- Updated customer handlers ---
   const handleCustomerSelect = (customer) => {
     setSelectedCustomer(customer);
   };
 
   const handleCustomerClear = () => {
     setSelectedCustomer(null);
+    setDeliveryEnabled(false);
+    setDeliveryInfo({
+      recipientName: "",
+      recipientPhone: "",
+      recipientEmail: "",
+      deliveryCategory: "",
+      deliveryOption: "",
+      deliveryAddress: {
+        street: "",
+        city: "",
+        state: "",
+        postalCode: "",
+        country: "Kenya",
+        landmark: "",
+      },
+      notes: "",
+    });
   };
+
+  // Schedule product refresh (debounced)
+  const scheduleProductRefresh = useCallback(() => {
+    if (refreshDebounceTimer) {
+      clearTimeout(refreshDebounceTimer);
+    }
+    const timer = setTimeout(() => {
+      if (shopifyConnection?.status === "active" && locationId) {
+        loadShopifyProductsData();
+      }
+    }, 2000);
+    setRefreshDebounceTimer(timer);
+  }, [shopifyConnection?.status, locationId, loadShopifyProductsData]);
 
   // --- Render ---
   return (
@@ -2224,7 +2441,7 @@ export default function PosPage() {
         </div>
       </div>
 
-      {/* Location Picker Modal (unchanged) */}
+      {/* Location Picker Modal */}
       {showLocationPicker && locations && locations.length > 1 && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
@@ -2339,7 +2556,24 @@ export default function PosPage() {
         onClose={() => setShowCompleteCheckoutModal(false)}
         status={status}
         error={error}
+        selectedCustomer={selectedCustomer}
+        deliveryInfo={deliveryInfo}
+        deliveryFee={calculateDeliveryFee()}
+        deliveryEnabled={deliveryEnabled}
       />
+
+      {/* Delivery Checkout Modal */}
+      {showDeliveryModal && (
+        <DeliveryCheckoutModal
+          isOpen={showDeliveryModal}
+          locationId={locationId}
+          cartSubtotal={cartSubtotal}
+          cartDiscount={cartLineItemDiscounts}
+          onConfirm={handleDeliveryConfirm}
+          onSkip={handleDeliverySkip}
+          onClose={() => setShowDeliveryModal(false)}
+        />
+      )}
 
       {/* Main Content - New Layout */}
       <div className="flex-1 flex overflow-hidden min-h-0 w-full max-w-full">
@@ -2621,7 +2855,32 @@ export default function PosPage() {
           <div className="flex-1 min-h-0 overflow-auto p-4 space-y-4">
             {/* Customer Section */}
             <div>
-              <h3 className="text-sm font-semibold text-gray-700 mb-2">Customer</h3>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-semibold text-gray-700">Customer</h3>
+                {selectedCustomer && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCustomerUpdateData({
+                        fullname: selectedCustomer.fullname || "",
+                        email: selectedCustomer.email || "",
+                        phone: selectedCustomer.phone || "",
+                        address: selectedCustomer.address || {
+                          street: "",
+                          city: "",
+                          state: "",
+                          postalCode: "",
+                          country: "Kenya",
+                        },
+                      });
+                      setShowUpdateCustomerModal(true);
+                    }}
+                    className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+                  >
+                    Update Customer
+                  </button>
+                )}
+              </div>
               <CustomerSelector
                 selectedCustomer={selectedCustomer}
                 onSelectCustomer={handleCustomerSelect}
@@ -2672,17 +2931,7 @@ export default function PosPage() {
                   <div className="flex justify-between">
                     <span className="text-gray-600">Delivery Fee</span>
                     <span className="font-medium">
-                      ${(() => {
-                        const selectedCategory = deliveryInfo.deliveryCategory;
-                        const selectedOption = deliveryInfo.deliveryOption;
-                        const category = locationSettings?.deliveryCategories?.find(
-                          c => c.categoryName === selectedCategory
-                        );
-                        const option = category?.childOptions?.find(
-                          o => o.optionName === selectedOption
-                        );
-                        return option?.price?.toFixed(2) || "0.00";
-                      })()}
+                      ${calculateDeliveryFee().toFixed(2)}
                     </span>
                   </div>
                 )}
@@ -2696,20 +2945,7 @@ export default function PosPage() {
                   <div className="flex justify-between text-lg font-bold">
                     <span>Total</span>
                     <span className="text-blue-600">
-                      ${(
-                        cartTotal +
-                        (deliveryEnabled
-                          ? (() => {
-                              const category = locationSettings?.deliveryCategories?.find(
-                                c => c.categoryName === deliveryInfo.deliveryCategory
-                              );
-                              const option = category?.childOptions?.find(
-                                o => o.optionName === deliveryInfo.deliveryOption
-                              );
-                              return option?.price || 0;
-                            })()
-                          : 0)
-                      ).toFixed(2)}
+                      ${(cartTotal + (deliveryEnabled ? calculateDeliveryFee() : 0)).toFixed(2)}
                     </span>
                   </div>
                 </div>
@@ -2809,8 +3045,6 @@ export default function PosPage() {
         </div>
       </div>
 
-      {/* Modals (unchanged) */}
-
       {/* Attach Modal (block second service) */}
       {showAttachModal && (
         <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
@@ -2897,7 +3131,7 @@ export default function PosPage() {
         </div>
       )}
 
-      {/* Variant Picker Modal (unchanged) */}
+      {/* Variant Picker Modal */}
       {showVariantPicker && variantPickerProduct && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
@@ -2935,7 +3169,7 @@ export default function PosPage() {
         </div>
       )}
 
-      {/* Receipt Lookup Modal (unchanged) */}
+      {/* Receipt Lookup Modal */}
       {showReturnLookup && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg max-w-md w-full p-6">
@@ -2953,14 +3187,153 @@ export default function PosPage() {
         </div>
       )}
 
-      {/* Receipt Modal (unchanged) */}
+      {/* Update Customer Modal */}
+      {showUpdateCustomerModal && selectedCustomer && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl max-h-[90vh] overflow-y-auto">
+            <h2 className="text-xl font-semibold mb-4">Update Customer</h2>
+            <form onSubmit={(e) => { e.preventDefault(); handleUpdateCustomer(); }} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-zinc-700">Full Name *</label>
+                <input
+                  type="text"
+                  required
+                  value={customerUpdateData.fullname}
+                  onChange={(e) => setCustomerUpdateData({ ...customerUpdateData, fullname: e.target.value })}
+                  className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-zinc-700">Email</label>
+                <input
+                  type="email"
+                  value={customerUpdateData.email}
+                  onChange={(e) => setCustomerUpdateData({ ...customerUpdateData, email: e.target.value })}
+                  className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-zinc-700">Phone</label>
+                <input
+                  type="tel"
+                  value={customerUpdateData.phone}
+                  onChange={(e) => setCustomerUpdateData({ ...customerUpdateData, phone: e.target.value })}
+                  className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                />
+              </div>
+
+              {/* Address */}
+              <div className="border-t border-zinc-200 pt-4">
+                <div className="flex items-center justify-between mb-3">
+                  <label className="text-sm font-medium text-zinc-700">Delivery Address</label>
+                </div>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-700">Street</label>
+                    <input
+                      type="text"
+                      value={customerUpdateData.address?.street || ""}
+                      onChange={(e) =>
+                        setCustomerUpdateData({
+                          ...customerUpdateData,
+                          address: { ...customerUpdateData.address, street: e.target.value },
+                        })
+                      }
+                      className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-zinc-700">City</label>
+                      <input
+                        type="text"
+                        value={customerUpdateData.address?.city || ""}
+                        onChange={(e) =>
+                          setCustomerUpdateData({
+                            ...customerUpdateData,
+                            address: { ...customerUpdateData.address, city: e.target.value },
+                          })
+                        }
+                        className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-zinc-700">State/Province</label>
+                      <input
+                        type="text"
+                        value={customerUpdateData.address?.state || ""}
+                        onChange={(e) =>
+                          setCustomerUpdateData({
+                            ...customerUpdateData,
+                            address: { ...customerUpdateData.address, state: e.target.value },
+                          })
+                        }
+                        className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-zinc-700">Postal Code</label>
+                      <input
+                        type="text"
+                        value={customerUpdateData.address?.postalCode || ""}
+                        onChange={(e) =>
+                          setCustomerUpdateData({
+                            ...customerUpdateData,
+                            address: { ...customerUpdateData.address, postalCode: e.target.value },
+                          })
+                        }
+                        className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-zinc-700">Country</label>
+                      <input
+                        type="text"
+                        value={customerUpdateData.address?.country || "Kenya"}
+                        onChange={(e) =>
+                          setCustomerUpdateData({
+                            ...customerUpdateData,
+                            address: { ...customerUpdateData.address, country: e.target.value },
+                          })
+                        }
+                        className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setShowUpdateCustomerModal(false)}
+                  className="rounded border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={updatingCustomer || !customerUpdateData.fullname.trim()}
+                  className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {updatingCustomer ? "Updating..." : "Update Customer"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Receipt Modal */}
       {showReceipt && receipt && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg max-w-md w-full max-h-[90vh] overflow-auto">
             <div className="p-6 border-b border-gray-200 sticky top-0 bg-white">
               <div className="flex items-center gap-2">
                 <h2 className="text-2xl font-bold text-gray-900">{receipt.isExchange ? "Exchange Slip" : receipt.isReturn ? "Return Receipt" : "Receipt"}</h2>
-                {isPartialReceipt && <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-xs font-semibold">Partial</span>}
+                {receipt.isReservation && <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 text-xs font-semibold">Partial</span>}
               </div>
               <p className="text-sm text-gray-600 font-mono">#{receipt.receiptNumber}</p>
               <p className="text-xs text-gray-500 mt-1">{new Date(receipt.timestamp).toLocaleString()}</p>
@@ -2997,10 +3370,10 @@ export default function PosPage() {
               ) : (
                 <div className={`${receipt.isReturn ? "bg-orange-50" : "bg-blue-50"} rounded-lg p-4`}>
                   <div className="flex justify-between items-center"><p className="text-lg font-bold text-gray-900">{receipt.isReturn ? "Refund Total" : "Total"}</p><p className={`text-2xl font-bold ${receipt.isReturn ? "text-orange-600" : "text-blue-600"}`}>${(receipt.subtotal + (receipt.deliveryFee || 0)).toFixed(2)}</p></div>
-                  {isPartialReceipt && !receipt.isReturn && !receipt.isExchange && (
+                  {receipt.isReservation && !receipt.isReturn && !receipt.isExchange && (
                     <div className="mt-3 pt-3 border-t border-blue-100 space-y-1">
-                      <div className="flex justify-between items-center text-sm"><p className="text-gray-700">Amount Paid</p><p className="font-semibold text-gray-900">${receiptAmountPaid.toFixed(2)}</p></div>
-                      <div className="flex justify-between items-center text-sm"><p className="text-gray-700">Balance Due</p><p className="font-semibold text-amber-700">${receiptBalanceDue.toFixed(2)}</p></div>
+                      <div className="flex justify-between items-center text-sm"><p className="text-gray-700">Amount Paid</p><p className="font-semibold text-gray-900">${receipt.amountPaid.toFixed(2)}</p></div>
+                      <div className="flex justify-between items-center text-sm"><p className="text-gray-700">Balance Due</p><p className="font-semibold text-amber-700">${receipt.balanceDue.toFixed(2)}</p></div>
                     </div>
                   )}
                 </div>

@@ -8,6 +8,7 @@ import {
   saveSessionToStorage,
 } from "@/lib/storage";
 import { getDeviceId, getDeviceName } from "@/lib/device";
+import { apiFetch } from "@/lib/api-client";
 
 const createDefaults = ({ persistDeviceId = true } = {}) => ({
   accessToken: null,
@@ -22,6 +23,7 @@ const createDefaults = ({ persistDeviceId = true } = {}) => ({
   tempAuthCredentials: null,
   deviceId: getDeviceId({ persist: persistDeviceId }),
   deviceName: getDeviceName(),
+  permissionsRefreshed: false, // NEW: flag to prevent repeated refreshes
 });
 
 function persistState(state) {
@@ -37,6 +39,7 @@ function persistState(state) {
     selectedLocationId: state.selectedLocationId,
     deviceId: state.deviceId,
     deviceName: state.deviceName,
+    permissionsRefreshed: state.permissionsRefreshed,
   });
 }
 
@@ -54,7 +57,7 @@ export const useSessionStore = create((set, get) => ({
   },
   setTokens({ accessToken, refreshToken }) {
     set((state) => {
-      const next = { ...state, accessToken, refreshToken };
+      const next = { ...state, accessToken, refreshToken, permissionsRefreshed: false };
       persistState(next);
       return next;
     });
@@ -75,7 +78,7 @@ export const useSessionStore = create((set, get) => ({
   },
   setActiveOrganization(activeOrganization) {
     set((state) => {
-      const next = { ...state, activeOrganization };
+      const next = { ...state, activeOrganization, permissionsRefreshed: false };
       persistState(next);
       return next;
     });
@@ -115,7 +118,7 @@ export const useSessionStore = create((set, get) => ({
     });
   },
   async clearSession() {
-    set({ ...createDefaults({ persistDeviceId: false }), hydrated: true });
+    set({ ...createDefaults({ persistDeviceId: false }), hydrated: true, permissionsRefreshed: false });
 
     try {
       clearSessionStorage();
@@ -126,6 +129,45 @@ export const useSessionStore = create((set, get) => ({
   },
   can(permission) {
     return get().permissions.includes(permission);
+  },
+
+  // Refresh permissions from the server
+  async refreshPermissions() {
+    const state = get();
+    if (!state.accessToken || !state.activeOrganization) {
+      console.warn("Cannot refresh permissions: No access token or active organization");
+      return;
+    }
+
+    // If already refreshed, skip (but only if we have permissions)
+    if (state.permissionsRefreshed && state.permissions.length > 0) {
+      console.log("Permissions already refreshed, skipping");
+      return;
+    }
+
+    try {
+      const response = await apiFetch(`/organizations/${state.activeOrganization._id}`);
+      const orgData = response?.organization || response?.data?.organization;
+      if (orgData) {
+        set({
+          permissions: orgData.permissions || [],
+          locations: orgData.locations || [],
+          activeOrganization: {
+            ...state.activeOrganization,
+            permissions: orgData.permissions,
+            locations: orgData.locations,
+          },
+          permissionsRefreshed: true,
+        });
+        // Persist the updated state
+        persistState(get());
+        console.log("✅ Permissions refreshed successfully");
+      } else {
+        console.warn("No organization data returned from refresh");
+      }
+    } catch (error) {
+      console.error("Failed to refresh permissions:", error);
+    }
   },
 }));
 

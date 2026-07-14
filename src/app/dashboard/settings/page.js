@@ -53,6 +53,13 @@ const cards = [
     href: "/dashboard/expenses",
     permission: PERMISSIONS.VIEW_EXPENSES,
   },
+  // NEW: Backdate Sales Card
+  {
+    title: "Backdate Sales",
+    description: "Move sales from one date to another (admin only).",
+    href: "/dashboard/settings/backdate-sales",
+    permission: PERMISSIONS.BACKDATE_SALES,
+  },
 ];
 
 export default function SettingsPage() {

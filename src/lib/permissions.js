@@ -1,13 +1,16 @@
 // Permission constants matching backend permission system
 // Keep this in sync with server/config/permissions.js
 
-export const  PERMISSIONS = {
+export const PERMISSIONS = {
   // Sales Permissions
   CREATE_SALE: "create_sale",
   VIEW_SALE_HISTORY: "view_sale_history",
   EDIT_SALE: "edit_sale",
   DELETE_SALE: "delete_sale",
   REFUND_SALE: "refund_sale",
+
+  // NEW: Backdate Sales Permission
+  BACKDATE_SALES: "backdate_sales",
 
   // POS Permissions
   POS_OVERRIDE_PRICE: "pos:override_price",
@@ -83,6 +86,10 @@ export const  PERMISSIONS = {
   DELIVERY_FEES_DELETE: "delivery_fees.delete",
   DELIVERY_FEES_ASSIGN_DRIVER: "delivery_fees.assign_driver",
   DELIVERY_FEES_UPDATE_STATUS: "delivery_fees.update_status",
+
+  // Customer Permissions
+  VIEW_CUSTOMERS: "view_customers",
+  CREATE_CUSTOMERS: "create_customers",
 };
 
 // Permission Groups for UI organization
@@ -127,6 +134,7 @@ export const PERMISSION_GROUPS = {
     PERMISSIONS.MANAGE_ROLES,
     PERMISSIONS.MANAGE_AUDIT_LOGS,
     PERMISSIONS.MANAGE_SETTINGS,
+    PERMISSIONS.BACKDATE_SALES,   // <-- Added here
   ],
   deliveryFees: [
     PERMISSIONS.DELIVERY_FEES_CREATE,
@@ -135,5 +143,9 @@ export const PERMISSION_GROUPS = {
     PERMISSIONS.DELIVERY_FEES_DELETE,
     PERMISSIONS.DELIVERY_FEES_ASSIGN_DRIVER,
     PERMISSIONS.DELIVERY_FEES_UPDATE_STATUS,
+  ],
+  customers: [
+    PERMISSIONS.VIEW_CUSTOMERS,
+    PERMISSIONS.CREATE_CUSTOMERS,
   ],
 };
