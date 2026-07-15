@@ -1,6 +1,6 @@
 // IndexedDB utility for storing pending sales and deliveries when offline
 const DB_NAME = "FLEXI_POS";
-const DB_VERSION = 3; // Incremented for new delivery stores
+const DB_VERSION = 4; // Incremented to add idempotencyKey index
 const STORE_NAME = "pending_sales";
 const SHOPIFY_STORE_NAME = "shopify_products";
 const PENDING_DELIVERIES_STORE = "pending_deliveries";
@@ -33,16 +33,26 @@ export async function initDB() {
     request.onupgradeneeded = (event) => {
       const database = event.target.result;
       
-      // Existing stores
+      // === Pending Sales Store (keyPath: "id", autoIncrement) ===
       if (!database.objectStoreNames.contains(STORE_NAME)) {
-        database.createObjectStore(STORE_NAME, { keyPath: "id", autoIncrement: true });
+        const store = database.createObjectStore(STORE_NAME, { keyPath: "id", autoIncrement: true });
+        // Add index for idempotencyKey (used for delete and lookup)
+        store.createIndex("idempotencyKey", "idempotencyKey", { unique: false });
+      } else {
+        // For existing store, add index if missing
+        const store = event.target.transaction.objectStore(STORE_NAME);
+        if (!store.indexNames.contains("idempotencyKey")) {
+          store.createIndex("idempotencyKey", "idempotencyKey", { unique: false });
+        }
       }
+
+      // === Shopify Products Store ===
       if (!database.objectStoreNames.contains(SHOPIFY_STORE_NAME)) {
         const store = database.createObjectStore(SHOPIFY_STORE_NAME, { keyPath: "id" });
         store.createIndex("title", "title", { unique: false });
       }
 
-      // New delivery-related stores
+      // === Pending Deliveries Store ===
       if (!database.objectStoreNames.contains(PENDING_DELIVERIES_STORE)) {
         const store = database.createObjectStore(PENDING_DELIVERIES_STORE, {
           keyPath: "id",
@@ -53,6 +63,7 @@ export async function initDB() {
         store.createIndex("savedAt", "savedAt", { unique: false });
       }
 
+      // === Pending Delivery Updates Store ===
       if (!database.objectStoreNames.contains(PENDING_DELIVERY_UPDATES_STORE)) {
         const store = database.createObjectStore(PENDING_DELIVERY_UPDATES_STORE, {
           keyPath: "id",
@@ -62,6 +73,7 @@ export async function initDB() {
         store.createIndex("type", "type", { unique: false });
       }
 
+      // === Cached Categories Store ===
       if (!database.objectStoreNames.contains(CACHED_CATEGORIES_STORE)) {
         const store = database.createObjectStore(CACHED_CATEGORIES_STORE, {
           keyPath: "id",
@@ -76,6 +88,9 @@ export async function initDB() {
 // Save pending sale to IndexedDB
 export async function savePendingSale(saleData) {
   if (!db) await initDB();
+
+  // Ensure the sale has a status (default to "pending")
+  if (!saleData.status) saleData.status = "pending";
 
   return new Promise((resolve, reject) => {
     const transaction = db.transaction([STORE_NAME], "readwrite");
@@ -106,7 +121,7 @@ export async function getPendingSales() {
   });
 }
 
-// Get pending sale by ID
+// Get pending sale by ID (auto-increment id)
 export async function getPendingSaleById(id) {
   if (!db) await initDB();
 
@@ -114,6 +129,21 @@ export async function getPendingSaleById(id) {
     const transaction = db.transaction([STORE_NAME], "readonly");
     const store = transaction.objectStore(STORE_NAME);
     const request = store.get(id);
+
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => resolve(request.result);
+  });
+}
+
+// Get pending sale by idempotencyKey
+export async function getPendingSaleByIdempotencyKey(idempotencyKey) {
+  if (!db) await initDB();
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([STORE_NAME], "readonly");
+    const store = transaction.objectStore(STORE_NAME);
+    const index = store.index("idempotencyKey");
+    const request = index.get(idempotencyKey);
 
     request.onerror = () => reject(request.error);
     request.onsuccess = () => resolve(request.result);
@@ -145,17 +175,36 @@ export async function updatePendingSale(id, updates) {
   });
 }
 
-// Delete pending sale
-export async function deletePendingSale(id) {
+// Delete pending sale by idempotencyKey
+export async function deletePendingSale(idempotencyKey) {
   if (!db) await initDB();
 
   return new Promise((resolve, reject) => {
     const transaction = db.transaction([STORE_NAME], "readwrite");
     const store = transaction.objectStore(STORE_NAME);
-    const request = store.delete(id);
+    const index = store.index("idempotencyKey");
+    const getRequest = index.get(idempotencyKey);
 
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve();
+    getRequest.onsuccess = () => {
+      const record = getRequest.result;
+      if (!record) {
+        // If not found, try to find by auto-increment id (backward compatibility)
+        const id = parseInt(idempotencyKey, 10);
+        if (!isNaN(id)) {
+          const deleteByIdRequest = store.delete(id);
+          deleteByIdRequest.onerror = () => reject(deleteByIdRequest.error);
+          deleteByIdRequest.onsuccess = () => resolve();
+        } else {
+          resolve(); // nothing to delete
+        }
+        return;
+      }
+      const deleteRequest = store.delete(record.id);
+      deleteRequest.onerror = () => reject(deleteRequest.error);
+      deleteRequest.onsuccess = () => resolve();
+    };
+
+    getRequest.onerror = () => reject(getRequest.error);
   });
 }
 
@@ -188,8 +237,7 @@ export async function getPendingSalesCount() {
 }
 
 // ===== DELIVERY FUNCTIONS =====
-
-// Save pending delivery to IndexedDB
+// (unchanged - kept as-is)
 export async function savePendingDelivery(deliveryData) {
   if (!db) await initDB();
 
@@ -209,7 +257,6 @@ export async function savePendingDelivery(deliveryData) {
   });
 }
 
-// Get all pending deliveries
 export async function getPendingDeliveries(locationId = null) {
   if (!db) await initDB();
 
@@ -228,13 +275,11 @@ export async function getPendingDeliveries(locationId = null) {
     request.onerror = () => reject(request.error);
     request.onsuccess = () => {
       const results = request.result || [];
-      // Filter to unsync edigered only
       resolve(results.filter((d) => !d.syncedAt));
     };
   });
 }
 
-// Get pending delivery by ID
 export async function getPendingDeliveryById(id) {
   if (!db) await initDB();
 
@@ -248,7 +293,6 @@ export async function getPendingDeliveryById(id) {
   });
 }
 
-// Update pending delivery
 export async function updatePendingDelivery(id, updates) {
   if (!db) await initDB();
 
@@ -275,7 +319,6 @@ export async function updatePendingDelivery(id, updates) {
   });
 }
 
-// Mark delivery as synced (keeps it in DB for reference)
 export async function markDeliveryAsSynced(id, serverId) {
   if (!db) await initDB();
 
@@ -302,7 +345,6 @@ export async function markDeliveryAsSynced(id, serverId) {
   });
 }
 
-// Delete pending delivery
 export async function deletePendingDelivery(id) {
   if (!db) await initDB();
 
@@ -316,7 +358,6 @@ export async function deletePendingDelivery(id) {
   });
 }
 
-// Get count of pending deliveries
 export async function getPendingDeliveriesCount(locationId = null) {
   if (!db) await initDB();
 
@@ -333,16 +374,12 @@ export async function getPendingDeliveriesCount(locationId = null) {
     }
 
     request.onerror = () => reject(request.error);
-    request.onsuccess = () => {
-      // Count only unsynced deliveries
-      resolve(request.result);
-    };
+    request.onsuccess = () => resolve(request.result);
   });
 }
 
 // ===== DELIVERY UPDATES (STATUS CHANGES) =====
-
-// Save pending delivery update (status change, etc.)
+// (unchanged - kept as-is)
 export async function savePendingDeliveryUpdate(deliveryId, updateData) {
   if (!db) await initDB();
 
@@ -363,7 +400,6 @@ export async function savePendingDeliveryUpdate(deliveryId, updateData) {
   });
 }
 
-// Get pending delivery updates for a specific delivery
 export async function getPendingDeliveryUpdates(deliveryId) {
   if (!db) await initDB();
 
@@ -376,13 +412,11 @@ export async function getPendingDeliveryUpdates(deliveryId) {
     request.onerror = () => reject(request.error);
     request.onsuccess = () => {
       const results = request.result || [];
-      // Filter to unsynced only
       resolve(results.filter((u) => !u.syncedAt));
     };
   });
 }
 
-// Get all un synced delivery updates
 export async function getAllPendingDeliveryUpdates() {
   if (!db) await initDB();
 
@@ -394,13 +428,11 @@ export async function getAllPendingDeliveryUpdates() {
     request.onerror = () => reject(request.error);
     request.onsuccess = () => {
       const results = request.result || [];
-      // Filter to unsynced only
       resolve(results.filter((u) => !u.syncedAt));
     };
   });
 }
 
-// Mark delivery update as synced
 export async function markDeliveryUpdateAsSynced(id) {
   if (!db) await initDB();
 
@@ -426,7 +458,6 @@ export async function markDeliveryUpdateAsSynced(id) {
   });
 }
 
-// Delete pending delivery update
 export async function deletePendingDeliveryUpdate(id) {
   if (!db) await initDB();
 
@@ -441,8 +472,7 @@ export async function deletePendingDeliveryUpdate(id) {
 }
 
 // ===== CACHED CATEGORIES =====
-
-// Cache delivery categories for a location (offline access)
+// (unchanged - kept as-is)
 export async function cacheDeliveryCategories(locationId, categories) {
   if (!db) await initDB();
 
@@ -469,7 +499,6 @@ export async function cacheDeliveryCategories(locationId, categories) {
   });
 }
 
-// Get cached categories for a location
 export async function getCachedCategories(locationId) {
   if (!db) await initDB();
 
@@ -487,7 +516,6 @@ export async function getCachedCategories(locationId) {
   });
 }
 
-// Clear cached categories
 export async function clearCachedCategories(locationId = null) {
   if (!db) await initDB();
 
@@ -534,26 +562,20 @@ function editDistance(a, b) {
   return dp[m][n];
 }
 
-// Calculate fuzzy match score (lower distance = higher score)
 function calculateFuzzyScore(query, text) {
   const distance = editDistance(query, text);
   const maxLen = Math.max(query.length, text.length);
   return 1 - (distance / maxLen);
 }
 
-// Check if query is a prefix of any word in the text (for multi-word product names)
 function hasWordPrefixMatch(query, text) {
   const lowerQuery = query.toLowerCase();
   const lowerText = text.toLowerCase();
-  
-  // Split on whitespace and common delimiters
   const words = lowerText.split(/[\s-_,]+/);
-  
-  // Check if any word starts with the query
   return words.some(word => word.startsWith(lowerQuery));
 }
 
-// Set Shopify products in cache (clears old data)
+// Shopify product functions (unchanged)
 export async function setShopifyProducts(products) {
   console.log("[setShopifyProducts] Called with", products?.length, "products, db exists:", !!db);
   if (!db) {
@@ -566,7 +588,6 @@ export async function setShopifyProducts(products) {
     const transaction = db.transaction([SHOPIFY_STORE_NAME], "readwrite");
     const store = transaction.objectStore(SHOPIFY_STORE_NAME);
     
-    // Clear the store and wait for it to complete
     const clearRequest = store.clear();
     
     clearRequest.onerror = () => {
@@ -636,7 +657,6 @@ export async function setShopifyProducts(products) {
   });
 }
 
-// Get all Shopify products from cache
 export async function getShopifyProducts() {
   if (!db) await initDB();
   return new Promise((resolve, reject) => {
@@ -648,12 +668,6 @@ export async function getShopifyProducts() {
   });
 }
 
-/**
- * Search Shopify products by title (fuzzy) and SKU (exact match)
- * @param {string} query - Search query
- * @param {number} limit - Max results to return
- * @returns {Promise<Array>} - Matching products sorted by score
- */
 export async function searchShopifyProducts(query = "", limit = 50) {
   console.log("[searchShopifyProducts] Called with query:", query, "limit:", limit, "db exists:", !!db);
   if (!db) await initDB();
@@ -683,39 +697,30 @@ export async function searchShopifyProducts(query = "", limit = 50) {
         let matchScore = 0;
         let matchType = null;
 
-        // Check word prefix match (e.g., "flann" matches "Flannel Shirt")
         if (hasWordPrefixMatch(lowerQuery, product.title)) {
           matchScore = 0.85;
           matchType = "word-prefix";
         }
 
-        // Check title fuzzy match (fallback for typos)
         const titleScore = calculateFuzzyScore(lowerQuery, product.title.toLowerCase());
         if (titleScore > 0.3) {
           matchScore = Math.max(matchScore, titleScore);
           matchType = matchType || "title";
         }
 
-        // Check SKU exact/partial match (higher priority)
         if (product.variants && product.variants.length > 0) {
           for (const variant of product.variants) {
             if (variant.sku) {
               const variantSku = variant.sku.toLowerCase();
-              
-              // Exact match gets highest score
               if (variantSku === lowerQuery) {
                 matchScore = 1.0;
                 matchType = "sku-exact";
                 break;
               }
-              
-              // Partial match (starts with)
               if (variantSku.startsWith(lowerQuery)) {
                 matchScore = Math.max(matchScore, 0.9);
                 matchType = "sku-partial";
               }
-              
-              // Contains match
               if (variantSku.includes(lowerQuery)) {
                 matchScore = Math.max(matchScore, 0.7);
                 matchType = matchType || "sku-contains";
@@ -729,7 +734,6 @@ export async function searchShopifyProducts(query = "", limit = 50) {
         }
       }
 
-      // Sort by score (highest first)
       results.sort((a, b) => b._matchScore - a._matchScore);
       
       console.log("[searchShopifyProducts] Found", results.length, "matching products for query:", query);
@@ -738,7 +742,6 @@ export async function searchShopifyProducts(query = "", limit = 50) {
   });
 }
 
-// Clear all Shopify products from cache
 export async function clearShopifyProducts() {
   if (!db) await initDB();
   return new Promise((resolve, reject) => {

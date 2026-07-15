@@ -9,6 +9,7 @@ import { PERMISSIONS } from "@/lib/permissions";
 import {
   savePendingSale,
   getPendingSales,
+  deletePendingSale,
   setShopifyProducts,
   searchShopifyProducts,
   clearShopifyProducts,
@@ -24,7 +25,7 @@ import {
   toNonNegativeAmount,
 } from "@/lib/receipt/receiptPrintTemplate";
 
-// NEW: Components for remodel
+// NEW: Components
 import SearchOverlay from "@/components/pos/SearchOverlay";
 import CustomerSelector from "@/components/pos/CustomerSelector";
 import DeliveryForm from "@/components/pos/DeliveryForm";
@@ -258,7 +259,7 @@ export default function PosPage() {
     notes: "",
   });
 
-  // NEW: Update customer modal state
+  // Update customer modal state
   const [updatingCustomer, setUpdatingCustomer] = useState(false);
   const [showUpdateCustomerModal, setShowUpdateCustomerModal] = useState(false);
   const [customerUpdateData, setCustomerUpdateData] = useState({
@@ -273,6 +274,13 @@ export default function PosPage() {
       country: "Kenya",
     },
   });
+
+  // ====== HELD SALES STATE ======
+  const [heldSales, setHeldSales] = useState([]);
+  const [showHeldSalesModal, setShowHeldSalesModal] = useState(false);
+  const [loadingHeldSales, setLoadingHeldSales] = useState(false);
+  const [heldSalesSearchQuery, setHeldSalesSearchQuery] = useState(""); // NEW
+  // =============================
 
   const cartContainerRef = useRef(null);
 
@@ -424,7 +432,6 @@ export default function PosPage() {
   useEffect(() => {
     if (!selectedCustomer) return;
 
-    // 1. When toggle is ON, fill/update delivery info from customer
     if (deliveryEnabled) {
       const address = selectedCustomer.address || {};
       setDeliveryInfo((prev) => ({
@@ -444,7 +451,6 @@ export default function PosPage() {
       return;
     }
 
-    // 2. When customer has address and toggle is OFF, auto-enable and fill
     const address = selectedCustomer.address;
     if (!address) return;
 
@@ -452,7 +458,6 @@ export default function PosPage() {
       address.street || address.city || address.state || address.postalCode || address.country;
     if (!hasAddressInfo) return;
 
-    // Only fill if delivery fields are empty (no user input yet)
     const hasUserEntered =
       deliveryInfo.recipientName ||
       deliveryInfo.recipientPhone ||
@@ -522,6 +527,9 @@ export default function PosPage() {
       try {
         const sales = await getPendingSales();
         setPendingSales(sales || []);
+        // Also load held sales separately (status === "held")
+        const held = sales.filter(s => s.status === "held");
+        setHeldSales(held);
       } catch (err) {
         console.error("Failed to load pending sales:", err);
       }
@@ -762,6 +770,107 @@ export default function PosPage() {
     }
   }, [saleAssignedUser, serviceProductMap, users]);
 
+  // ================================
+  // HELD SALES FUNCTIONS
+  // ================================
+  const loadHeldSales = async () => {
+    setLoadingHeldSales(true);
+    try {
+      const allSales = await getPendingSales();
+      const held = allSales.filter(s => s.status === "held");
+      setHeldSales(held);
+    } catch (err) {
+      console.error("Failed to load held sales:", err);
+    } finally {
+      setLoadingHeldSales(false);
+    }
+  };
+
+  const holdCurrentSale = async () => {
+    if (cart.length === 0) {
+      setError("Cart is empty. Cannot hold.");
+      return;
+    }
+
+    const draft = {
+      status: "held",
+      heldAt: new Date().toISOString(),
+      cart: cart.map(item => ({ ...item })),
+      notes: notes,
+      selectedCustomer: selectedCustomer,
+      deliveryEnabled: deliveryEnabled,
+      deliveryInfo: deliveryInfo,
+      transactionDiscount: transactionDiscount,
+      discountReason: discountReason,
+      saleAssignedUser: saleAssignedUser,
+      cartSubtotal: cartSubtotal,
+      cartLineItemDiscounts: cartLineItemDiscounts,
+      cartTotal: cartTotal,
+      idempotencyKey: `HOLD-${Date.now()}`,
+    };
+
+    try {
+      await savePendingSale(draft);
+      setStatus("Sale held successfully!");
+      clearCart();
+      await loadHeldSales();
+    } catch (err) {
+      setError("Failed to hold sale: " + err.message);
+    }
+  };
+
+  const resumeHeldSale = async (draft) => {
+    // Load the draft into the cart
+    setCart(draft.cart || []);
+    setNotes(draft.notes || "");
+    setSelectedCustomer(draft.selectedCustomer || null);
+    setDeliveryEnabled(draft.deliveryEnabled || false);
+    setDeliveryInfo(draft.deliveryInfo || {
+      recipientName: "",
+      recipientPhone: "",
+      recipientEmail: "",
+      deliveryCategory: "",
+      deliveryOption: "",
+      deliveryAddress: {
+        street: "",
+        city: "",
+        state: "",
+        postalCode: "",
+        country: "Kenya",
+        landmark: "",
+      },
+      notes: "",
+    });
+    setTransactionDiscount(draft.transactionDiscount || 0);
+    setDiscountReason(draft.discountReason || "");
+    setSaleAssignedUser(draft.saleAssignedUser || null);
+    setShowHeldSalesModal(false);
+
+    // Delete the held draft from IndexedDB
+    try {
+      await deletePendingSale(draft.idempotencyKey);
+      // Refresh the held sales list
+      await loadHeldSales();
+      setStatus("Held sale loaded and removed from list.");
+    } catch (err) {
+      console.error("Failed to delete held sale after resume:", err);
+      // Still show the status even if delete fails
+      setStatus("Held sale loaded, but could not be removed. You may need to delete it manually.");
+    }
+  };
+
+  const deleteHeldSale = async (idempotencyKey) => {
+    if (!confirm("Delete this held sale?")) return;
+    try {
+      await deletePendingSale(idempotencyKey);
+      await loadHeldSales();
+      setStatus("Held sale deleted.");
+    } catch (err) {
+      setError("Failed to delete: " + err.message);
+    }
+  };
+  // ================================
+
   // Cart operations
   const upsertCartItem = (targetCart, setTargetCart, cartItem) => {
     const existingIndex = targetCart.findIndex(
@@ -791,7 +900,6 @@ export default function PosPage() {
     }
 
     const isService = product.type === "service";
-    // For services, get labor/product cost from product or default
     let laborCost = 0;
     let productCost = 0;
     let price = product.price;
@@ -799,7 +907,7 @@ export default function PosPage() {
       const prodDefaults = serviceProductMap[product.id || product._id] || {};
       laborCost = Number(prodDefaults.laborCost) || 0;
       productCost = Number(prodDefaults.productCost) || 0;
-      price = laborCost + productCost; // total price
+      price = laborCost + productCost;
     }
 
     const newItem = {
@@ -1264,10 +1372,8 @@ export default function PosPage() {
       });
       const updated = res?.customer;
       if (updated) {
-        // Update the selected customer with new data
         setSelectedCustomer(updated);
         
-        // Update delivery info with new address if delivery is enabled
         if (deliveryEnabled && updated.address) {
           setDeliveryInfo((prev) => ({
             ...prev,
@@ -1332,7 +1438,6 @@ export default function PosPage() {
 
   // ========== DELIVERY CHECKOUT HANDLERS ==========
   const handleDeliveryConfirm = (deliveryData, fee) => {
-    // Update delivery info with data from modal
     setDeliveryInfo({
       recipientName: deliveryData.recipientName,
       recipientPhone: deliveryData.recipientPhone,
@@ -1342,17 +1447,12 @@ export default function PosPage() {
       deliveryAddress: deliveryData.deliveryAddress,
       notes: deliveryData.notes || "",
     });
-    
-    // Close delivery modal
     setShowDeliveryModal(false);
-    
-    // Now open checkout modal
     setShowCompleteCheckoutModal(true);
   };
 
   const handleDeliverySkip = () => {
     setShowDeliveryModal(false);
-    // Optionally disable delivery
     setDeliveryEnabled(false);
   };
 
@@ -1851,14 +1951,12 @@ export default function PosPage() {
       return;
     }
 
-    // Check if delivery is enabled but delivery info is incomplete
     if (deliveryEnabled) {
       const hasRecipientInfo = deliveryInfo.recipientName && deliveryInfo.recipientPhone;
       const hasAddress = deliveryInfo.deliveryAddress?.street && deliveryInfo.deliveryAddress?.city;
       const hasDeliveryOptions = deliveryInfo.deliveryCategory && deliveryInfo.deliveryOption;
 
       if (!hasRecipientInfo || !hasAddress || !hasDeliveryOptions) {
-        // Show delivery modal to complete delivery info
         setShowDeliveryModal(true);
         return;
       }
@@ -1873,7 +1971,7 @@ export default function PosPage() {
       paymentMethod,
       splitPayments: cbSplitPayments,
       useSplitPayment: isSplitPayment,
-      deliveryInfo: modalDeliveryInfo,
+      deliveryInfo,
       deliveryFee,
       isReservation,
     } = checkoutData;
@@ -1882,7 +1980,6 @@ export default function PosPage() {
       (payment) => payment.amount > 0,
     );
 
-    // Use delivery fee from calculation if not provided
     const finalDeliveryFee = deliveryFee !== undefined ? deliveryFee : calculateDeliveryFee();
 
     setStatus("Processing...");
@@ -3039,6 +3136,24 @@ export default function PosPage() {
             >
               Create Reservation
             </button>
+            {/* ===== HOLD BUTTON ===== */}
+            <button
+              onClick={holdCurrentSale}
+              disabled={cart.length === 0 || checkingPreviousDayShift}
+              className="w-full bg-gray-600 hover:bg-gray-700 disabled:bg-gray-300 text-white font-bold py-3 rounded-lg text-sm transition-colors"
+            >
+              Hold Sale
+            </button>
+            {/* ===== VIEW HELD BUTTON ===== */}
+            <button
+              onClick={() => {
+                setShowHeldSalesModal(true);
+                loadHeldSales();
+              }}
+              className="w-full border border-gray-300 hover:bg-gray-100 text-gray-700 font-medium py-3 rounded-lg text-sm transition-colors"
+            >
+              📋 View Held Sales ({heldSales.length})
+            </button>
             {checkingPreviousDayShift && <p className="mt-2 text-xs text-gray-500">Checking whether a previous-day shift is still open...</p>}
             {previousDayShiftError && !checkingPreviousDayShift && <p className="mt-2 text-xs text-amber-700">{previousDayShiftError}</p>}
           </div>
@@ -3397,6 +3512,116 @@ export default function PosPage() {
           </div>
         </div>
       )}
+
+      {/* ===== HELD SALES MODAL (with search) ===== */}
+      {showHeldSalesModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-lg bg-white p-6 shadow-xl">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-2xl font-bold text-gray-900">Held Sales</h2>
+              <button
+                onClick={() => setShowHeldSalesModal(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                ✕
+              </button>
+            </div>
+            {/* Search bar */}
+            <div className="mb-4">
+              <input
+                type="text"
+                placeholder="Search by PROF number..."
+                value={heldSalesSearchQuery}
+                onChange={(e) => setHeldSalesSearchQuery(e.target.value)}
+                className="w-full rounded border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+            {loadingHeldSales ? (
+              <p className="text-gray-500">Loading...</p>
+            ) : (
+              (() => {
+                // Filter held sales by idempotencyKey (case-insensitive)
+                const filtered = heldSales.filter(draft =>
+                  draft.idempotencyKey?.toLowerCase().includes(heldSalesSearchQuery.toLowerCase().trim())
+                );
+                if (filtered.length === 0) {
+                  return <p className="text-gray-500 text-center py-8">No held sales found.</p>;
+                }
+                return (
+                  <div className="space-y-4">
+                    {filtered.map((draft, idx) => (
+                      <div key={draft.idempotencyKey || idx} className="border border-gray-200 rounded-lg p-4">
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <div className="flex-1">
+                            <p className="text-sm font-medium text-gray-900">
+                              {draft.cart.length} items &nbsp;|&nbsp;
+                              Total: ${(draft.cartTotal || 0).toFixed(2)}
+                            </p>
+                            <p className="text-xs text-gray-600">PROF: {draft.idempotencyKey}</p>
+                            {draft.selectedCustomer && (
+                              <p className="text-xs text-gray-600">Customer: {draft.selectedCustomer.fullname}</p>
+                            )}
+                            <p className="text-xs text-gray-400">Held: {new Date(draft.heldAt).toLocaleString()}</p>
+                          </div>
+                          <div className="flex gap-2 flex-wrap">
+                            <button
+                              onClick={() => resumeHeldSale(draft)}
+                              className="rounded bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-700"
+                            >
+                              Resume
+                            </button>
+                            <button
+                              onClick={() => {
+                                // Build proforma receipt with items
+                                const items = (draft.cart || []).map(item => ({
+                                  name: item.name,
+                                  quantity: item.quantity,
+                                  price: item.price,
+                                  type: item.type,
+                                  discount: item.discount || 0,
+                                }));
+                                const subtotal = draft.cartTotal || 0;
+                                const total = subtotal; // proforma excludes delivery fee
+
+                                const proformaReceipt = {
+                                  isProforma: true,
+                                  receiptNumber: `PROF-${draft.idempotencyKey?.slice(0, 8) || Date.now()}`,
+                                  timestamp: new Date().toISOString(),
+                                  items,
+                                  subtotal,
+                                  total,
+                                  notes: draft.notes || "",
+                                  customer: draft.selectedCustomer?.fullname || "",
+                                };
+
+                                printReceiptInBrowser({
+                                  receipt: proformaReceipt,
+                                  organizationName: activeOrganization?.name,
+                                  locationLabel: getLocationLabel(locationId),
+                                });
+                              }}
+                              className="rounded bg-green-600 px-3 py-1 text-xs font-medium text-white hover:bg-green-700"
+                            >
+                              Print Proforma
+                            </button>
+                            <button
+                              onClick={() => deleteHeldSale(draft.idempotencyKey)}
+                              className="rounded bg-red-600 px-3 py-1 text-xs font-medium text-white hover:bg-red-700"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()
+            )}
+          </div>
+        </div>
+      )}
+      {/* ============================= */}
     </div>
   );
 }
