@@ -27,6 +27,18 @@ const normalizeItems = (items = []) => {
   const regularItems = [];
 
   for (const item of arr) {
+    // Skip attached products (they have a parentItemIndex and are not bundle children)
+    // A product is "attached" if it has a parentItemIndex and is NOT a service (flexi or shopify).
+    const isAttachedProduct = item.parentItemIndex !== null &&
+                             item.parentItemIndex !== undefined &&
+                             item.type !== "service" &&
+                             item.isBundleChild !== true;
+
+    if (isAttachedProduct) {
+      // Hide from receipt – skip entirely
+      continue;
+    }
+
     // Check if this item is a bundle child
     const isBundleChild = item.isBundleChild === true;
     const bundleName = item.serviceBundle?.bundleName || null;
@@ -36,17 +48,16 @@ const normalizeItems = (items = []) => {
       if (!bundleGroups[bundleName]) {
         bundleGroups[bundleName] = {
           name: bundleName,
-          quantity: 1, // one line per bundle
+          quantity: 1,
           price: 0,
           type: "bundle",
           discount: 0,
         };
       }
-      // Sum the line total (or price) of each child
       bundleGroups[bundleName].price += toNonNegativeAmount(item.lineTotal ?? item.price ?? 0);
       bundleGroups[bundleName].discount += toNonNegativeAmount(item.discount ?? 0);
     } else {
-      // Regular item (non‑bundle child)
+      // Regular item (non‑bundle child) – includes standalone products, services, etc.
       regularItems.push({
         name: item?.name || item?.productName || "Item",
         quantity: Number(item?.quantity) || 0,

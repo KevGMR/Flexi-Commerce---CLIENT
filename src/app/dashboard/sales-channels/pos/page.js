@@ -1181,16 +1181,29 @@ export default function PosPage() {
 
   // ====== ATTACH FUNCTIONS (added) ======
   const openAttachQuantityModal = (productIndex) => {
-    const serviceIndexes = cart
-      .map((item, idx) => (item.type === "service" && !item.isBundleParent && !item.isBundleChild ? idx : -1))
-      .filter(idx => idx !== -1);
-    if (serviceIndexes.length === 0) {
-      setError("No services in cart to attach to.");
+    // Find all attachable targets:
+    // - Single services (type === "service", not bundle child, not bundle parent)
+    // - Bundle parents (isBundleParent === true)
+    const targets = cart
+      .map((item, idx) => {
+        if (item.type === "service" && !item.isBundleChild && !item.isBundleParent) {
+          return { index: idx, label: item.name, type: "service" };
+        }
+        if (item.isBundleParent) {
+          return { index: idx, label: item.name, type: "bundle" };
+        }
+        return null;
+      })
+      .filter(Boolean);
+
+    if (targets.length === 0) {
+      setError("No services or bundles in cart to attach to.");
       return;
     }
+
     setAttachQuantityProductIndex(productIndex);
     setAttachQuantityValue(cart[productIndex].quantity);
-    setAttachModalSelectedServiceIndex(serviceIndexes[0]);
+    setAttachModalSelectedServiceIndex(targets[0].index);
     setShowAttachQuantityModal(true);
   };
 
@@ -1262,7 +1275,9 @@ export default function PosPage() {
     const newCart = [...cart];
     const item = newCart[index];
 
+    // ----- Bundle Parent Removal -----
     if (item.isBundleParent) {
+      // Remove all children and the parent itself
       const toRemove = newCart
         .map((it, idx) => (it.parentItemIndex === index || idx === index ? idx : -1))
         .filter(idx => idx !== -1);
@@ -1274,6 +1289,7 @@ export default function PosPage() {
       return;
     }
 
+    // ----- Bundle Child Removal -----
     if (item.isBundleChild) {
       const parentIdx = item.parentItemIndex;
       const parent = newCart[parentIdx];
@@ -1331,6 +1347,24 @@ export default function PosPage() {
       return;
     }
 
+    // ----- Regular (non‑bundle) item removal -----
+    // Check if it's an attached product (has parentItemIndex and is not a service or bundle)
+    if (item.parentItemIndex !== null && item.parentItemIndex !== undefined && item.type !== "service") {
+      // Detach: restore price and clear parentItemIndex
+      const updatedItem = { ...item };
+      if (item.originalPrice !== null && item.originalPrice !== undefined) {
+        updatedItem.price = item.originalPrice;
+      } else {
+        // fallback: if originalPrice is missing, use 0 or some default
+        updatedItem.price = 0;
+      }
+      updatedItem.parentItemIndex = null;
+      newCart[index] = updatedItem;
+      setCart(newCart);
+      return;
+    }
+
+    // Regular standalone item removal
     setCart(cart.filter((_, i) => i !== index));
   };
 
@@ -2201,235 +2235,250 @@ export default function PosPage() {
   };
 
   const handleCompleteCheckout = async (checkoutData) => {
-    const {
-      notes: checkoutNotes,
-      paymentMethod,
-      splitPayments: cbSplitPayments,
-      useSplitPayment: isSplitPayment,
-      deliveryInfo,
-      deliveryFee,
-      isReservation,
-    } = checkoutData;
-    const normalizedSplitPayments = normalizeSplitPaymentAmounts(cbSplitPayments);
-    const positiveSplitPayments = normalizedSplitPayments.filter(
-      (payment) => payment.amount > 0,
-    );
 
-    const finalDeliveryFee = deliveryFee !== undefined ? deliveryFee : calculateDeliveryFee();
+  const {
+    notes: checkoutNotes,
+    paymentMethod,
+    splitPayments: cbSplitPayments,
+    useSplitPayment: isSplitPayment,
+    deliveryInfo,
+    deliveryFee,
+    isReservation,
+  } = checkoutData;
+  const normalizedSplitPayments = normalizeSplitPaymentAmounts(cbSplitPayments);
+  const positiveSplitPayments = normalizedSplitPayments.filter(
+    (payment) => payment.amount > 0,
+  );
 
-    setStatus("Processing...");
-    setError("");
+  const finalDeliveryFee = deliveryFee !== undefined ? deliveryFee : calculateDeliveryFee();
 
-    try {
-      if (isSplitPayment) {
-        const totalAmount = positiveSplitPayments.reduce(
+  setStatus("Processing...");
+  setError("");
+
+  try {
+    if (isSplitPayment) {
+      const totalAmount = positiveSplitPayments.reduce(
+        (sum, payment) => sum + payment.amount,
+        0,
+      );
+      if (totalAmount <= 0 || totalAmount > cartTotal + finalDeliveryFee) {
+        setError("Split payment total must be between 0 and cart total.");
+        return;
+      }
+    }
+
+    const bundleParentNames = {};
+    cart.forEach((item, index) => {
+      if (item.isBundleParent) {
+        bundleParentNames[index] = item.name;
+      }
+    });
+
+    const saleItems = cart.filter(item => !item.isBundleParent);
+
+    const formattedItems = saleItems.map((item) => {
+      const isChild = item.parentItemIndex !== null &&
+                      item.parentItemIndex !== undefined &&
+                      !item.isBundleParent &&
+                      !item.isBundleChild;
+
+      const baseItem = {
+        type: item.type,
+        quantity: item.quantity,
+        unitPrice: isChild ? 0 : item.price,
+        discount: item.discount || 0,
+        parentItemIndex: isChild ? item.parentItemIndex : null,
+      };
+
+      if (isChild && item.originalPrice !== undefined) {
+        baseItem.originalPrice = item.originalPrice;
+      }
+
+      if (item.type === "service") {
+        let displayName = item.name || item.productName;
+        if (item.isBundleChild && bundleParentNames[item.parentItemIndex]) {
+          displayName = `${bundleParentNames[item.parentItemIndex]} – ${displayName}`;
+        }
+
+        return {
+          ...baseItem,
+          productId: item.variant,
+          productName: displayName,
+          sku: item.sku || "",
+          assignedUser: item.assignedUser || saleAssignedUser || null,
+          parentItemIndex: null,
+          laborCost: item.laborCost || 0,
+          productCost: 0,
+          commissionType: item.commissionType,
+          commissionValue: item.commissionValue,
+          commissionAmount: item.commissionAmount,
+          isBundleChild: item.isBundleChild || false,
+        };
+      } else if (item.type === "shopify") {
+        return {
+          ...baseItem,
+          shopifyVariantId: item.variant,
+          sku: item.sku || undefined,
+          productName: item.name,
+          assignedUser: null,
+        };
+      } else {
+        return {
+          ...baseItem,
+          productId: item.variant,
+          assignedUser: null,
+        };
+      }
+    });
+
+    // Build payload (unchanged)
+    const payload = {
+      locationId,
+      items: formattedItems,
+      notes: checkoutNotes || undefined,
+      idempotencyKey: buildSaleIdempotencyKey({
+        organizationId:
+          activeOrganization?._id || activeOrganization?.organizationId,
+        locationId,
+      }),
+      assignedUser: saleAssignedUser || undefined,
+      customerId: selectedCustomer?._id || undefined,
+      customerName: selectedCustomer?.fullname || undefined,
+      customerEmail: selectedCustomer?.email || undefined,
+      customerPhone: selectedCustomer?.phone || undefined,
+    };
+
+    if (deliveryEnabled) {
+      payload.requiresDelivery = true;
+      payload.deliveryInfo = {
+        requiresDelivery: true,
+        recipientName: deliveryInfo.recipientName,
+        recipientPhone: deliveryInfo.recipientPhone,
+        recipientEmail: deliveryInfo.recipientEmail,
+        deliveryAddress: deliveryInfo.deliveryAddress,
+        deliveryCategory: deliveryInfo.deliveryCategory,
+        deliveryOption: deliveryInfo.deliveryOption,
+        deliveryFee: finalDeliveryFee || 0,
+        notes: deliveryInfo.notes,
+      };
+    }
+
+    const paidAmount = isSplitPayment
+      ? positiveSplitPayments.reduce(
           (sum, payment) => sum + payment.amount,
           0,
-        );
-        if (totalAmount <= 0 || totalAmount > cartTotal + finalDeliveryFee) {
-          setError("Split payment total must be between 0 and cart total.");
-          return;
-        }
+        )
+      : cartTotal + (deliveryEnabled ? (finalDeliveryFee || 0) : 0);
+    const balanceDue = Math.max(0, cartTotal + (deliveryEnabled ? (finalDeliveryFee || 0) : 0) - paidAmount);
+    const isReservationSale = Boolean(isReservation || balanceDue > 0.01);
+
+    payload.paymentStatus = isReservationSale ? "partial" : "completed";
+    payload.tags = [
+      "pos",
+      ...(isSplitPayment ? ["split-payment"] : []),
+      ...(isReservationSale ? ["reservation", "partial-payment"] : []),
+    ];
+
+    if (isSplitPayment) {
+      payload.payments = positiveSplitPayments.map((payment) => ({
+        method: payment.method,
+        amount: payment.amount,
+        status: "completed",
+        paidAt: new Date().toISOString(),
+      }));
+    } else {
+      payload.paymentMethod = paymentMethod;
+    }
+
+    const res = await apiFetch("/sales", { method: "POST", body: payload });
+    const receiptData = res?.data || res;
+    const receiptNumber = receiptData?.receiptNumber || "RECEIPT-" + Date.now();
+
+    // ✅ Group bundle items for receipt (skip attached products)
+    const groupedReceiptItems = [];
+    const bundleGroups = {};
+
+    saleItems.forEach((item) => {
+      // Skip attached products (non‑service items with a parentItemIndex)
+      const isAttachedProduct = item.parentItemIndex !== null &&
+                               item.parentItemIndex !== undefined &&
+                               item.type !== "service" &&
+                               item.isBundleChild !== true;
+
+      if (isAttachedProduct) {
+        return; // don't show on receipt
       }
 
-      const bundleParentNames = {};
-      cart.forEach((item, index) => {
-        if (item.isBundleParent) {
-          bundleParentNames[index] = item.name;
-        }
-      });
-
-      const saleItems = cart.filter(item => !item.isBundleParent);
-
-      const formattedItems = saleItems.map((item) => {
-        const isChild = item.parentItemIndex !== null &&
-                        item.parentItemIndex !== undefined &&
-                        !item.isBundleParent &&
-                        !item.isBundleChild;
-
-        const baseItem = {
-          type: item.type,
-          quantity: item.quantity,
-          unitPrice: isChild ? 0 : item.price,
-          discount: item.discount || 0,
-          parentItemIndex: isChild ? item.parentItemIndex : null,
-        };
-
-        if (isChild && item.originalPrice !== undefined) {
-          baseItem.originalPrice = item.originalPrice;
-        }
-
-        if (item.type === "service") {
-          let displayName = item.name || item.productName;
-          if (item.isBundleChild && bundleParentNames[item.parentItemIndex]) {
-            displayName = `${bundleParentNames[item.parentItemIndex]} – ${displayName}`;
-          }
-
-          return {
-            ...baseItem,
-            productId: item.variant,
-            productName: displayName,
-            sku: item.sku || "",
-            assignedUser: item.assignedUser || saleAssignedUser || null,
-            parentItemIndex: null,
-            laborCost: item.laborCost || 0,
-            productCost: 0,
-            commissionType: item.commissionType,
-            commissionValue: item.commissionValue,
-            commissionAmount: item.commissionAmount,
-            isBundleChild: item.isBundleChild || false,
-          };
-        } else if (item.type === "shopify") {
-          return {
-            ...baseItem,
-            shopifyVariantId: item.variant,
-            sku: item.sku || undefined,
-            productName: item.name,
-            assignedUser: null,
-          };
-        } else {
-          return {
-            ...baseItem,
-            productId: item.variant,
-            assignedUser: null,
+      // If it's a bundle child and we have the parent name, group it
+      const parentName = bundleParentNames[item.parentItemIndex];
+      if (item.isBundleChild && parentName) {
+        if (!bundleGroups[parentName]) {
+          bundleGroups[parentName] = {
+            name: parentName,
+            quantity: 1,
+            price: 0,
+            type: "bundle",
+            discount: 0,
           };
         }
-      });
-
-      const payload = {
-        locationId,
-        items: formattedItems,
-        notes: checkoutNotes || undefined,
-        idempotencyKey: buildSaleIdempotencyKey({
-          organizationId:
-            activeOrganization?._id || activeOrganization?.organizationId,
-          locationId,
-        }),
-        assignedUser: saleAssignedUser || undefined,
-        customerId: selectedCustomer?._id || undefined,
-        customerName: selectedCustomer?.fullname || undefined,
-        customerEmail: selectedCustomer?.email || undefined,
-        customerPhone: selectedCustomer?.phone || undefined,
-      };
-
-      if (deliveryEnabled) {
-        payload.requiresDelivery = true;
-        payload.deliveryInfo = {
-          requiresDelivery: true,
-          recipientName: deliveryInfo.recipientName,
-          recipientPhone: deliveryInfo.recipientPhone,
-          recipientEmail: deliveryInfo.recipientEmail,
-          deliveryAddress: deliveryInfo.deliveryAddress,
-          deliveryCategory: deliveryInfo.deliveryCategory,
-          deliveryOption: deliveryInfo.deliveryOption,
-          deliveryFee: finalDeliveryFee || 0,
-          notes: deliveryInfo.notes,
-        };
-      }
-
-      const paidAmount = isSplitPayment
-        ? positiveSplitPayments.reduce(
-            (sum, payment) => sum + payment.amount,
-            0,
-          )
-        : cartTotal + (deliveryEnabled ? (finalDeliveryFee || 0) : 0);
-      const balanceDue = Math.max(0, cartTotal + (deliveryEnabled ? (finalDeliveryFee || 0) : 0) - paidAmount);
-      const isReservationSale = Boolean(isReservation || balanceDue > 0.01);
-
-      payload.paymentStatus = isReservationSale ? "partial" : "completed";
-      payload.tags = [
-        "pos",
-        ...(isSplitPayment ? ["split-payment"] : []),
-        ...(isReservationSale ? ["reservation", "partial-payment"] : []),
-      ];
-
-      if (isSplitPayment) {
-        payload.payments = positiveSplitPayments.map((payment) => ({
-          method: payment.method,
-          amount: payment.amount,
-          status: "completed",
-          paidAt: new Date().toISOString(),
-        }));
+        bundleGroups[parentName].price += item.price * item.quantity;
+        bundleGroups[parentName].discount += item.discount || 0;
       } else {
-        payload.paymentMethod = paymentMethod;
-      }
-
-      const res = await apiFetch("/sales", { method: "POST", body: payload });
-      const receiptData = res?.data || res;
-      const receiptNumber = receiptData?.receiptNumber || "RECEIPT-" + Date.now();
-
-      // ✅ Group bundle items for receipt
-      const groupedReceiptItems = [];
-      const bundleGroups = {};
-
-      saleItems.forEach((item) => {
-        const parentName = bundleParentNames[item.parentItemIndex];
-        if (item.isBundleChild && parentName) {
-          if (!bundleGroups[parentName]) {
-            bundleGroups[parentName] = {
-              name: parentName,
-              quantity: 1,
-              price: 0,
-              type: "bundle",
-              discount: 0,
-            };
-          }
-          bundleGroups[parentName].price += item.price * item.quantity;
-          bundleGroups[parentName].discount += item.discount || 0;
-        } else {
-          groupedReceiptItems.push({
-            name: item.name,
-            quantity: item.quantity,
-            price: item.price,
-            type: item.type,
-            discount: item.discount || 0,
-          });
-        }
-      });
-
-      Object.values(bundleGroups).forEach((group) => {
+        // Regular item (non‑bundle child, non‑attached)
         groupedReceiptItems.push({
-          name: group.name,
-          quantity: 1,
-          price: group.price,
-          type: "bundle",
-          discount: group.discount,
+          name: item.name,
+          quantity: item.quantity,
+          price: item.price,
+          type: item.type,
+          discount: item.discount || 0,
         });
+      }
+    });
+
+    // Add grouped bundles to the receipt items
+    Object.values(bundleGroups).forEach((group) => {
+      groupedReceiptItems.push({
+        name: group.name,
+        quantity: 1,
+        price: group.price,
+        type: "bundle",
+        discount: group.discount,
       });
+    });
 
-      const receiptInfo = {
-        receiptNumber,
-        items: groupedReceiptItems,
-        payments: isSplitPayment
-          ? positiveSplitPayments
-          : [{ method: paymentMethod, amount: cartTotal + (deliveryEnabled ? (finalDeliveryFee || 0) : 0) }],
-        subtotal: cartTotal,
-        deliveryFee: deliveryEnabled ? (finalDeliveryFee || 0) : 0,
-        deliveryInfo: deliveryEnabled ? deliveryInfo : undefined,
-        deliveryFeeId: receiptData?.deliveryFeeId,
-        trackingNumber: receiptData?.trackingNumber,
-        totalDiscount: cartLineItemDiscounts + transactionDiscount,
-        discountReason: discountReason || undefined,
-        notes: checkoutNotes,
-        amountPaid: paidAmount,
-        balanceDue,
-        isReservation: isReservationSale,
-        paymentStatus: receiptData?.paymentStatus || payload.paymentStatus,
-        tags: Array.isArray(receiptData?.tags) ? receiptData.tags : payload.tags,
-        timestamp: new Date().toISOString(),
-      };
+    const receiptInfo = {
+      receiptNumber,
+      items: groupedReceiptItems,
+      payments: isSplitPayment
+        ? positiveSplitPayments
+        : [{ method: paymentMethod, amount: cartTotal + (deliveryEnabled ? (finalDeliveryFee || 0) : 0) }],
+      subtotal: cartTotal,
+      deliveryFee: deliveryEnabled ? (finalDeliveryFee || 0) : 0,
+      deliveryInfo: deliveryEnabled ? deliveryInfo : undefined,
+      deliveryFeeId: receiptData?.deliveryFeeId,
+      trackingNumber: receiptData?.trackingNumber,
+      totalDiscount: cartLineItemDiscounts + transactionDiscount,
+      discountReason: discountReason || undefined,
+      notes: checkoutNotes,
+      amountPaid: paidAmount,
+      balanceDue,
+      isReservation: isReservationSale,
+      paymentStatus: receiptData?.paymentStatus || payload.paymentStatus,
+      tags: Array.isArray(receiptData?.tags) ? receiptData.tags : payload.tags,
+      timestamp: new Date().toISOString(),
+    };
 
-      setReceipt(receiptInfo);
-      setShowReceipt(true);
-      setStatus(
-        isReservationSale
-          ? `✓ Reservation created: ${receiptNumber}`
-          : `✓ Sale completed: ${receiptNumber}`,
-      );
-      clearCart();
-      setShowCompleteCheckoutModal(false);
-      scheduleProductRefresh();
-      setTimeout(() => setStatus(""), 3000);
+    setReceipt(receiptInfo);
+    setShowReceipt(true);
+    setStatus(
+      isReservationSale
+        ? `✓ Reservation created: ${receiptNumber}`
+        : `✓ Sale completed: ${receiptNumber}`,
+    );
+    clearCart();
+    setShowCompleteCheckoutModal(false);
+    scheduleProductRefresh();
+    setTimeout(() => setStatus(""), 3000);
     } catch (err) {
       const errCode = err?.details?.code || err?.code || err?.response?.data?.code;
       if (err.status === 403 && errCode === "LOCATION_ACCESS_DENIED") {
@@ -3651,8 +3700,12 @@ export default function PosPage() {
                   className="w-full rounded border border-gray-300 px-3 py-2 text-sm"
                 >
                   {cart.map((item, idx) => {
+                    // Include single services AND bundle parents
                     if (item.type === "service" && !item.isBundleParent && !item.isBundleChild) {
                       return <option key={idx} value={idx}>{item.name}</option>;
+                    }
+                    if (item.isBundleParent) {
+                      return <option key={idx} value={idx}>{item.name} (Bundle)</option>;
                     }
                     return null;
                   })}
