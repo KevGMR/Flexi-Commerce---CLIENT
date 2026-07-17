@@ -24,14 +24,9 @@ import {
   hasPartialPaymentSignal,
   toNonNegativeAmount,
 } from "@/lib/receipt/receiptPrintTemplate";
-
-// NEW: Components
 import SearchOverlay from "@/components/pos/SearchOverlay";
 import CustomerSelector from "@/components/pos/CustomerSelector";
 import DeliveryForm from "@/components/pos/DeliveryForm";
-
-// Mock product catalog - replace with real product fetch
-const mockProducts = [];
 
 const paymentMethods = [
   { value: "cash", label: "Cash", icon: "💵" },
@@ -66,7 +61,7 @@ const PRODUCT_TABS = new Set(["flexi", "services", "shopify"]);
 const normalizeProductTab = (value) =>
   PRODUCT_TABS.has(value) ? value : DEFAULT_PRODUCT_TAB;
 
-// Helper to compute effective commission (based on laborCost)
+// Helper to compute effective commission
 const getEffectiveCommission = (product, user) => {
   const defaultType = product?.commissionType || "percentage";
   const defaultValue = Number(product?.commissionValue) || 0;
@@ -95,14 +90,43 @@ const getEffectiveCommission = (product, user) => {
   };
 };
 
-// Compute commission amount based on laborCost
-const computeCommissionAmount = (laborCost, commissionType, commissionValue) => {
-  if (commissionType === "percentage") {
-    return (laborCost * commissionValue) / 100;
-  } else {
-    // fixed amount
-    return Math.min(commissionValue, laborCost);
+// Compute commission amount
+const computeCommissionAmount = (laborCost, commissionType, commissionValue, productCost = 0, includeProduct = false) => {
+  let base = laborCost;
+  if (includeProduct) {
+    base += productCost;
   }
+  if (commissionType === "percentage") {
+    return (base * commissionValue) / 100;
+  } else {
+    return Math.min(commissionValue, base);
+  }
+};
+
+// Recalculate commissions for bundle children based on net bundle amount
+const recalculateBundleCommissions = (children, bundleTotal) => {
+  const beforeCommissionTotal = children
+    .filter((ch) => ch.commissionDeductionTiming === "before_commission")
+    .reduce((sum, ch) => sum + ch.price, 0);
+  const netAmount = Math.max(0, bundleTotal - beforeCommissionTotal);
+
+  return children.map((ch) => {
+    if (ch.commissionValue === 0 || ch.commissionType === null) {
+      return { ...ch, commissionAmount: 0 };
+    }
+    let commissionAmount = 0;
+    if (ch.commissionType === "percentage") {
+      commissionAmount = (netAmount * ch.commissionValue) / 100;
+    } else {
+      commissionAmount = ch.commissionValue;
+    }
+    return {
+      ...ch,
+      commissionAmount: Math.min(commissionAmount, netAmount),
+      commissionIsOverride: ch.commissionIsOverride || false,
+      commissionDisplay: ch.commissionDisplay || (ch.commissionType === "percentage" ? `${ch.commissionValue}%` : `$${ch.commissionValue.toFixed(2)}`),
+    };
+  });
 };
 
 export default function PosPage() {
@@ -116,6 +140,7 @@ export default function PosPage() {
     locationsMeta,
     selectedLocationId,
     setSelectedLocationId,
+    user,
   } = useSessionStore();
   const {
     isOnline,
@@ -172,11 +197,9 @@ export default function PosPage() {
   const [previousDayShiftError, setPreviousDayShiftError] = useState("");
   const [showPreviousDayShiftModal, setShowPreviousDayShiftModal] = useState(false);
 
-  // Location settings
   const [locationSettings, setLocationSettings] = useState(null);
   const [enableProductCost, setEnableProductCost] = useState(false);
 
-  // State for service attachment, user assignment, commissions
   const [attachMode, setAttachMode] = useState(false);
   const [attachingServiceIndex, setAttachingServiceIndex] = useState(null);
   const [users, setUsers] = useState([]);
@@ -184,13 +207,11 @@ export default function PosPage() {
   const [showAttachModal, setShowAttachModal] = useState(false);
   const [pendingServiceProduct, setPendingServiceProduct] = useState(null);
 
-  // Attach with Quantity modal
   const [showAttachQuantityModal, setShowAttachQuantityModal] = useState(false);
   const [attachQuantityProductIndex, setAttachQuantityProductIndex] = useState(null);
   const [attachQuantityValue, setAttachQuantityValue] = useState(1);
   const [attachModalSelectedServiceIndex, setAttachModalSelectedServiceIndex] = useState(null);
 
-  // Return mode state
   const [returnMode, setReturnMode] = useState(false);
   const [showReturnLookup, setShowReturnLookup] = useState(false);
   const [receiptSearchQuery, setReceiptSearchQuery] = useState("");
@@ -200,7 +221,6 @@ export default function PosPage() {
   const [lookupError, setLookupError] = useState("");
   const [processingReturn, setProcessingReturn] = useState(false);
 
-  // Exchange mode state
   const [exchangeMode, setExchangeMode] = useState(false);
   const [exchangeCart, setExchangeCart] = useState([]);
   const [exchangeSelectedPaymentMethod, setExchangeSelectedPaymentMethod] =
@@ -211,12 +231,10 @@ export default function PosPage() {
     { method: "cash", amount: 0 },
   ]);
 
-  // Checkout modal state
   const [showCompleteCheckoutModal, setShowCompleteCheckoutModal] =
     useState(false);
   const [pendingCheckoutData, setPendingCheckoutData] = useState(null);
 
-  // Delivery modal state
   const [showDeliveryModal, setShowDeliveryModal] = useState(false);
 
   const [exchangeEditingPriceIndex, setExchangeEditingPriceIndex] =
@@ -225,7 +243,6 @@ export default function PosPage() {
     useState("");
   const [processingExchange, setProcessingExchange] = useState(false);
 
-  // Discount state
   const [editingDiscountIndex, setEditingDiscountIndex] = useState(null);
   const [discountType, setDiscountType] = useState("fixed");
   const [discountValue, setDiscountValue] = useState("");
@@ -237,10 +254,8 @@ export default function PosPage() {
   const [exchangeDiscountType, setExchangeDiscountType] = useState("fixed");
   const [exchangeDiscountValue, setExchangeDiscountValue] = useState("");
 
-  // Customer state
   const [selectedCustomer, setSelectedCustomer] = useState(null);
 
-  // Delivery state
   const [deliveryEnabled, setDeliveryEnabled] = useState(false);
   const [deliveryInfo, setDeliveryInfo] = useState({
     recipientName: "",
@@ -259,7 +274,6 @@ export default function PosPage() {
     notes: "",
   });
 
-  // Update customer modal state
   const [updatingCustomer, setUpdatingCustomer] = useState(false);
   const [showUpdateCustomerModal, setShowUpdateCustomerModal] = useState(false);
   const [customerUpdateData, setCustomerUpdateData] = useState({
@@ -275,16 +289,13 @@ export default function PosPage() {
     },
   });
 
-  // ====== HELD SALES STATE ======
   const [heldSales, setHeldSales] = useState([]);
   const [showHeldSalesModal, setShowHeldSalesModal] = useState(false);
   const [loadingHeldSales, setLoadingHeldSales] = useState(false);
-  const [heldSalesSearchQuery, setHeldSalesSearchQuery] = useState(""); // NEW
-  // =============================
+  const [heldSalesSearchQuery, setHeldSalesSearchQuery] = useState("");
 
   const cartContainerRef = useRef(null);
 
-  // Helper to calculate delivery fee from current delivery info
   const calculateDeliveryFee = useCallback(() => {
     if (!deliveryEnabled || !deliveryInfo.deliveryCategory) return 0;
     
@@ -309,7 +320,7 @@ export default function PosPage() {
     return match.name || match.shopifyLocationName || id;
   };
 
-  // Load locations from API on mount
+  // Load locations
   useEffect(() => {
     const loadLocations = async () => {
       try {
@@ -340,7 +351,6 @@ export default function PosPage() {
     }
   }, [activeOrganization?.id, accessToken, locations]);
 
-  // Initialize location on mount
   useEffect(() => {
     if (locations !== undefined) {
       setLocationsLoading(false);
@@ -371,7 +381,6 @@ export default function PosPage() {
     }
   }, [locations, selectedLocationId]);
 
-  // Validate selected location belongs to organization
   useEffect(() => {
     if (!locationId || !locations || locations.length === 0) return;
 
@@ -387,7 +396,6 @@ export default function PosPage() {
     }
   }, [locationId, locations]);
 
-  // Fetch location settings when locationId changes
   useEffect(() => {
     if (!locationId) return;
     const fetchLocationSettings = async () => {
@@ -406,7 +414,6 @@ export default function PosPage() {
     fetchLocationSettings();
   }, [locationId]);
 
-  // Click outside overlay to close
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (showSearchOverlay && cartContainerRef.current && !cartContainerRef.current.contains(event.target)) {
@@ -417,7 +424,6 @@ export default function PosPage() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [showSearchOverlay]);
 
-  // Escape key closes overlay
   useEffect(() => {
     const handleEscape = (e) => {
       if (e.key === "Escape" && showSearchOverlay) {
@@ -428,7 +434,6 @@ export default function PosPage() {
     return () => document.removeEventListener("keydown", handleEscape);
   }, [showSearchOverlay]);
 
-  // Auto-fill delivery info from selected customer
   useEffect(() => {
     if (!selectedCustomer) return;
 
@@ -486,7 +491,6 @@ export default function PosPage() {
     }
   }, [selectedCustomer, deliveryEnabled]);
 
-
   const checkPreviousDayOpenShift = useCallback(async (targetLocationId) => {
     if (!targetLocationId) return;
 
@@ -521,13 +525,11 @@ export default function PosPage() {
     checkPreviousDayOpenShift(locationId);
   }, [locationId, locations, checkPreviousDayOpenShift]);
 
-  // Load pending sales on mount and when count changes
   useEffect(() => {
     const loadPendingSales = async () => {
       try {
         const sales = await getPendingSales();
         setPendingSales(sales || []);
-        // Also load held sales separately (status === "held")
         const held = sales.filter(s => s.status === "held");
         setHeldSales(held);
       } catch (err) {
@@ -537,7 +539,6 @@ export default function PosPage() {
     loadPendingSales();
   }, [pendingSalesCount]);
 
-  // Auto-retry pending sales when coming back online
   useEffect(() => {
     if (isOnline && pendingSalesCount > 0 && !isReconnectingShopify) {
       const retryWithDelay = async () => {
@@ -562,7 +563,6 @@ export default function PosPage() {
     retrySyncPendingSales,
   ]);
 
-  // Load Shopify connection status
   const loadShopifyConnection = async () => {
     try {
       const data = await apiFetch("/shopify/connection");
@@ -592,7 +592,6 @@ export default function PosPage() {
           commissionValue: p.commissionValue || 0,
           name: p.name,
           laborCost: p.laborCost || 0,
-          productCost: p.productCost || 0,
         };
       });
       setServiceProductMap(productMap);
@@ -662,7 +661,6 @@ export default function PosPage() {
     }
   }, [shopifyConnection?.status]);
 
-  // Load Shopify data on mount and when organization changes
   useEffect(() => {
     loadShopifyConnection();
     loadServiceProductsData();
@@ -689,14 +687,12 @@ export default function PosPage() {
     });
   }, [activeOrganization, loadShopifyProductsData, loadServiceProductsData]);
 
-  // Load products when connection/location context is active
   useEffect(() => {
     if (shopifyConnection?.status === "active" && locationId) {
       loadShopifyProductsData();
     }
   }, [shopifyConnection?.status, locationId, loadShopifyProductsData]);
 
-  // Fetch users for assignment
   useEffect(() => {
     const loadUsers = async () => {
       try {
@@ -727,29 +723,42 @@ export default function PosPage() {
     loadUsers();
   }, [activeOrganization]);
 
-  // Auto‑fill service assignedUser when saleAssignedUser is set
+  // Auto‑assign cashier
+  useEffect(() => {
+    if (user?._id && users.length > 0 && !saleAssignedUser) {
+      const currentUser = users.find(u => u._id === user._id);
+      if (currentUser) {
+        setSaleAssignedUser(user._id);
+        console.log("[POS] Auto‑assigned cashier as sale user:", currentUser.fullname || user._id);
+      }
+    }
+  }, [user, users, saleAssignedUser]);
+
+  // Auto‑fill service assignedUser when saleAssignedUser is set (only for single services, not bundle children)
   useEffect(() => {
     if (!saleAssignedUser) return;
     let updated = false;
     const newCart = cart.map((item) => {
-      if (item.type === "service" && !item.assignedUser) {
+      if (item.type === "service" && !item.assignedUser && !item.isBundleChild) {
         updated = true;
         const productDefaults = serviceProductMap[item.variant];
         if (productDefaults) {
-          const user = users.find((u) => u._id === saleAssignedUser);
+          const userObj = users.find((u) => u._id === saleAssignedUser);
           const commission = getEffectiveCommission(
             {
               _id: item.variant,
               commissionType: productDefaults.commissionType,
               commissionValue: productDefaults.commissionValue,
             },
-            user
+            userObj
           );
-          // Compute commission amount based on laborCost
+          const includeProduct = false;
           const commissionAmount = computeCommissionAmount(
             item.laborCost || 0,
             commission.type,
-            commission.value
+            commission.value,
+            0,
+            includeProduct
           );
           return {
             ...item,
@@ -770,9 +779,7 @@ export default function PosPage() {
     }
   }, [saleAssignedUser, serviceProductMap, users]);
 
-  // ================================
-  // HELD SALES FUNCTIONS
-  // ================================
+  // ====== HELD SALES FUNCTIONS ======
   const loadHeldSales = async () => {
     setLoadingHeldSales(true);
     try {
@@ -820,7 +827,6 @@ export default function PosPage() {
   };
 
   const resumeHeldSale = async (draft) => {
-    // Load the draft into the cart
     setCart(draft.cart || []);
     setNotes(draft.notes || "");
     setSelectedCustomer(draft.selectedCustomer || null);
@@ -846,15 +852,12 @@ export default function PosPage() {
     setSaleAssignedUser(draft.saleAssignedUser || null);
     setShowHeldSalesModal(false);
 
-    // Delete the held draft from IndexedDB
     try {
       await deletePendingSale(draft.idempotencyKey);
-      // Refresh the held sales list
       await loadHeldSales();
       setStatus("Held sale loaded and removed from list.");
     } catch (err) {
       console.error("Failed to delete held sale after resume:", err);
-      // Still show the status even if delete fails
       setStatus("Held sale loaded, but could not be removed. You may need to delete it manually.");
     }
   };
@@ -869,12 +872,14 @@ export default function PosPage() {
       setError("Failed to delete: " + err.message);
     }
   };
-  // ================================
 
-  // Cart operations
+  // ====== CART OPERATIONS ======
+  const isBundleParent = (item) => item.isBundleParent === true;
+  const isBundleChild = (item) => item.isBundleChild === true;
+
   const upsertCartItem = (targetCart, setTargetCart, cartItem) => {
     const existingIndex = targetCart.findIndex(
-      (item) => item.variant === cartItem.variant,
+      (item) => item.variant === cartItem.variant && item.isBundleChild === cartItem.isBundleChild && item.parentItemIndex === cartItem.parentItemIndex
     );
     if (existingIndex >= 0) {
       const updated = [...targetCart];
@@ -882,11 +887,108 @@ export default function PosPage() {
       setTargetCart(updated);
       return;
     }
-
     setTargetCart([...targetCart, cartItem]);
   };
 
+  // Add a bundle to cart – all children start with their own laborCost
+  const addBundleToCart = (product) => {
+    const parentIndex = cart.length;
+    const bundleId = product._id;
+    const bundleTotal = product.price;
+
+    const aggregatorIndex = product.bundleSubServices.findIndex((sub) => sub.isAggregator === true);
+    if (aggregatorIndex === -1) {
+      console.warn("No aggregator defined for bundle, defaulting to first sub‑service");
+      product.bundleSubServices[0].isAggregator = true;
+    }
+
+    const parentItem = {
+      type: "bundle",
+      variant: bundleId,
+      name: product.name,
+      price: bundleTotal,
+      quantity: 1,
+      discount: 0,
+      parentItemIndex: null,
+      isBundleParent: true,
+      assignedUser: null,
+      commissionType: null,
+      commissionValue: null,
+      commissionDeductionTiming: null,
+      laborCost: 0,
+      productCost: 0,
+    };
+
+    const children = product.bundleSubServices.map((sub, index) => {
+      const isAggregator = sub.isAggregator === true;
+      const price = sub.laborCost; // ALL children start with their own laborCost
+
+      let assignedUserId = sub.defaultAssignedUser || null;
+      if (!assignedUserId && saleAssignedUser) {
+        assignedUserId = saleAssignedUser;
+      }
+
+      let effectiveCommissionType = sub.commissionType;
+      let effectiveCommissionValue = sub.commissionValue;
+      let isOverride = false;
+      let overrideDisplay = null;
+
+      if (assignedUserId) {
+        const user = users.find(u => u._id === assignedUserId);
+        if (user && user.commissionOverrides) {
+          const overrideKey = `${bundleId}:${index}`;
+          const override = user.commissionOverrides.find(
+            ov => ov.serviceId === overrideKey
+          );
+          if (override) {
+            effectiveCommissionType = override.commissionType;
+            effectiveCommissionValue = override.commissionValue;
+            isOverride = true;
+            overrideDisplay = effectiveCommissionType === "percentage"
+              ? `${effectiveCommissionValue}%`
+              : `$${effectiveCommissionValue.toFixed(2)}`;
+          }
+        }
+      }
+
+      return {
+        type: "service",
+        variant: bundleId,
+        name: sub.name,
+        price: price,
+        originalPrice: null,
+        quantity: 1,
+        discount: 0,
+        parentItemIndex: parentIndex,
+        isBundleChild: true,
+        isAggregator: isAggregator,
+        assignedUser: assignedUserId,
+        commissionType: effectiveCommissionType,
+        commissionValue: effectiveCommissionValue,
+        commissionDeductionTiming: sub.commissionDeductionTiming,
+        laborCost: sub.laborCost,
+        productCost: 0,
+        commissionAmount: 0,
+        commissionIsOverride: isOverride,
+        commissionDisplay: isOverride ? overrideDisplay : (sub.commissionType === "percentage" ? `${sub.commissionValue}%` : `$${sub.commissionValue.toFixed(2)}`),
+        defaultCommissionType: sub.commissionType,
+        defaultCommissionValue: sub.commissionValue,
+        subServiceIndex: index,
+      };
+    });
+
+    const updatedChildren = recalculateBundleCommissions(children, bundleTotal);
+    const newCart = [...cart, parentItem, ...updatedChildren];
+    setCart(newCart);
+    handleCloseSearch();
+  };
+
   const addToCart = (product) => {
+    if (product.serviceKind === "bundle" && product.bundleSubServices && product.bundleSubServices.length > 0) {
+      addBundleToCart(product);
+      return;
+    }
+
     let parentItemIndex = null;
     let isChild = false;
     if (attachMode && attachingServiceIndex !== null) {
@@ -901,13 +1003,11 @@ export default function PosPage() {
 
     const isService = product.type === "service";
     let laborCost = 0;
-    let productCost = 0;
     let price = product.price;
     if (isService) {
       const prodDefaults = serviceProductMap[product.id || product._id] || {};
       laborCost = Number(prodDefaults.laborCost) || 0;
-      productCost = Number(prodDefaults.productCost) || 0;
-      price = laborCost + productCost;
+      price = laborCost;
     }
 
     const newItem = {
@@ -932,7 +1032,9 @@ export default function PosPage() {
       defaultCommissionType: null,
       defaultCommissionValue: null,
       laborCost: isService ? laborCost : 0,
-      productCost: isService ? productCost : 0,
+      productCost: 0,
+      isBundleChild: false,
+      isBundleParent: false,
     };
 
     if (isService) {
@@ -955,10 +1057,13 @@ export default function PosPage() {
         assignedUser
       );
 
+      const includeProduct = false;
       const commissionAmount = computeCommissionAmount(
         newItem.laborCost,
         commission.type,
-        commission.value
+        commission.value,
+        0,
+        includeProduct
       );
 
       newItem.commissionType = commission.type;
@@ -981,26 +1086,19 @@ export default function PosPage() {
         setAttachingServiceIndex(null);
       }
       upsertCartItem(cart, setCart, newItem);
+      handleCloseSearch();
     }
   };
 
-  // Helper to update service costs in cart
   const updateServiceCosts = (index, field, value) => {
     const newCart = [...cart];
     const item = newCart[index];
-    if (item.type !== "service") return;
+    if (item.type !== "service" || item.isBundleChild) return;
     const numVal = parseFloat(value) || 0;
     if (field === "laborCost") {
       item.laborCost = numVal;
-    } else if (field === "productCost") {
-      item.productCost = numVal;
     }
-    if (enableProductCost) {
-      item.price = item.laborCost + item.productCost;
-    } else {
-      item.price = item.laborCost;
-      item.productCost = 0;
-    }
+    item.price = item.laborCost;
     const commission = getEffectiveCommission(
       {
         _id: item.variant,
@@ -1009,6 +1107,7 @@ export default function PosPage() {
       },
       users.find(u => u._id === item.assignedUser)
     );
+    const includeProduct = false;
     item.commissionType = commission.type;
     item.commissionValue = commission.value;
     item.commissionIsOverride = commission.isOverride;
@@ -1016,9 +1115,83 @@ export default function PosPage() {
     item.commissionAmount = computeCommissionAmount(
       item.laborCost,
       commission.type,
-      commission.value
+      commission.value,
+      0,
+      includeProduct
     );
     setCart(newCart);
+  };
+
+  const updateBundleChildCosts = (index, field, value) => {
+    const newCart = [...cart];
+    const child = newCart[index];
+    if (!child.isBundleChild) return;
+    const numVal = parseFloat(value) || 0;
+    if (field === "laborCost") {
+      child.laborCost = numVal;
+      if (!child.isAggregator) {
+        child.price = child.laborCost;
+      }
+    }
+    const parentIdx = child.parentItemIndex;
+    if (parentIdx !== null && parentIdx !== undefined) {
+      const parent = newCart[parentIdx];
+      if (parent && parent.isBundleParent) {
+        const bundleTotal = parent.price;
+        const children = newCart.filter(
+          (it) => it.isBundleChild && it.parentItemIndex === parentIdx
+        );
+        const updatedChildren = recalculateBundleCommissions(children, bundleTotal);
+        const childIndices = newCart
+          .map((it, idx) => (it.isBundleChild && it.parentItemIndex === parentIdx ? idx : -1))
+          .filter(idx => idx !== -1);
+        for (let i = 0; i < childIndices.length; i++) {
+          newCart[childIndices[i]] = updatedChildren[i];
+        }
+      }
+    }
+    setCart(newCart);
+  };
+
+  const updateBundleParentQuantity = (index, newQty) => {
+    if (newQty <= 0) {
+      removeFromCart(index);
+      return;
+    }
+    const newCart = [...cart];
+    const parent = newCart[index];
+    if (!parent.isBundleParent) return;
+    parent.quantity = newQty;
+    const childrenIndices = newCart
+      .map((item, idx) => (item.parentItemIndex === index && item.isBundleChild ? idx : -1))
+      .filter(idx => idx !== -1);
+    for (const idx of childrenIndices) {
+      newCart[idx].quantity = newQty;
+    }
+    const bundleTotal = parent.price;
+    const children = newCart.filter(
+      (it) => it.isBundleChild && it.parentItemIndex === index
+    );
+    const updatedChildren = recalculateBundleCommissions(children, bundleTotal);
+    for (let i = 0; i < childrenIndices.length; i++) {
+      newCart[childrenIndices[i]] = updatedChildren[i];
+    }
+    setCart(newCart);
+  };
+
+  // ====== ATTACH FUNCTIONS (added) ======
+  const openAttachQuantityModal = (productIndex) => {
+    const serviceIndexes = cart
+      .map((item, idx) => (item.type === "service" && !item.isBundleParent && !item.isBundleChild ? idx : -1))
+      .filter(idx => idx !== -1);
+    if (serviceIndexes.length === 0) {
+      setError("No services in cart to attach to.");
+      return;
+    }
+    setAttachQuantityProductIndex(productIndex);
+    setAttachQuantityValue(cart[productIndex].quantity);
+    setAttachModalSelectedServiceIndex(serviceIndexes[0]);
+    setShowAttachQuantityModal(true);
   };
 
   const splitAndAttachItem = (productIndex, serviceIndex, attachQty) => {
@@ -1054,20 +1227,6 @@ export default function PosPage() {
     setShowAttachQuantityModal(false);
   };
 
-  const openAttachQuantityModal = (productIndex) => {
-    const serviceIndexes = cart
-      .map((item, idx) => (item.type === "service" ? idx : -1))
-      .filter(idx => idx !== -1);
-    if (serviceIndexes.length === 0) {
-      setError("No services in cart to attach to.");
-      return;
-    }
-    setAttachQuantityProductIndex(productIndex);
-    setAttachQuantityValue(cart[productIndex].quantity);
-    setAttachModalSelectedServiceIndex(serviceIndexes[0]);
-    setShowAttachQuantityModal(true);
-  };
-
   const detachFromService = (itemIndex) => {
     const updatedCart = [...cart];
     const item = updatedCart[itemIndex];
@@ -1078,9 +1237,14 @@ export default function PosPage() {
     setCart(updatedCart);
   };
 
-  const startAttach = (index) => {
-    setAttachMode(true);
-    setAttachingServiceIndex(index);
+  const toggleAttachMode = (index) => {
+    if (attachMode && attachingServiceIndex === index) {
+      setAttachMode(false);
+      setAttachingServiceIndex(null);
+    } else {
+      setAttachMode(true);
+      setAttachingServiceIndex(index);
+    }
   };
 
   const stopAttach = () => {
@@ -1088,12 +1252,86 @@ export default function PosPage() {
     setAttachingServiceIndex(null);
   };
 
-  const toggleAttachMode = (index) => {
+  // Remove from cart (handles bundle parent/children, aggregator, and price transfer)
+  const removeFromCart = (index) => {
     if (attachMode && attachingServiceIndex === index) {
-      stopAttach();
-    } else {
-      startAttach(index);
+      setAttachMode(false);
+      setAttachingServiceIndex(null);
     }
+
+    const newCart = [...cart];
+    const item = newCart[index];
+
+    if (item.isBundleParent) {
+      const toRemove = newCart
+        .map((it, idx) => (it.parentItemIndex === index || idx === index ? idx : -1))
+        .filter(idx => idx !== -1);
+      toRemove.sort((a, b) => b - a);
+      for (const idx of toRemove) {
+        newCart.splice(idx, 1);
+      }
+      setCart(newCart);
+      return;
+    }
+
+    if (item.isBundleChild) {
+      const parentIdx = item.parentItemIndex;
+      const parent = newCart[parentIdx];
+      if (!parent) {
+        newCart.splice(index, 1);
+        setCart(newCart);
+        return;
+      }
+
+      if (item.isAggregator) {
+        const toRemove = newCart
+          .map((it, idx) => (it.parentItemIndex === parentIdx || idx === parentIdx ? idx : -1))
+          .filter(idx => idx !== -1);
+        toRemove.sort((a, b) => b - a);
+        for (const idx of toRemove) {
+          newCart.splice(idx, 1);
+        }
+        setCart(newCart);
+        return;
+      }
+
+      const removedPrice = item.price;
+      newCart.splice(index, 1);
+
+      const aggregatorIndex = newCart.findIndex(
+        (it) => it.isBundleChild && it.parentItemIndex === parentIdx && it.isAggregator === true
+      );
+      if (aggregatorIndex !== -1) {
+        newCart[aggregatorIndex].price += removedPrice;
+      }
+
+      const bundleTotal = parent.price;
+      const remainingChildren = newCart.filter(
+        (it) => it.isBundleChild && it.parentItemIndex === parentIdx
+      );
+      const updatedChildren = recalculateBundleCommissions(remainingChildren, bundleTotal);
+
+      const childIndices = newCart
+        .map((it, idx) => (it.isBundleChild && it.parentItemIndex === parentIdx ? idx : -1))
+        .filter(idx => idx !== -1);
+      for (let i = 0; i < childIndices.length; i++) {
+        newCart[childIndices[i]] = updatedChildren[i];
+      }
+
+      if (updatedChildren.length === 0) {
+        const parentIndexToRemove = newCart.findIndex(
+          (it) => it.isBundleParent && it.variant === parent.variant && it.parentItemIndex === null
+        );
+        if (parentIndexToRemove !== -1) {
+          newCart.splice(parentIndexToRemove, 1);
+        }
+      }
+
+      setCart(newCart);
+      return;
+    }
+
+    setCart(cart.filter((_, i) => i !== index));
   };
 
   const updateQuantity = (index, newQty) => {
@@ -1101,17 +1339,27 @@ export default function PosPage() {
       removeFromCart(index);
     } else {
       const newCart = [...cart];
-      newCart[index].quantity = newQty;
-      setCart(newCart);
+      const item = newCart[index];
+      if (item.isBundleParent) {
+        updateBundleParentQuantity(index, newQty);
+      } else if (item.isBundleChild) {
+        // ignore direct changes to child quantity
+      } else {
+        newCart[index].quantity = newQty;
+        setCart(newCart);
+      }
     }
   };
 
   const updatePrice = (index, newPrice) => {
     const newCart = [...cart];
+    const item = newCart[index];
+    if (item.isBundleParent || item.isBundleChild) return;
     newCart[index].price = parseFloat(newPrice) || 0;
     setCart(newCart);
   };
 
+  // Discount functions (unchanged)
   const updateDiscount = (index, discountAmount) => {
     const newCart = [...cart];
     newCart[index].discount = parseFloat(discountAmount) || 0;
@@ -1138,14 +1386,6 @@ export default function PosPage() {
     const newCart = [...exchangeCart];
     newCart[index].price = parseFloat(newPrice) || 0;
     setExchangeCart(newCart);
-  };
-
-  const removeFromCart = (index) => {
-    if (attachMode && attachingServiceIndex === index) {
-      setAttachMode(false);
-      setAttachingServiceIndex(null);
-    }
-    setCart(cart.filter((_, i) => i !== index));
   };
 
   const removeFromExchangeCart = (index) => {
@@ -1285,29 +1525,24 @@ export default function PosPage() {
     }
   };
 
-  // Cart totals: filter out child items
-  const cartSubtotal = cart
-    .filter(item => item.parentItemIndex === null || item.parentItemIndex === undefined)
+  // Cart totals
+  const cartItems = cart.filter(item => !item.isBundleParent);
+  const cartSubtotal = cartItems
     .reduce((sum, item) => sum + item.price * item.quantity, 0);
 
-  const cartLineItemDiscounts = cart
-    .filter(item => item.parentItemIndex === null || item.parentItemIndex === undefined)
+  const cartLineItemDiscounts = cartItems
     .reduce((sum, item) => sum + (item.discount || 0), 0);
 
   const cartTotal = Math.max(0, cartSubtotal - cartLineItemDiscounts - transactionDiscount);
   const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
 
-  const exchangeCartSubtotal = exchangeCart
-    .filter(item => item.parentItemIndex === null || item.parentItemIndex === undefined)
+  const exchangeCartItems = exchangeCart.filter(item => !item.isBundleParent);
+  const exchangeCartSubtotal = exchangeCartItems
     .reduce((sum, item) => sum + item.price * item.quantity, 0);
-  const exchangeCartLineItemDiscounts = exchangeCart
-    .filter(item => item.parentItemIndex === null || item.parentItemIndex === undefined)
+  const exchangeCartLineItemDiscounts = exchangeCartItems
     .reduce((sum, item) => sum + (item.discount || 0), 0);
   const exchangeCartTotal = Math.max(0, exchangeCartSubtotal - exchangeCartLineItemDiscounts);
-  const exchangeCartCount = exchangeCart.reduce(
-    (sum, item) => sum + item.quantity,
-    0,
-  );
+  const exchangeCartCount = exchangeCart.reduce((sum, item) => sum + item.quantity, 0);
 
   const splitPaymentTotal = splitPayments.reduce(
     (sum, p) => sum + (parseFloat(p.amount) || 0),
@@ -1354,7 +1589,6 @@ export default function PosPage() {
     });
   };
 
-  // NEW: Update customer handler
   const handleUpdateCustomer = async () => {
     if (!selectedCustomer) return;
     setUpdatingCustomer(true);
@@ -1436,7 +1670,6 @@ export default function PosPage() {
     }
   };
 
-  // ========== DELIVERY CHECKOUT HANDLERS ==========
   const handleDeliveryConfirm = (deliveryData, fee) => {
     setDeliveryInfo({
       recipientName: deliveryData.recipientName,
@@ -1456,7 +1689,7 @@ export default function PosPage() {
     setDeliveryEnabled(false);
   };
 
-  // ========== RETURNS MODE HANDLERS ==========
+  // ====== RETURNS / EXCHANGE ======
   const enterReturnMode = () => {
     setReturnMode(true);
     setExchangeMode(false);
@@ -1905,7 +2138,7 @@ export default function PosPage() {
     }
   };
 
-  // ---------- Checkout ----------
+  // ====== CHECKOUT ======
   const handleCheckout = async () => {
     if (cart.length === 0) {
       setError("Cart is empty");
@@ -1914,13 +2147,15 @@ export default function PosPage() {
 
     setError("");
 
-    const servicesWithNoUser = cart.filter(item => {
-      if (item.type !== "service") return false;
-      return !item.assignedUser && !saleAssignedUser;
-    });
+    const bundleChildrenWithNoUser = cart.filter(item => 
+      item.isBundleChild && item.type === "service" && !item.assignedUser
+    );
+    const regularServicesNoUser = cart.filter(item => 
+      item.type === "service" && !item.isBundleChild && !item.assignedUser && !saleAssignedUser
+    );
 
-    if (servicesWithNoUser.length > 0) {
-      const names = servicesWithNoUser.map(item => item.name).join(", ");
+    if (regularServicesNoUser.length > 0) {
+      const names = regularServicesNoUser.map(item => item.name).join(", ");
       setError(`Please assign a user to the following services (or set a sale-level user): ${names}`);
       return;
     }
@@ -1997,8 +2232,21 @@ export default function PosPage() {
         }
       }
 
-      const formattedItems = cart.map((item) => {
-        const isChild = item.parentItemIndex !== null && item.parentItemIndex !== undefined;
+      const bundleParentNames = {};
+      cart.forEach((item, index) => {
+        if (item.isBundleParent) {
+          bundleParentNames[index] = item.name;
+        }
+      });
+
+      const saleItems = cart.filter(item => !item.isBundleParent);
+
+      const formattedItems = saleItems.map((item) => {
+        const isChild = item.parentItemIndex !== null &&
+                        item.parentItemIndex !== undefined &&
+                        !item.isBundleParent &&
+                        !item.isBundleChild;
+
         const baseItem = {
           type: item.type,
           quantity: item.quantity,
@@ -2012,13 +2260,24 @@ export default function PosPage() {
         }
 
         if (item.type === "service") {
+          let displayName = item.name || item.productName;
+          if (item.isBundleChild && bundleParentNames[item.parentItemIndex]) {
+            displayName = `${bundleParentNames[item.parentItemIndex]} – ${displayName}`;
+          }
+
           return {
             ...baseItem,
             productId: item.variant,
+            productName: displayName,
+            sku: item.sku || "",
             assignedUser: item.assignedUser || saleAssignedUser || null,
             parentItemIndex: null,
             laborCost: item.laborCost || 0,
-            productCost: item.productCost || 0,
+            productCost: 0,
+            commissionType: item.commissionType,
+            commissionValue: item.commissionValue,
+            commissionAmount: item.commissionAmount,
+            isBundleChild: item.isBundleChild || false,
           };
         } else if (item.type === "shopify") {
           return {
@@ -2086,11 +2345,11 @@ export default function PosPage() {
 
       if (isSplitPayment) {
         payload.payments = positiveSplitPayments.map((payment) => ({
-            method: payment.method,
-            amount: payment.amount,
-            status: "completed",
-            paidAt: new Date().toISOString(),
-          }));
+          method: payment.method,
+          amount: payment.amount,
+          status: "completed",
+          paidAt: new Date().toISOString(),
+        }));
       } else {
         payload.paymentMethod = paymentMethod;
       }
@@ -2098,15 +2357,49 @@ export default function PosPage() {
       const res = await apiFetch("/sales", { method: "POST", body: payload });
       const receiptData = res?.data || res;
       const receiptNumber = receiptData?.receiptNumber || "RECEIPT-" + Date.now();
+
+      // ✅ Group bundle items for receipt
+      const groupedReceiptItems = [];
+      const bundleGroups = {};
+
+      saleItems.forEach((item) => {
+        const parentName = bundleParentNames[item.parentItemIndex];
+        if (item.isBundleChild && parentName) {
+          if (!bundleGroups[parentName]) {
+            bundleGroups[parentName] = {
+              name: parentName,
+              quantity: 1,
+              price: 0,
+              type: "bundle",
+              discount: 0,
+            };
+          }
+          bundleGroups[parentName].price += item.price * item.quantity;
+          bundleGroups[parentName].discount += item.discount || 0;
+        } else {
+          groupedReceiptItems.push({
+            name: item.name,
+            quantity: item.quantity,
+            price: item.price,
+            type: item.type,
+            discount: item.discount || 0,
+          });
+        }
+      });
+
+      Object.values(bundleGroups).forEach((group) => {
+        groupedReceiptItems.push({
+          name: group.name,
+          quantity: 1,
+          price: group.price,
+          type: "bundle",
+          discount: group.discount,
+        });
+      });
+
       const receiptInfo = {
         receiptNumber,
-        items: cart.map((item) => ({
-          name: item.name,
-          quantity: item.quantity,
-          price: item.price,
-          type: item.type,
-          discount: item.discount || 0,
-        })),
+        items: groupedReceiptItems,
         payments: isSplitPayment
           ? positiveSplitPayments
           : [{ method: paymentMethod, amount: cartTotal + (deliveryEnabled ? (finalDeliveryFee || 0) : 0) }],
@@ -2153,9 +2446,22 @@ export default function PosPage() {
         return;
       }
 
+      // Offline fallback
       try {
-        const formattedItems = cart.map((item) => {
-          const isChild = item.parentItemIndex !== null && item.parentItemIndex !== undefined;
+        const offlineBundleParentNames = {};
+        cart.forEach((item, index) => {
+          if (item.isBundleParent) {
+            offlineBundleParentNames[index] = item.name;
+          }
+        });
+
+        const saleItemsForOffline = cart.filter(item => !item.isBundleParent);
+
+        const formattedItemsOffline = saleItemsForOffline.map((item) => {
+          const isChild = item.parentItemIndex !== null &&
+                          item.parentItemIndex !== undefined &&
+                          !item.isBundleParent &&
+                          !item.isBundleChild;
           const baseItem = {
             type: item.type,
             quantity: item.quantity,
@@ -2166,14 +2472,26 @@ export default function PosPage() {
           if (isChild && item.originalPrice !== undefined) {
             baseItem.originalPrice = item.originalPrice;
           }
+
           if (item.type === "service") {
+            let displayName = item.name || item.productName;
+            if (item.isBundleChild && offlineBundleParentNames[item.parentItemIndex]) {
+              displayName = `${offlineBundleParentNames[item.parentItemIndex]} – ${displayName}`;
+            }
+
             return {
               ...baseItem,
               productId: item.variant,
+              productName: displayName,
+              sku: item.sku || "",
               assignedUser: item.assignedUser || saleAssignedUser || null,
               parentItemIndex: null,
               laborCost: item.laborCost || 0,
-              productCost: item.productCost || 0,
+              productCost: 0,
+              commissionType: item.commissionType,
+              commissionValue: item.commissionValue,
+              commissionAmount: item.commissionAmount,
+              isBundleChild: item.isBundleChild || false,
             };
           } else if (item.type === "shopify") {
             return {
@@ -2194,7 +2512,7 @@ export default function PosPage() {
 
         const offlinePayload = {
           locationId,
-          items: formattedItems,
+          items: formattedItemsOffline,
           notes: checkoutNotes || undefined,
           assignedUser: saleAssignedUser || undefined,
           customerId: selectedCustomer?._id || undefined,
@@ -2240,13 +2558,12 @@ export default function PosPage() {
         ];
 
         if (isSplitPayment) {
-          offlinePayload.payments = positiveSplitPayments
-            .map((payment) => ({
-              method: payment.method,
-              amount: payment.amount,
-              status: "completed",
-              paidAt: new Date().toISOString(),
-            }));
+          offlinePayload.payments = positiveSplitPayments.map((payment) => ({
+            method: payment.method,
+            amount: payment.amount,
+            status: "completed",
+            paidAt: new Date().toISOString(),
+          }));
         } else {
           offlinePayload.paymentMethod = paymentMethod;
         }
@@ -2256,13 +2573,41 @@ export default function PosPage() {
           locationId,
         });
         offlinePayload.idempotencyKey = idempotencyKey;
+
         await savePendingSale(offlinePayload);
         await updatePendingCounts();
+
+        // Offline receipt also grouped
+        const offlineBundleGroups = {};
+        saleItemsForOffline.forEach((item) => {
+          const parentName = offlineBundleParentNames[item.parentItemIndex];
+          if (item.isBundleChild && parentName) {
+            if (!offlineBundleGroups[parentName]) {
+              offlineBundleGroups[parentName] = {
+                name: parentName,
+                quantity: 1,
+                price: 0,
+                type: "bundle",
+              };
+            }
+            offlineBundleGroups[parentName].price += item.price * item.quantity;
+          }
+        });
+
+        const offlineGroupedItems = [];
+        Object.values(offlineBundleGroups).forEach((group) => {
+          offlineGroupedItems.push({
+            name: group.name,
+            quantity: 1,
+            price: group.price,
+            type: "bundle",
+          });
+        });
 
         const offlineReceipt = {
           receiptNumber: idempotencyKey,
           timestamp: new Date().toISOString(),
-          items: cart.map((item) => ({
+          items: offlineGroupedItems.length > 0 ? offlineGroupedItems : saleItemsForOffline.map((item) => ({
             name: item.name,
             quantity: item.quantity,
             price: item.customPrice ?? item.price,
@@ -2270,11 +2615,10 @@ export default function PosPage() {
           subtotal: cartTotal,
           deliveryFee: deliveryEnabled ? (finalDeliveryFee || 0) : 0,
           payments: isSplitPayment
-            ? positiveSplitPayments
-                .map((payment) => ({
-                  method: payment.method,
-                  amount: payment.amount,
-                }))
+            ? positiveSplitPayments.map((payment) => ({
+                method: payment.method,
+                amount: payment.amount,
+              }))
             : [{ method: paymentMethod, amount: cartTotal + (deliveryEnabled ? (finalDeliveryFee || 0) : 0) }],
           notes: checkoutNotes,
           amountPaid: offlinePaidAmount,
@@ -2319,7 +2663,7 @@ export default function PosPage() {
     }
   };
 
-  // --- Updated handleProductClick ---
+  // ====== PRODUCT CLICK HANDLERS ======
   const handleProductClick = (product) => {
     const variants = product.variants || [];
     if (variants.length <= 1) {
@@ -2341,12 +2685,13 @@ export default function PosPage() {
         discount: 0,
         parentItemIndex: parentIndex,
         assignedUser: null,
+        isBundleChild: false,
+        isBundleParent: false,
       };
       if (exchangeMode) {
         upsertCartItem(exchangeCart, setExchangeCart, cartItem);
       } else {
         upsertCartItem(cart, setCart, cartItem);
-        // Close search overlay after adding product
         handleCloseSearch();
       }
     } else {
@@ -2355,7 +2700,6 @@ export default function PosPage() {
     }
   };
 
-  // --- Updated handleVariantSelect ---
   const handleVariantSelect = (variant) => {
     if (!variantPickerProduct) return;
     let isChild = false;
@@ -2375,12 +2719,13 @@ export default function PosPage() {
       discount: 0,
       parentItemIndex: parentIndex,
       assignedUser: null,
+      isBundleChild: false,
+      isBundleParent: false,
     };
     if (exchangeMode) {
       upsertCartItem(exchangeCart, setExchangeCart, cartItem);
     } else {
       upsertCartItem(cart, setCart, cartItem);
-      // Close search overlay after selecting variant
       handleCloseSearch();
     }
     setShowVariantPicker(false);
@@ -2402,7 +2747,6 @@ export default function PosPage() {
     handleCloseSearch();
   };
 
-  // --- Updated customer handlers ---
   const handleCustomerSelect = (customer) => {
     setSelectedCustomer(customer);
   };
@@ -2428,7 +2772,6 @@ export default function PosPage() {
     });
   };
 
-  // Schedule product refresh (debounced)
   const scheduleProductRefresh = useCallback(() => {
     if (refreshDebounceTimer) {
       clearTimeout(refreshDebounceTimer);
@@ -2441,10 +2784,10 @@ export default function PosPage() {
     setRefreshDebounceTimer(timer);
   }, [shopifyConnection?.status, locationId, loadShopifyProductsData]);
 
-  // --- Render ---
+  // ====== RENDER ======
   return (
     <div className="flex flex-col bg-gray-50 h-full w-full max-w-full overflow-hidden box-border">
-      {/* Top Bar - fixed height */}
+      {/* Top Bar */}
       <div className="bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between flex-shrink-0 h-[56px]">
         <div className="flex items-center gap-4">
           <h1 className="text-xl font-bold text-gray-900">Point of Sale</h1>
@@ -2659,7 +3002,6 @@ export default function PosPage() {
         deliveryEnabled={deliveryEnabled}
       />
 
-      {/* Delivery Checkout Modal */}
       {showDeliveryModal && (
         <DeliveryCheckoutModal
           isOpen={showDeliveryModal}
@@ -2672,14 +3014,14 @@ export default function PosPage() {
         />
       )}
 
-      {/* Main Content - New Layout */}
+      {/* Main Content */}
       <div className="flex-1 flex overflow-hidden min-h-0 w-full max-w-full">
-        {/* LEFT: Cart Area with Search */}
+        {/* LEFT: Cart Area */}
         <div
           ref={cartContainerRef}
           className="flex-1 min-w-0 bg-white border-r border-gray-200 flex flex-col min-h-0 h-full max-h-full overflow-hidden"
         >
-          {/* Search Bar (always visible) */}
+          {/* Search Bar */}
           <div className="p-3 border-b border-gray-200 bg-white z-10 flex-shrink-0">
             <div className="flex items-center gap-2">
               <div className="relative flex-1">
@@ -2721,7 +3063,7 @@ export default function PosPage() {
             </div>
           </div>
 
-          {/* Content area: overlay or cart items */}
+          {/* Content: Overlay or Cart Items */}
           <div className="flex-1 min-h-0 overflow-auto relative">
             {showSearchOverlay ? (
               <SearchOverlay
@@ -2745,7 +3087,9 @@ export default function PosPage() {
                   <div className="space-y-2">
                     {cart.map((item, index) => {
                       const isService = item.type === "service";
-                      const isChild = item.parentItemIndex !== null && item.parentItemIndex !== undefined;
+                      const isChild = item.parentItemIndex !== null && item.parentItemIndex !== undefined && !item.isBundleParent;
+                      const isBundleParent = item.isBundleParent === true;
+                      const isBundleChild = item.isBundleChild === true;
                       const isAttachActive = attachMode && attachingServiceIndex === index;
 
                       return (
@@ -2754,54 +3098,44 @@ export default function PosPage() {
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2 flex-wrap">
                                 <h4 className="font-medium text-gray-900 text-sm truncate">{item.name}</h4>
-                                {isChild && <span className="text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded whitespace-nowrap">attached</span>}
+                                {isBundleParent && <span className="text-[10px] bg-purple-100 text-purple-600 px-1.5 py-0.5 rounded whitespace-nowrap">Bundle</span>}
+                                {isBundleChild && <span className="text-[10px] bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded whitespace-nowrap">Bundle item</span>}
+                                {isChild && !isBundleChild && <span className="text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded whitespace-nowrap">attached</span>}
                                 {isService && <span className="text-[10px] bg-purple-100 text-purple-600 px-1.5 py-0.5 rounded whitespace-nowrap">service</span>}
                               </div>
-                              {isService && !isChild && (
+                              {isBundleParent && (
+                                <div className="text-xs text-gray-500 mt-1">
+                                  {item.quantity} × {cart.filter(i => i.parentItemIndex === index && i.isBundleChild).length} sub‑services
+                                </div>
+                              )}
+                              {isService && !isBundleParent && (
                                 <div className="mt-1 space-y-1">
-                                  {enableProductCost ? (
-                                    <>
-                                      <div className="flex items-center gap-1">
-                                        <label className="text-[10px] text-gray-500">Labor:</label>
-                                        <input
-                                          type="number"
-                                          step="0.01"
-                                          min="0"
-                                          value={item.laborCost || 0}
-                                          onChange={(e) => updateServiceCosts(index, "laborCost", e.target.value)}
-                                          className="w-16 px-1 py-0.5 text-xs border border-gray-300 rounded"
-                                        />
-                                        <label className="text-[10px] text-gray-500 ml-2">Product:</label>
-                                        <input
-                                          type="number"
-                                          step="0.01"
-                                          min="0"
-                                          value={item.productCost || 0}
-                                          onChange={(e) => updateServiceCosts(index, "productCost", e.target.value)}
-                                          className="w-16 px-1 py-0.5 text-xs border border-gray-300 rounded"
-                                        />
-                                      </div>
-                                      <div className="text-[10px] text-gray-500">
-                                        Total: ${item.price.toFixed(2)}
-                                      </div>
-                                    </>
-                                  ) : (
-                                    <div className="flex items-center gap-1">
-                                      <label className="text-[10px] text-gray-500">Labor Cost:</label>
-                                      <input
-                                        type="number"
-                                        step="0.01"
-                                        min="0"
-                                        value={item.laborCost || 0}
-                                        onChange={(e) => updateServiceCosts(index, "laborCost", e.target.value)}
-                                        className="w-20 px-1 py-0.5 text-xs border border-gray-300 rounded"
-                                      />
-                                      <span className="text-[10px] text-gray-500">= ${item.price.toFixed(2)}</span>
+                                  <div className="flex items-center gap-1">
+                                    <label className="text-[10px] text-gray-500">Labor:</label>
+                                    <input
+                                      type="number"
+                                      step="0.01"
+                                      min="0"
+                                      value={item.laborCost || 0}
+                                      onChange={(e) => {
+                                        if (isBundleChild) {
+                                          updateBundleChildCosts(index, "laborCost", e.target.value);
+                                        } else {
+                                          updateServiceCosts(index, "laborCost", e.target.value);
+                                        }
+                                      }}
+                                      className="w-16 px-1 py-0.5 text-xs border border-gray-300 rounded"
+                                    />
+                                    <span className="text-[10px] text-gray-500">= ${item.price.toFixed(2)}</span>
+                                  </div>
+                                  {isBundleChild && item.commissionDeductionTiming && (
+                                    <div className="text-[10px] text-gray-400">
+                                      Timing: {item.commissionDeductionTiming === "before_commission" ? "Before Commission" : "After Deductions"}
                                     </div>
                                   )}
                                 </div>
                               )}
-                              {!isService && (
+                              {!isService && !isBundleParent && !isBundleChild && (
                                 <div className="flex items-center gap-2 mt-1">
                                   {editingPriceIndex === index ? (
                                     <input autoFocus type="number" step="0.01" value={editingPriceValue} onChange={(e) => setEditingPriceValue(e.target.value)} onBlur={() => savePriceEdit(index)} onKeyDown={(e) => e.key === "Enter" && savePriceEdit(index)} className="w-20 px-2 py-1 border border-blue-300 rounded text-sm" />
@@ -2812,7 +3146,7 @@ export default function PosPage() {
                                   )}
                                 </div>
                               )}
-                              {useSessionStore.getState().can(PERMISSIONS.POS_APPLY_DISCOUNT) && !isChild && (
+                              {useSessionStore.getState().can(PERMISSIONS.POS_APPLY_DISCOUNT) && !isChild && !isBundleParent && !isBundleChild && (
                                 <div className="mt-1">
                                   {editingDiscountIndex === index ? (
                                     <div className="flex items-center gap-2">
@@ -2837,31 +3171,127 @@ export default function PosPage() {
                                   )}
                                 </div>
                               )}
-                              {isService && (
+
+                              {isService && !isBundleParent && (
                                 <div className="mt-1">
                                   <select
                                     value={item.assignedUser || ""}
                                     onChange={(e) => {
                                       const userId = e.target.value || null;
                                       const newCart = [...cart];
-                                      newCart[index].assignedUser = userId;
-                                      const productDefaults = serviceProductMap[item.variant];
-                                      if (productDefaults) {
-                                        const user = userId ? users.find(u => u._id === userId) : null;
-                                        const commission = getEffectiveCommission(
-                                          { _id: item.variant, commissionType: productDefaults.commissionType, commissionValue: productDefaults.commissionValue },
-                                          user
-                                        );
-                                        newCart[index].commissionType = commission.type;
-                                        newCart[index].commissionValue = commission.value;
-                                        newCart[index].commissionIsOverride = commission.isOverride;
-                                        newCart[index].commissionDisplay = commission.display;
-                                        newCart[index].commissionAmount = computeCommissionAmount(
-                                          newCart[index].laborCost || 0,
-                                          commission.type,
-                                          commission.value
-                                        );
+                                      const updatedItem = { ...newCart[index] };
+                                      updatedItem.assignedUser = userId;
+
+                                      const isBundleChild = updatedItem.isBundleChild === true;
+
+                                      if (isBundleChild) {
+                                        const bundleId = updatedItem.variant;
+                                        const subServiceIndex = updatedItem.subServiceIndex;
+                                        if (subServiceIndex !== undefined) {
+                                          const overrideKey = `${bundleId}:${subServiceIndex}`;
+                                          const user = userId ? users.find(u => u._id === userId) : null;
+                                          
+                                          // Start with defaults from the bundle definition
+                                          let effectiveCommissionType = updatedItem.defaultCommissionType || "percentage";
+                                          let effectiveCommissionValue = updatedItem.defaultCommissionValue || 0;
+                                          let isOverride = false;
+                                          let overrideDisplay = null;
+
+                                          if (user && user.commissionOverrides) {
+                                            const override = user.commissionOverrides.find(ov => ov.serviceId === overrideKey);
+                                            if (override) {
+                                              // ✅ Override found – use it
+                                              effectiveCommissionType = override.commissionType;
+                                              effectiveCommissionValue = override.commissionValue;
+                                              isOverride = true;
+                                              overrideDisplay = effectiveCommissionType === "percentage"
+                                                ? `${effectiveCommissionValue}%`
+                                                : `$${effectiveCommissionValue.toFixed(2)}`;
+                                              
+                                              console.log(`✅ Override applied for ${updatedItem.name}:`, {
+                                                type: effectiveCommissionType,
+                                                value: effectiveCommissionValue,
+                                                isOverride,
+                                              });
+                                            } else {
+                                              console.log(`❌ No override for ${updatedItem.name} (key: ${overrideKey})`);
+                                            }
+                                          }
+
+                                          // Update the child with the effective commission
+                                          updatedItem.commissionType = effectiveCommissionType;
+                                          updatedItem.commissionValue = effectiveCommissionValue;
+                                          updatedItem.commissionIsOverride = isOverride;
+                                          updatedItem.commissionDisplay = isOverride ? overrideDisplay : updatedItem.commissionDisplay;
+
+                                          // ✅ IMPORTANT: Place the updated child back into the cart BEFORE recalculating
+                                          newCart[index] = updatedItem;
+
+                                          // Now recalculate commissions for the entire bundle
+                                          const parentIdx = updatedItem.parentItemIndex;
+                                          if (parentIdx !== null && parentIdx !== undefined) {
+                                            const parent = newCart[parentIdx];
+                                            if (parent && parent.isBundleParent) {
+                                              const bundleTotal = parent.price;
+                                              const children = newCart.filter(
+                                                (it) => it.isBundleChild && it.parentItemIndex === parentIdx
+                                              );
+                                              
+                                              console.log("Children before recalculation:", children.map(c => ({
+                                                name: c.name,
+                                                commissionType: c.commissionType,
+                                                commissionValue: c.commissionValue,
+                                                price: c.price,
+                                              })));
+                                              
+                                              const updatedChildren = recalculateBundleCommissions(children, bundleTotal);
+                                              
+                                              console.log("Children after recalculation:", updatedChildren.map(c => ({
+                                                name: c.name,
+                                                commissionType: c.commissionType,
+                                                commissionValue: c.commissionValue,
+                                                commissionAmount: c.commissionAmount,
+                                              })));
+                                              
+                                              const childIndices = newCart
+                                                .map((it, idx) => (it.isBundleChild && it.parentItemIndex === parentIdx ? idx : -1))
+                                                .filter(idx => idx !== -1);
+                                              for (let i = 0; i < childIndices.length; i++) {
+                                                newCart[childIndices[i]] = updatedChildren[i];
+                                              }
+                                            }
+                                          }
+                                        }
+                                      } else {
+                                        // Regular service logic
+                                        const productDefaults = serviceProductMap[updatedItem.variant];
+                                        if (productDefaults) {
+                                          const user = userId ? users.find(u => u._id === userId) : null;
+                                          const commission = getEffectiveCommission(
+                                            { _id: updatedItem.variant, commissionType: productDefaults.commissionType, commissionValue: productDefaults.commissionValue },
+                                            user
+                                          );
+                                          const includeProduct = false;
+                                          updatedItem.commissionType = commission.type;
+                                          updatedItem.commissionValue = commission.value;
+                                          updatedItem.commissionIsOverride = commission.isOverride;
+                                          updatedItem.commissionDisplay = commission.display;
+                                          updatedItem.commissionAmount = computeCommissionAmount(
+                                            updatedItem.laborCost || 0,
+                                            commission.type,
+                                            commission.value,
+                                            0,
+                                            includeProduct
+                                          );
+                                          newCart[index] = updatedItem;
+                                        }
                                       }
+
+                                      // If it's not a bundle child, we already set newCart[index] above, but for safety:
+                                      if (!isBundleChild) {
+                                        newCart[index] = updatedItem;
+                                      }
+
                                       setCart(newCart);
                                     }}
                                     className="text-xs border border-gray-300 rounded px-1 py-0.5 w-full max-w-[120px]"
@@ -2873,7 +3303,8 @@ export default function PosPage() {
                                   </select>
                                 </div>
                               )}
-                              {isService && (
+
+                              {isService && !isBundleParent && (
                                 <div className="text-xs mt-1 flex items-center gap-2">
                                   <span className="text-gray-500">
                                     Commission: <span className="font-medium text-gray-700">
@@ -2894,17 +3325,17 @@ export default function PosPage() {
                             {/* Right side actions */}
                             <div className="flex flex-col items-end gap-1 flex-shrink-0">
                               <button onClick={() => removeFromCart(index)} className="text-red-500 hover:text-red-700">✕</button>
-                              {!isService && !isChild && cart.some(item => item.type === "service") && (
+                              {!isService && !isChild && !isBundleParent && !isBundleChild && cart.some(item => item.type === "service") && (
                                 <button onClick={() => openAttachQuantityModal(index)} className="text-[10px] text-blue-600 hover:text-blue-800 whitespace-nowrap">
                                   Attach
                                 </button>
                               )}
-                              {isChild && (
+                              {isChild && !isBundleChild && (
                                 <button onClick={() => detachFromService(index)} className="text-[10px] text-red-500 hover:text-red-700 whitespace-nowrap">
                                   Detach
                                 </button>
                               )}
-                              {isService && (
+                              {isService && !isBundleParent && !isBundleChild && (
                                 <button
                                   onClick={() => toggleAttachMode(index)}
                                   className={`text-[10px] p-1 rounded-full border ${isAttachActive ? "border-blue-500 bg-blue-100 text-blue-700" : "border-gray-300 bg-gray-100 text-gray-500 hover:bg-gray-200"}`}
@@ -2922,9 +3353,21 @@ export default function PosPage() {
                           {/* Quantity controls and item total */}
                           <div className="flex items-center justify-between mt-2">
                             <div className="flex items-center gap-2">
-                              <button onClick={() => updateQuantity(index, item.quantity - 1)} className="w-8 h-8 bg-white border border-gray-300 rounded hover:bg-gray-100 font-bold">−</button>
-                              <span className="w-12 text-center font-medium">{item.quantity}</span>
-                              <button onClick={() => updateQuantity(index, item.quantity + 1)} className="w-8 h-8 bg-white border border-gray-300 rounded hover:bg-gray-100 font-bold">+</button>
+                              {isBundleParent ? (
+                                <>
+                                  <button onClick={() => updateBundleParentQuantity(index, item.quantity - 1)} className="w-8 h-8 bg-white border border-gray-300 rounded hover:bg-gray-100 font-bold">−</button>
+                                  <span className="w-12 text-center font-medium">{item.quantity}</span>
+                                  <button onClick={() => updateBundleParentQuantity(index, item.quantity + 1)} className="w-8 h-8 bg-white border border-gray-300 rounded hover:bg-gray-100 font-bold">+</button>
+                                </>
+                              ) : isBundleChild ? (
+                                <span className="w-12 text-center font-medium text-gray-500">{item.quantity}</span>
+                              ) : (
+                                <>
+                                  <button onClick={() => updateQuantity(index, item.quantity - 1)} className="w-8 h-8 bg-white border border-gray-300 rounded hover:bg-gray-100 font-bold">−</button>
+                                  <span className="w-12 text-center font-medium">{item.quantity}</span>
+                                  <button onClick={() => updateQuantity(index, item.quantity + 1)} className="w-8 h-8 bg-white border border-gray-300 rounded hover:bg-gray-100 font-bold">+</button>
+                                </>
+                              )}
                             </div>
                             <div className="text-right">
                               <p className="font-bold text-gray-900">${((item.price * item.quantity) - (item.discount || 0)).toFixed(2)}</p>
@@ -2943,14 +3386,34 @@ export default function PosPage() {
 
         {/* RIGHT: Checkout Panel */}
         <div className="w-[380px] bg-white border-l border-gray-200 flex flex-col min-h-0 h-full max-h-full overflow-hidden">
-          {/* Header */}
           <div className="p-4 border-b border-gray-200 flex-shrink-0">
             <h2 className="text-lg font-semibold text-gray-900">Checkout</h2>
           </div>
 
-          {/* Scrollable Content */}
           <div className="flex-1 min-h-0 overflow-auto p-4 space-y-4">
-            {/* Customer Section */}
+            {/* Sale Assigned User */}
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-semibold text-gray-700">Sale Assigned User</h3>
+              </div>
+              <select
+                value={saleAssignedUser || ""}
+                onChange={(e) => setSaleAssignedUser(e.target.value || null)}
+                className="w-full rounded border border-zinc-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">None (cashier default)</option>
+                {users.map((user) => (
+                  <option key={user._id} value={user._id}>
+                    {user.fullname || user.email}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-gray-500">
+                This user will be assigned to all services that don't have a specific user.
+              </p>
+            </div>
+
+            {/* Customer */}
             <div>
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-sm font-semibold text-gray-700">Customer</h3>
@@ -2985,7 +3448,7 @@ export default function PosPage() {
               />
             </div>
 
-            {/* Delivery Section (toggle + form) */}
+            {/* Delivery */}
             <div>
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-sm font-semibold text-gray-700">Delivery</h3>
@@ -3010,7 +3473,7 @@ export default function PosPage() {
               )}
             </div>
 
-            {/* Sale Summary */}
+            {/* Summary */}
             <div>
               <h3 className="text-sm font-semibold text-gray-700 mb-2">Summary</h3>
               <div className="space-y-1 text-sm">
@@ -3118,7 +3581,7 @@ export default function PosPage() {
             </div>
           </div>
 
-          {/* Footer (fixed) */}
+          {/* Footer */}
           <div className="border-t border-gray-200 p-4 space-y-2 flex-shrink-0">
             <button
               onClick={handleCheckout}
@@ -3136,7 +3599,6 @@ export default function PosPage() {
             >
               Create Reservation
             </button>
-            {/* ===== HOLD BUTTON ===== */}
             <button
               onClick={holdCurrentSale}
               disabled={cart.length === 0 || checkingPreviousDayShift}
@@ -3144,7 +3606,6 @@ export default function PosPage() {
             >
               Hold Sale
             </button>
-            {/* ===== VIEW HELD BUTTON ===== */}
             <button
               onClick={() => {
                 setShowHeldSalesModal(true);
@@ -3160,7 +3621,7 @@ export default function PosPage() {
         </div>
       </div>
 
-      {/* Attach Modal (block second service) */}
+      {/* Modals */}
       {showAttachModal && (
         <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 max-w-sm w-full">
@@ -3174,7 +3635,6 @@ export default function PosPage() {
         </div>
       )}
 
-      {/* Attach with Quantity Modal */}
       {showAttachQuantityModal && attachQuantityProductIndex !== null && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 max-w-md w-full">
@@ -3191,7 +3651,7 @@ export default function PosPage() {
                   className="w-full rounded border border-gray-300 px-3 py-2 text-sm"
                 >
                   {cart.map((item, idx) => {
-                    if (item.type === "service") {
+                    if (item.type === "service" && !item.isBundleParent && !item.isBundleChild) {
                       return <option key={idx} value={idx}>{item.name}</option>;
                     }
                     return null;
@@ -3246,7 +3706,6 @@ export default function PosPage() {
         </div>
       )}
 
-      {/* Variant Picker Modal */}
       {showVariantPicker && variantPickerProduct && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
@@ -3284,7 +3743,6 @@ export default function PosPage() {
         </div>
       )}
 
-      {/* Receipt Lookup Modal */}
       {showReturnLookup && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg max-w-md w-full p-6">
@@ -3302,7 +3760,6 @@ export default function PosPage() {
         </div>
       )}
 
-      {/* Update Customer Modal */}
       {showUpdateCustomerModal && selectedCustomer && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl max-h-[90vh] overflow-y-auto">
@@ -3336,8 +3793,6 @@ export default function PosPage() {
                   className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
                 />
               </div>
-
-              {/* Address */}
               <div className="border-t border-zinc-200 pt-4">
                 <div className="flex items-center justify-between mb-3">
                   <label className="text-sm font-medium text-zinc-700">Delivery Address</label>
@@ -3419,7 +3874,6 @@ export default function PosPage() {
                   </div>
                 </div>
               </div>
-
               <div className="flex justify-end gap-2 pt-4">
                 <button
                   type="button"
@@ -3441,7 +3895,6 @@ export default function PosPage() {
         </div>
       )}
 
-      {/* Receipt Modal */}
       {showReceipt && receipt && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg max-w-md w-full max-h-[90vh] overflow-auto">
@@ -3513,7 +3966,6 @@ export default function PosPage() {
         </div>
       )}
 
-      {/* ===== HELD SALES MODAL (with search) ===== */}
       {showHeldSalesModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="w-full max-w-4xl max-h-[90vh] overflow-y-auto rounded-lg bg-white p-6 shadow-xl">
@@ -3526,7 +3978,6 @@ export default function PosPage() {
                 ✕
               </button>
             </div>
-            {/* Search bar */}
             <div className="mb-4">
               <input
                 type="text"
@@ -3540,7 +3991,6 @@ export default function PosPage() {
               <p className="text-gray-500">Loading...</p>
             ) : (
               (() => {
-                // Filter held sales by idempotencyKey (case-insensitive)
                 const filtered = heldSales.filter(draft =>
                   draft.idempotencyKey?.toLowerCase().includes(heldSalesSearchQuery.toLowerCase().trim())
                 );
@@ -3572,7 +4022,6 @@ export default function PosPage() {
                             </button>
                             <button
                               onClick={() => {
-                                // Build proforma receipt with items
                                 const items = (draft.cart || []).map(item => ({
                                   name: item.name,
                                   quantity: item.quantity,
@@ -3581,7 +4030,7 @@ export default function PosPage() {
                                   discount: item.discount || 0,
                                 }));
                                 const subtotal = draft.cartTotal || 0;
-                                const total = subtotal; // proforma excludes delivery fee
+                                const total = subtotal;
 
                                 const proformaReceipt = {
                                   isProforma: true,
@@ -3621,7 +4070,6 @@ export default function PosPage() {
           </div>
         </div>
       )}
-      {/* ============================= */}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { apiFetch } from "@/lib/api-client";
 import { searchShopifyProducts } from "@/lib/indexeddb";
 
@@ -12,29 +12,43 @@ export default function SearchOverlay({
 }) {
   const [results, setResults] = useState({ flexi: [], services: [], shopify: [] });
   const [loading, setLoading] = useState(false);
+  const searchIdRef = useRef(0);
 
   const performSearch = useCallback(async () => {
-    if (!searchQuery.trim()) {
+    const query = searchQuery.trim();
+    if (!query) {
       setResults({ flexi: [], services: [], shopify: [] });
+      setLoading(false);
       return;
     }
+
+    const currentSearchId = ++searchIdRef.current;
     setLoading(true);
+
     try {
       const [flexiRes, serviceRes, shopifyRes] = await Promise.all([
-        apiFetch(`/products?type=physical&search=${encodeURIComponent(searchQuery)}&limit=50`),
-        apiFetch(`/products?type=service&search=${encodeURIComponent(searchQuery)}&limit=50`),
-        searchShopifyProducts(searchQuery, 50),
+        apiFetch(`/products?type=physical&search=${encodeURIComponent(query)}&limit=50`),
+        apiFetch(`/products?type=service&search=${encodeURIComponent(query)}&limit=50`),
+        searchShopifyProducts(query, 50),
       ]);
-      setResults({
-        flexi: flexiRes?.products || [],
-        services: serviceRes?.products || [],
-        shopify: shopifyRes || [],
-      });
+
+      // Only update if this is the latest search
+      if (currentSearchId === searchIdRef.current) {
+        setResults({
+          flexi: flexiRes?.products || [],
+          services: serviceRes?.products || [],
+          shopify: shopifyRes || [],
+        });
+      }
     } catch (err) {
       console.error("Search failed:", err);
-      setResults({ flexi: [], services: [], shopify: [] });
+      if (currentSearchId === searchIdRef.current) {
+        setResults({ flexi: [], services: [], shopify: [] });
+      }
     } finally {
-      setLoading(false);
+      if (currentSearchId === searchIdRef.current) {
+        setLoading(false);
+      }
     }
   }, [searchQuery]);
 

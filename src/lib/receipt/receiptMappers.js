@@ -20,14 +20,52 @@ const normalizePayments = (payments, fallbackMethod, fallbackAmount) => {
   return [];
 };
 
-const normalizeItems = (items = []) =>
-  (Array.isArray(items) ? items : []).map((item) => ({
-    name: item?.name || item?.productName || "Item",
-    quantity: Number(item?.quantity) || 0,
-    price: toNonNegativeAmount(item?.price ?? item?.unitPrice),
-    type: item?.type,
-    discount: toNonNegativeAmount(item?.discount),
+// ✅ MODIFIED: Groups bundle children into a single line item per bundle
+const normalizeItems = (items = []) => {
+  const arr = Array.isArray(items) ? items : [];
+  const bundleGroups = {};
+  const regularItems = [];
+
+  for (const item of arr) {
+    // Check if this item is a bundle child
+    const isBundleChild = item.isBundleChild === true;
+    const bundleName = item.serviceBundle?.bundleName || null;
+
+    if (isBundleChild && bundleName) {
+      // Group by bundle name
+      if (!bundleGroups[bundleName]) {
+        bundleGroups[bundleName] = {
+          name: bundleName,
+          quantity: 1, // one line per bundle
+          price: 0,
+          type: "bundle",
+          discount: 0,
+        };
+      }
+      // Sum the line total (or price) of each child
+      bundleGroups[bundleName].price += toNonNegativeAmount(item.lineTotal ?? item.price ?? 0);
+      bundleGroups[bundleName].discount += toNonNegativeAmount(item.discount ?? 0);
+    } else {
+      // Regular item (non‑bundle child)
+      regularItems.push({
+        name: item?.name || item?.productName || "Item",
+        quantity: Number(item?.quantity) || 0,
+        price: toNonNegativeAmount(item?.price ?? item?.unitPrice),
+        type: item?.type,
+        discount: toNonNegativeAmount(item?.discount),
+      });
+    }
+  }
+
+  // Convert bundle groups to receipt items
+  const bundleItems = Object.values(bundleGroups).map((group) => ({
+    ...group,
+    price: toNonNegativeAmount(group.price),
+    discount: toNonNegativeAmount(group.discount),
   }));
+
+  return [...regularItems, ...bundleItems];
+};
 
 const normalizeTags = (tags) => {
   if (Array.isArray(tags)) return tags;

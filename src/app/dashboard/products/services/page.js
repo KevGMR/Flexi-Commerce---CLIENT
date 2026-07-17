@@ -16,19 +16,17 @@ const createEmptyForm = () => ({
   commissionType: "percentage",
   commissionValue: "",
   laborCost: "",
-  productCost: "",
   price: "",
 });
 
 const createBundleRow = (initial = {}) => ({
-  serviceProductId: initial.serviceProductId || "",
-  quantity: String(initial.quantity ?? 1),
-  nameSnapshot: initial.nameSnapshot || "",
-  skuSnapshot: initial.skuSnapshot || "",
-  priceSnapshot:
-    initial.priceSnapshot === 0 || initial.priceSnapshot
-      ? String(initial.priceSnapshot)
-      : "",
+  name: initial.name || "",
+  laborCost: initial.laborCost !== undefined ? String(initial.laborCost) : "",
+  commissionDeductionTiming: initial.commissionDeductionTiming || "before_commission",
+  commissionType: initial.commissionType || "percentage",
+  commissionValue: initial.commissionValue !== undefined ? String(initial.commissionValue) : "",
+  isAggregator: initial.isAggregator || false,
+  defaultAssignedUser: initial.defaultAssignedUser || "",
 });
 
 const toNumberOrZero = (value) => {
@@ -57,6 +55,21 @@ function ServicesPageContent() {
   const [kindFilter, setKindFilter] = useState("all");
   const [error, setError] = useState("");
   const [statusMessage, setStatusMessage] = useState("");
+  const [users, setUsers] = useState([]);
+
+  // Load users for the `defaultAssignedUser` dropdown
+  useEffect(() => {
+    const loadUsers = async () => {
+      try {
+        const res = await apiFetch("/users?limit=100");
+        setUsers(res?.data?.users || res?.users || []);
+      } catch (err) {
+        console.warn("Failed to load users:", err);
+        setUsers([]);
+      }
+    };
+    loadUsers();
+  }, []);
 
   const loadServices = async () => {
     setLoading(true);
@@ -107,19 +120,33 @@ function ServicesPageContent() {
     [services, selectedServiceId],
   );
 
-  // Auto-calculate price from labor + product
-  const recalcPrice = (labor, product) => {
-    const total = toNumberOrZero(labor) + toNumberOrZero(product);
-    setForm((prev) => ({ ...prev, price: total.toString() }));
+  // Recalculate price based on serviceKind
+  const recalcPrice = () => {
+    if (form.serviceKind === "single") {
+      const total = toNumberOrZero(form.laborCost);
+      setForm((prev) => ({ ...prev, price: total.toString() }));
+    } else {
+      // bundle: sum of laborCost of all sub‑services (productCost removed)
+      const total = bundleRows.reduce((sum, row) => {
+        return sum + toNumberOrZero(row.laborCost);
+      }, 0);
+      setForm((prev) => ({ ...prev, price: total.toString() }));
+    }
   };
+
+  // Trigger recalc when relevant fields change
+  useEffect(() => {
+    recalcPrice();
+  }, [form.laborCost, form.serviceKind, bundleRows]);
 
   const applyServiceToForm = (service) => {
     const serviceId = service._id || service.id || "";
     setSelectedServiceId(serviceId);
-    // Fallback: if laborCost is undefined, use price (old service), productCost = 0
+
+    // Single service fields
     const labor = service.laborCost ?? service.price ?? 0;
-    const product = service.productCost ?? 0;
-    const total = labor + product;
+    const total = labor;
+
     setForm({
       name: service.name || "",
       sku: service.sku || "",
@@ -133,23 +160,37 @@ function ServicesPageContent() {
           ? String(service.commissionValue)
           : "",
       laborCost: String(labor),
-      productCost: String(product),
       price: String(total),
     });
 
-    const existingRows = Array.isArray(service.serviceBundleComponents)
-      ? service.serviceBundleComponents.map((component) =>
-          createBundleRow({
-            serviceProductId: component.serviceProductId || "",
-            quantity: component.quantity || 1,
-            nameSnapshot: component.nameSnapshot || "",
-            skuSnapshot: component.skuSnapshot || "",
-            priceSnapshot: component.priceSnapshot,
-          }),
-        )
-      : [];
+    // Bundle sub‑services
+    if (service.serviceKind === "bundle") {
+      let subServices = [];
+      if (Array.isArray(service.bundleSubServices) && service.bundleSubServices.length > 0) {
+        subServices = service.bundleSubServices;
+      } else if (Array.isArray(service.serviceBundleComponents) && service.serviceBundleComponents.length > 0) {
+        // Convert legacy components to new format (inline)
+        subServices = service.serviceBundleComponents.map((comp) => ({
+          name: comp.nameSnapshot || "Unnamed",
+          laborCost: comp.priceSnapshot || 0,
+          commissionDeductionTiming: "before_commission",
+          commissionType: "percentage",
+          commissionValue: 0,
+          isAggregator: false,
+          defaultAssignedUser: "",
+        }));
+        // If multiple, set the first as aggregator
+        if (subServices.length > 0) subServices[0].isAggregator = true;
+      }
+      if (subServices.length > 0) {
+        setBundleRows(subServices.map((sub) => createBundleRow(sub)));
+      } else {
+        setBundleRows([createBundleRow()]);
+      }
+    } else {
+      setBundleRows([createBundleRow()]);
+    }
 
-    setBundleRows(existingRows.length > 0 ? existingRows : [createBundleRow()]);
     setError("");
     setStatusMessage("");
   };
@@ -157,44 +198,24 @@ function ServicesPageContent() {
   const handleFieldChange = (event) => {
     const { name, value } = event.target;
     setForm((previous) => ({ ...previous, [name]: value }));
-    if (name === "laborCost" || name === "productCost") {
-      const labor = name === "laborCost" ? value : form.laborCost;
-      const product = name === "productCost" ? value : form.productCost;
-      recalcPrice(labor, product);
-    }
   };
 
+  // Bundle row operations
   const updateBundleRow = (index, field, value) => {
     setBundleRows((previous) =>
       previous.map((row, rowIndex) => {
         if (rowIndex !== index) return row;
-
-        if (field === "serviceProductId") {
-          const selected = services.find((service) => (service._id || service.id) === value);
-          if (!selected) {
-            return {
-              ...row,
-              serviceProductId: value,
-              nameSnapshot: "",
-              skuSnapshot: "",
-              priceSnapshot: "",
-            };
-          }
-
-          return {
-            ...row,
-            serviceProductId: value,
-            nameSnapshot: selected.name || row.nameSnapshot,
-            skuSnapshot: selected.sku || row.skuSnapshot,
-            priceSnapshot:
-              selected.price !== undefined && selected.price !== null
-                ? String(selected.price)
-                : row.priceSnapshot,
-          };
+        // If toggling aggregator, unset others
+        if (field === "isAggregator" && value === true) {
+          const newRows = previous.map((r, i) => ({
+            ...r,
+            isAggregator: i === index ? true : false,
+          }));
+          setBundleRows(newRows);
+          return newRows[index];
         }
-
         return { ...row, [field]: value };
-      }),
+      })
     );
   };
 
@@ -219,15 +240,8 @@ function ServicesPageContent() {
     return matchesSearch && matchesStatus && matchesKind;
   });
 
-  const bundleServiceOptions = services.filter((service) => {
-    const serviceId = service._id || service.id;
-    if (!serviceId) return false;
-    if (serviceId === selectedServiceId) return false;
-    return true;
-  });
-
   const bundlePreviewTotal = bundleRows.reduce((sum, row) => {
-    return sum + toNumberOrZero(row.quantity) * toNumberOrZero(row.priceSnapshot);
+    return sum + toNumberOrZero(row.laborCost);
   }, 0);
 
   const handleSubmit = async (event) => {
@@ -239,18 +253,16 @@ function ServicesPageContent() {
     const sku = form.sku.trim();
     const price = toNumberOrZero(form.price);
     const labor = toNumberOrZero(form.laborCost);
-    const product = toNumberOrZero(form.productCost);
 
     if (!name || !sku || price <= 0) {
       setError("Name, SKU, and price are required.");
       return;
     }
 
-    if (labor < 0 || product < 0) {
-      setError("Labor cost and product cost cannot be negative.");
+    if (labor < 0) {
+      setError("Labor cost cannot be negative.");
       return;
     }
-    // No need to check sum, price is derived
 
     const commissionValue = toNumberOrZero(form.commissionValue);
     if (commissionValue < 0) {
@@ -262,57 +274,88 @@ function ServicesPageContent() {
       return;
     }
 
-    let normalizedRows = [];
-    if (form.serviceKind === "bundle") {
-      normalizedRows = bundleRows
+    let payload = {
+      name,
+      sku,
+      description: form.description.trim(),
+      price,
+      type: "service",
+      serviceKind: form.serviceKind,
+      status: form.status,
+      tags: form.tags
+        .split(",")
+        .map((tag) => tag.trim())
+        .filter(Boolean),
+      trackInventory: false,
+    };
+
+    if (form.serviceKind === "single") {
+      if (labor !== price) {
+        setError(`Price (${price}) must equal laborCost (${labor}).`);
+        return;
+      }
+      payload.laborCost = labor;
+      payload.productCost = 0; // always 0
+      payload.commissionType = form.commissionType;
+      payload.commissionValue = commissionValue;
+      payload.bundleSubServices = [];
+      payload.serviceBundleComponents = [];
+    } else {
+      // Bundle: build subServices array
+      const subServices = bundleRows
         .map((row) => ({
-          serviceProductId: row.serviceProductId,
-          quantity: toNumberOrZero(row.quantity),
-          nameSnapshot: row.nameSnapshot.trim(),
-          skuSnapshot: row.skuSnapshot.trim(),
-          priceSnapshot: toNumberOrZero(row.priceSnapshot),
+          name: row.name.trim(),
+          laborCost: toNumberOrZero(row.laborCost),
+          commissionDeductionTiming: row.commissionDeductionTiming,
+          commissionType: row.commissionType,
+          commissionValue: toNumberOrZero(row.commissionValue),
+          isAggregator: row.isAggregator || false,
+          defaultAssignedUser: row.defaultAssignedUser || null,
         }))
-        .filter((row) => row.serviceProductId || row.nameSnapshot || row.skuSnapshot || row.priceSnapshot > 0);
+        .filter((row) => row.name !== "");
 
-      if (normalizedRows.length === 0) {
-        setError("Add at least one bundle component.");
+      if (subServices.length === 0) {
+        setError("Add at least one sub‑service with a name.");
         return;
       }
 
-      if (normalizedRows.some((row) => !row.serviceProductId || row.quantity <= 0 || row.priceSnapshot < 0)) {
-        setError("Each bundle row needs a service, a quantity greater than 0, and a snapshot price.");
+      // Ensure exactly one aggregator
+      const aggregators = subServices.filter((s) => s.isAggregator);
+      if (aggregators.length !== 1) {
+        setError("You must select exactly one sub‑service as the Aggregator.");
         return;
       }
 
-      const serviceIds = normalizedRows.map((row) => row.serviceProductId);
-      if (new Set(serviceIds).size !== serviceIds.length) {
-        setError("Bundle components must be unique.");
+      // Validate sub‑service fields
+      for (const sub of subServices) {
+        if (sub.laborCost < 0) {
+          setError(`Sub‑service "${sub.name}" has negative cost.`);
+          return;
+        }
+        if (sub.commissionValue < 0) {
+          setError(`Sub‑service "${sub.name}" has negative commission value.`);
+          return;
+        }
+        if (sub.commissionType === "percentage" && sub.commissionValue > 100) {
+          setError(`Sub‑service "${sub.name}" has commission > 100%.`);
+          return;
+        }
+      }
+
+      const totalFromSubs = subServices.reduce((sum, sub) => sum + sub.laborCost, 0);
+      if (totalFromSubs !== price) {
+        setError(`Total price (${price}) does not match sum of sub‑services (${totalFromSubs}).`);
         return;
       }
+
+      payload.bundleSubServices = subServices;
+      payload.serviceBundleComponents = [];
+      payload.laborCost = 0;
+      payload.productCost = 0;
     }
 
     setSaving(true);
     try {
-      const payload = {
-        name,
-        sku,
-        description: form.description.trim(),
-        price,
-        type: "service",
-        serviceKind: form.serviceKind,
-        serviceBundleComponents: normalizedRows,
-        status: form.status,
-        tags: form.tags
-          .split(",")
-          .map((tag) => tag.trim())
-          .filter(Boolean),
-        trackInventory: false,
-        commissionType: form.commissionType,
-        commissionValue: commissionValue,
-        laborCost: labor,
-        productCost: product,
-      };
-
       let response;
       if (selectedServiceId) {
         response = await apiFetch(`/products/${selectedServiceId}`, {
@@ -476,7 +519,9 @@ function ServicesPageContent() {
               {filteredServices.map((service) => {
                 const serviceId = service._id || service.id;
                 const isSelected = serviceId === selectedServiceId;
-                const componentCount = Array.isArray(service.serviceBundleComponents)
+                const subCount = Array.isArray(service.bundleSubServices)
+                  ? service.bundleSubServices.length
+                  : Array.isArray(service.serviceBundleComponents)
                   ? service.serviceBundleComponents.length
                   : 0;
 
@@ -499,11 +544,17 @@ function ServicesPageContent() {
                           ${Number(service.price || 0).toFixed(2)}
                         </div>
                         <div className="mt-1 text-xs text-zinc-500">
-                          Labor: ${Number(service.laborCost ?? service.price ?? 0).toFixed(2)} | Product: ${Number(service.productCost || 0).toFixed(2)}
+                          {service.serviceKind === "bundle" ? (
+                            `Bundle · ${subCount} sub‑services`
+                          ) : (
+                            `Labor: $${Number(service.laborCost ?? service.price ?? 0).toFixed(2)}`
+                          )}
                         </div>
-                        <div className="mt-1 text-xs text-zinc-500">
-                          Commission: {service.commissionType === "percentage" ? `${service.commissionValue || 0}%` : `$${Number(service.commissionValue || 0).toFixed(2)}`}
-                        </div>
+                        {service.serviceKind !== "bundle" && (
+                          <div className="mt-1 text-xs text-zinc-500">
+                            Commission: {service.commissionType === "percentage" ? `${service.commissionValue || 0}%` : `$${Number(service.commissionValue || 0).toFixed(2)}`}
+                          </div>
+                        )}
                         {service.description ? (
                           <div className="mt-2 text-xs text-zinc-500 line-clamp-2">{service.description}</div>
                         ) : null}
@@ -512,7 +563,7 @@ function ServicesPageContent() {
                       <div className="flex flex-col items-end gap-2">
                         {service.serviceKind === "bundle" ? (
                           <span className="rounded-full bg-blue-100 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-blue-700">
-                            Bundle · {componentCount}
+                            Bundle · {subCount}
                           </span>
                         ) : (
                           <span className="rounded-full bg-zinc-100 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-zinc-700">
@@ -643,52 +694,76 @@ function ServicesPageContent() {
               </select>
             </div>
 
-            {/* Cost breakdown with auto-calculated total price */}
-            <div className="rounded-lg border border-purple-200 bg-purple-50 p-4">
-              <h3 className="text-sm font-semibold text-zinc-900 mb-2">Cost Breakdown</h3>
-              <div className="grid gap-3 md:grid-cols-3">
-                <div>
-                  <label className="text-xs font-medium text-zinc-700">Labor Cost</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    name="laborCost"
-                    value={form.laborCost}
-                    onChange={handleFieldChange}
-                    className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
-                    placeholder="0.00"
-                    required
-                  />
-                  <p className="mt-1 text-[10px] text-zinc-500">Commission is calculated on this value.</p>
+            {form.serviceKind === "single" && (
+              <>
+                {/* Cost breakdown for single services */}
+                <div className="rounded-lg border border-purple-200 bg-purple-50 p-4">
+                  <h3 className="text-sm font-semibold text-zinc-900 mb-2">Cost Breakdown</h3>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div>
+                      <label className="text-xs font-medium text-zinc-700">Labor Cost</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        name="laborCost"
+                        value={form.laborCost}
+                        onChange={handleFieldChange}
+                        className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                        placeholder="0.00"
+                        required
+                      />
+                      <p className="mt-1 text-[10px] text-zinc-500">Commission is calculated on this value.</p>
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-zinc-700">Total Price</label>
+                      <input
+                        type="text"
+                        value={form.price}
+                        disabled
+                        className="mt-1 w-full rounded border border-zinc-300 bg-gray-100 px-3 py-2 text-sm text-gray-700 cursor-not-allowed"
+                      />
+                      <p className="mt-1 text-[10px] text-zinc-500">Auto-calculated as Labor Cost.</p>
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <label className="text-xs font-medium text-zinc-700">Product Cost</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    name="productCost"
-                    value={form.productCost}
-                    onChange={handleFieldChange}
-                    className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
-                    placeholder="0.00"
-                    required
-                  />
-                  <p className="mt-1 text-[10px] text-zinc-500">Materials or product component cost.</p>
+
+                {/* Commission section for single services */}
+                <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
+                  <h3 className="text-sm font-semibold text-zinc-900 mb-2">Commission Default</h3>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div>
+                      <label className="text-xs font-medium text-zinc-700">Commission Type</label>
+                      <select
+                        name="commissionType"
+                        value={form.commissionType}
+                        onChange={handleFieldChange}
+                        className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                      >
+                        <option value="percentage">Percentage</option>
+                        <option value="fixed">Fixed Amount ($)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-zinc-700">Commission Value</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step={form.commissionType === "percentage" ? "1" : "0.01"}
+                        name="commissionValue"
+                        value={form.commissionValue}
+                        onChange={handleFieldChange}
+                        className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                        placeholder={form.commissionType === "percentage" ? "e.g., 10" : "e.g., 5.00"}
+                      />
+                      <p className="mt-1 text-[10px] text-zinc-500">
+                        {form.commissionType === "percentage" ? "Percentage of labor cost" : "Fixed amount per service"}
+                      </p>
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <label className="text-xs font-medium text-zinc-700">Total Price</label>
-                  <input
-                    type="text"
-                    value={form.price}
-                    disabled
-                    className="mt-1 w-full rounded border border-zinc-300 bg-gray-100 px-3 py-2 text-sm text-gray-700 cursor-not-allowed"
-                  />
-                  <p className="mt-1 text-[10px] text-zinc-500">Auto-calculated as Labor + Product.</p>
-                </div>
-              </div>
-            </div>
+              </>
+            )}
 
             <div>
               <label className="text-xs font-medium text-zinc-700">Service Type</label>
@@ -709,41 +784,6 @@ function ServicesPageContent() {
               </select>
             </div>
 
-            {/* Commission section */}
-            <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
-              <h3 className="text-sm font-semibold text-zinc-900 mb-2">Commission Default</h3>
-              <div className="grid gap-3 md:grid-cols-2">
-                <div>
-                  <label className="text-xs font-medium text-zinc-700">Commission Type</label>
-                  <select
-                    name="commissionType"
-                    value={form.commissionType}
-                    onChange={handleFieldChange}
-                    className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
-                  >
-                    <option value="percentage">Percentage</option>
-                    <option value="fixed">Fixed Amount ($)</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-zinc-700">Commission Value</label>
-                  <input
-                    type="number"
-                    min="0"
-                    step={form.commissionType === "percentage" ? "1" : "0.01"}
-                    name="commissionValue"
-                    value={form.commissionValue}
-                    onChange={handleFieldChange}
-                    className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
-                    placeholder={form.commissionType === "percentage" ? "e.g., 10" : "e.g., 5.00"}
-                  />
-                  <p className="mt-1 text-[10px] text-zinc-500">
-                    {form.commissionType === "percentage" ? "Percentage of labor cost" : "Fixed amount per service"}
-                  </p>
-                </div>
-              </div>
-            </div>
-
             <div>
               <label className="text-xs font-medium text-zinc-700">Tags</label>
               <input
@@ -759,82 +799,92 @@ function ServicesPageContent() {
               <div className="space-y-4 rounded-lg border border-blue-200 bg-blue-50 p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <h3 className="text-sm font-semibold text-zinc-900">Bundle Editor</h3>
-                    <p className="text-xs text-zinc-600">Group existing services into one sellable service line.</p>
+                    <h3 className="text-sm font-semibold text-zinc-900">Bundle Sub‑Services</h3>
+                    <p className="text-xs text-zinc-600">Define the components of this bundle. One sub‑service must be the Aggregator (holds the full bundle price).</p>
+                    <div className="mt-1">
+                      <span className="text-xs font-medium text-zinc-700">Total Price: </span>
+                      <span className="text-sm font-bold text-blue-700">${Number(form.price || 0).toFixed(2)}</span>
+                    </div>
                   </div>
                   <button
                     type="button"
                     onClick={addBundleRow}
                     className="rounded bg-blue-600 px-3 py-2 text-xs font-medium text-white hover:bg-blue-700"
                   >
-                    Add Component
+                    + Add Sub‑Service
                   </button>
                 </div>
 
                 <div className="space-y-3">
                   {bundleRows.map((row, index) => (
                     <div key={index} className="rounded border border-blue-200 bg-white p-4">
-                      <div className="grid gap-3 md:grid-cols-[1.1fr_100px_1fr_1fr_120px]">
+                      <div className="grid gap-3 md:grid-cols-[1.5fr_1fr_1fr_1fr_1fr_auto]">
                         <div>
-                          <label className="text-[11px] font-medium text-zinc-700">Service</label>
+                          <label className="text-[11px] font-medium text-zinc-700">Name *</label>
+                          <input
+                            value={row.name}
+                            onChange={(event) => updateBundleRow(index, "name", event.target.value)}
+                            className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                            placeholder="e.g., Massage"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[11px] font-medium text-zinc-700">Labor Cost</label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={row.laborCost}
+                            onChange={(event) => updateBundleRow(index, "laborCost", event.target.value)}
+                            className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                            placeholder="0.00"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[11px] font-medium text-zinc-700">Deduction Timing</label>
                           <select
-                            value={row.serviceProductId}
-                            onChange={(event) => updateBundleRow(index, "serviceProductId", event.target.value)}
+                            value={row.commissionDeductionTiming}
+                            onChange={(event) => updateBundleRow(index, "commissionDeductionTiming", event.target.value)}
                             className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
                           >
-                            <option value="">Select service</option>
-                            {bundleServiceOptions.map((service) => {
-                              const serviceId = service._id || service.id;
-                              return (
-                                <option key={serviceId} value={serviceId}>
-                                  {service.name} ({service.sku})
-                                </option>
-                              );
-                            })}
+                            <option value="before_commission">Before Commission</option>
+                            <option value="after_deductions">After Deductions</option>
                           </select>
                         </div>
                         <div>
-                          <label className="text-[11px] font-medium text-zinc-700">Qty</label>
-                          <input
-                            type="number"
-                            min="1"
-                            step="1"
-                            value={row.quantity}
-                            onChange={(event) => updateBundleRow(index, "quantity", event.target.value)}
-                            className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[11px] font-medium text-zinc-700">Name snapshot</label>
-                          <input
-                            value={row.nameSnapshot}
-                            onChange={(event) => updateBundleRow(index, "nameSnapshot", event.target.value)}
-                            className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
-                            placeholder="Component name"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[11px] font-medium text-zinc-700">SKU snapshot</label>
-                          <input
-                            value={row.skuSnapshot}
-                            onChange={(event) => updateBundleRow(index, "skuSnapshot", event.target.value)}
-                            className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
-                            placeholder="Component SKU"
-                          />
-                        </div>
-                        <div className="flex items-end gap-2">
-                          <div className="flex-1">
-                            <label className="text-[11px] font-medium text-zinc-700">Price snapshot</label>
+                          <label className="text-[11px] font-medium text-zinc-700">Commission</label>
+                          <div className="flex gap-1">
+                            <select
+                              value={row.commissionType}
+                              onChange={(event) => updateBundleRow(index, "commissionType", event.target.value)}
+                              className="mt-1 w-16 rounded border border-zinc-300 px-2 py-2 text-sm"
+                            >
+                              <option value="percentage">%</option>
+                              <option value="fixed">$</option>
+                            </select>
                             <input
                               type="number"
                               min="0"
-                              step="0.01"
-                              value={row.priceSnapshot}
-                              onChange={(event) => updateBundleRow(index, "priceSnapshot", event.target.value)}
-                              className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
-                              placeholder="0.00"
+                              step={row.commissionType === "percentage" ? "1" : "0.01"}
+                              value={row.commissionValue}
+                              onChange={(event) => updateBundleRow(index, "commissionValue", event.target.value)}
+                              className="mt-1 flex-1 rounded border border-zinc-300 px-3 py-2 text-sm"
+                              placeholder="0"
                             />
                           </div>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <label className="text-[10px] font-medium text-zinc-700 flex items-center gap-1">
+                            <input
+                              type="checkbox"
+                              checked={row.isAggregator}
+                              onChange={(event) => updateBundleRow(index, "isAggregator", event.target.checked)}
+                              className="w-4 h-4"
+                            />
+                            Aggregator
+                          </label>
+                        </div>
+                        <div className="flex items-end gap-1">
                           <button
                             type="button"
                             onClick={() => removeBundleRow(index)}
@@ -846,10 +896,6 @@ function ServicesPageContent() {
                       </div>
                     </div>
                   ))}
-                </div>
-
-                <div className="rounded border border-blue-200 bg-white p-3 text-sm text-zinc-700">
-                  Bundle snapshot total: ${bundlePreviewTotal.toFixed(2)}
                 </div>
               </div>
             ) : (

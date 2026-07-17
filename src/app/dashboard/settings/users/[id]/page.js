@@ -38,17 +38,14 @@ export default function UserDetailPage() {
     setLoading(true);
     setError("");
     try {
-      // Fetch user details (includes role, permissions, locations)
       const userRes = await apiFetch(`/users/${userId}`);
       const userData = userRes?.user || userRes?.data?.user || null;
       if (!userData) throw new Error("User not found");
       setUser(userData);
 
-      // Set role and locations for editing
       setSelectedRole(userData.role || "Employee");
       setSelectedLocations(userData.locations || []);
 
-      // Build overrides map from user's commissionOverrides
       const overrideMap = {};
       if (Array.isArray(userData.commissionOverrides)) {
         userData.commissionOverrides.forEach((ov) => {
@@ -60,12 +57,10 @@ export default function UserDetailPage() {
       }
       setOverrides(overrideMap);
 
-      // Fetch all services
       const servicesRes = await apiFetch("/products?type=service&limit=200");
       const allServices = servicesRes?.products || [];
       setServices(allServices);
 
-      // Fetch locations
       const locationsRes = await apiFetch("/locations?limit=100");
       const allLocations = locationsRes?.locations || [];
       setLocations(allLocations);
@@ -82,12 +77,40 @@ export default function UserDetailPage() {
     }
   }, [userId, canView]);
 
-  const handleOverrideChange = (serviceId, field, value) => {
+  // Build flat list of override items (single services + bundle children)
+  const overrideItems = [];
+  services.forEach((service) => {
+    const serviceId = service._id || service.id;
+    if (service.serviceKind === "bundle" && Array.isArray(service.bundleSubServices)) {
+      service.bundleSubServices.forEach((sub, index) => {
+        overrideItems.push({
+          key: `${serviceId}:${index}`,
+          displayName: `${service.name} → ${sub.name}`,
+          isBundleChild: true,
+          bundleId: serviceId,
+          subIndex: index,
+          subName: sub.name,
+          defaultCommissionType: sub.commissionType || "percentage",
+          defaultCommissionValue: sub.commissionValue || 0,
+        });
+      });
+    } else {
+      overrideItems.push({
+        key: serviceId,
+        displayName: service.name,
+        isBundleChild: false,
+        defaultCommissionType: service.commissionType || "percentage",
+        defaultCommissionValue: service.commissionValue || 0,
+      });
+    }
+  });
+
+  const handleOverrideChange = (key, field, value) => {
     if (!canManageUsers) return;
     setOverrides((prev) => ({
       ...prev,
-      [serviceId]: {
-        ...prev[serviceId],
+      [key]: {
+        ...prev[key],
         [field]: value,
       },
     }));
@@ -101,8 +124,8 @@ export default function UserDetailPage() {
     try {
       const overrideArray = Object.entries(overrides)
         .filter(([_, ov]) => ov.type && ov.value !== undefined && ov.value !== "")
-        .map(([serviceId, ov]) => ({
-          serviceId,
+        .map(([key, ov]) => ({
+          serviceId: key, // can be a product ID or a composite key (bundleId:index)
           commissionType: ov.type,
           commissionValue: toNumberOrZero(ov.value),
         }));
@@ -169,7 +192,6 @@ export default function UserDetailPage() {
     }
   };
 
-  // NEW: Sync permissions
   const handleSyncPermissions = async () => {
     if (!canManageUsers) return;
     setSaving(true);
@@ -282,7 +304,7 @@ export default function UserDetailPage() {
         </div>
       </div>
 
-      {/* Permissions & Roles Section (only for managers/owners) */}
+      {/* Permissions & Roles Section */}
       {canManageUsers && (
         <div className="rounded-lg border border-zinc-200 bg-white p-6 shadow-sm">
           <h2 className="text-lg font-semibold text-zinc-900 mb-4">Permissions & Roles</h2>
@@ -453,16 +475,16 @@ export default function UserDetailPage() {
           </div>
         )}
 
-        {services.length === 0 ? (
+        {overrideItems.length === 0 ? (
           <div className="py-4 text-sm text-zinc-500">
-            No services found. Create services first to set overrides.
+            No services or bundle sub‑services found.
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-zinc-200 text-left text-xs font-medium uppercase tracking-wider text-zinc-500">
-                  <th className="py-3 pr-4">Service</th>
+                  <th className="py-3 pr-4">Service / Sub‑service</th>
                   <th className="py-3 pr-4">Default</th>
                   <th className="py-3 pr-4">Override Type</th>
                   <th className="py-3 pr-4">Override Value</th>
@@ -470,37 +492,35 @@ export default function UserDetailPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-100">
-                {services.map((service) => {
-                  const serviceId = service._id || service.id;
-                  const defaultComm = {
-                    type: service.commissionType || "percentage",
-                    value: service.commissionValue || 0,
-                  };
-                  const override = overrides[serviceId] || {};
+                {overrideItems.map((item) => {
+                  const override = overrides[item.key] || {};
                   const overrideType = override.type || "";
                   const overrideValue =
                     override.value !== undefined ? String(override.value) : "";
-                  const effectiveType = overrideType || defaultComm.type;
+                  const effectiveType = overrideType || item.defaultCommissionType;
                   const effectiveValue =
-                    overrideValue !== "" ? toNumberOrZero(overrideValue) : defaultComm.value;
+                    overrideValue !== "" ? toNumberOrZero(overrideValue) : item.defaultCommissionValue;
                   const isOverridden = !!overrideType && overrideValue !== "";
 
                   return (
-                    <tr key={serviceId} className="hover:bg-zinc-50">
+                    <tr key={item.key} className="hover:bg-zinc-50">
                       <td className="py-3 pr-4 font-medium text-zinc-900">
-                        {service.name}
+                        {item.displayName}
+                        {item.isBundleChild && (
+                          <span className="ml-2 text-[10px] text-blue-500 bg-blue-50 px-1.5 py-0.5 rounded">bundle</span>
+                        )}
                       </td>
                       <td className="py-3 pr-4 text-zinc-600">
-                        {defaultComm.type === "percentage"
-                          ? `${defaultComm.value}%`
-                          : `$${defaultComm.value.toFixed(2)}`}
+                        {item.defaultCommissionType === "percentage"
+                          ? `${item.defaultCommissionValue}%`
+                          : `$${item.defaultCommissionValue.toFixed(2)}`}
                       </td>
                       <td className="py-3 pr-4">
                         {canManageUsers ? (
                           <select
                             value={overrideType}
                             onChange={(e) =>
-                              handleOverrideChange(serviceId, "type", e.target.value)
+                              handleOverrideChange(item.key, "type", e.target.value)
                             }
                             className="rounded border border-zinc-300 px-2 py-1 text-xs"
                           >
@@ -522,7 +542,7 @@ export default function UserDetailPage() {
                             step={overrideType === "percentage" ? "1" : "0.01"}
                             value={overrideValue}
                             onChange={(e) =>
-                              handleOverrideChange(serviceId, "value", e.target.value)
+                              handleOverrideChange(item.key, "value", e.target.value)
                             }
                             className="w-20 rounded border border-zinc-300 px-2 py-1 text-xs"
                             placeholder="—"

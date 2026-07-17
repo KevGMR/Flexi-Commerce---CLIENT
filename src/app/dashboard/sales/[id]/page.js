@@ -173,7 +173,6 @@ export default function SaleDetailPage() {
     fetchSaleById();
   }, [params.id, canViewSalesHistory, fetchSaleById]);
 
-  // Fetch delivery if sale has deliveryFeeId
   useEffect(() => {
     if (!sale?.deliveryFeeId) return;
 
@@ -266,14 +265,14 @@ export default function SaleDetailPage() {
     return location?.name || "Unknown Location";
   };
 
-  // Helper to get user name by ID from store or fallback
+  // ✅ FIXED: getUserFullName now falls back to user ID
   const getUserFullName = (userId) => {
     if (!userId) return "Unassigned";
     const cached = userCache[userId];
     if (cached) return cached.fullname || cached.email || userId;
     const fromStore = storeUsers?.find((u) => u._id === userId);
     if (fromStore) return fromStore.fullname || fromStore.email || userId;
-    return userId;
+    return userId; // fallback to ID
   };
 
   // Compute commission summary per user
@@ -303,36 +302,35 @@ export default function SaleDetailPage() {
   }, [saleItems]);
 
   // Fetch user details for commission summary users
-useEffect(() => {
-  const userIds = commissionSummary.map((entry) => entry.userId).filter(Boolean);
-  if (userIds.length === 0) return;
+  useEffect(() => {
+    const userIds = commissionSummary.map((entry) => entry.userId).filter(Boolean);
+    if (userIds.length === 0) return;
 
-  const missingUserIds = userIds.filter((id) => !userCache[id]);
-  if (missingUserIds.length === 0) return;
+    const missingUserIds = userIds.filter((id) => !userCache[id]);
+    if (missingUserIds.length === 0) return;
 
-  const fetchMissingUsers = async () => {
-    try {
-      const results = await Promise.all(
-        missingUserIds.map((id) =>
-          apiFetch(`/users/${id}`).then((res) => ({ id, user: res?.user || res?.data?.user }))
-        )
-      );
-      const newCache = { ...userCache };
-      results.forEach(({ id, user }) => {
-        if (user) newCache[id] = user;
-      });
-      setUserCache(newCache);
-    } catch (err) {
-      console.error("Failed to fetch user details:", err);
-    }
-  };
-  fetchMissingUsers();
-}, [commissionSummary]); // eslint-disable-line react-hooks/exhaustive-deps
+    const fetchMissingUsers = async () => {
+      try {
+        const results = await Promise.all(
+          missingUserIds.map((id) =>
+            apiFetch(`/users/${id}`).then((res) => ({ id, user: res?.user || res?.data?.user }))
+          )
+        );
+        const newCache = { ...userCache };
+        results.forEach(({ id, user }) => {
+          if (user) newCache[id] = user;
+        });
+        setUserCache(newCache);
+      } catch (err) {
+        console.error("Failed to fetch user details:", err);
+      }
+    };
+    fetchMissingUsers();
+  }, [commissionSummary]);
 
   const buildTimeline = () => {
     const events = [];
 
-    // Sale created
     if (sale?.createdAt) {
       events.push({
         type: "created",
@@ -341,7 +339,6 @@ useEffect(() => {
       });
     }
 
-    // Voided
     if (sale?.status === "voided" && sale?.voidedAt) {
       events.push({
         type: "voided",
@@ -351,7 +348,6 @@ useEffect(() => {
       });
     }
 
-    // Refunds
     if (sale?.refundHistory && sale.refundHistory.length > 0) {
       sale.refundHistory.forEach((refund) => {
         events.push({
@@ -363,7 +359,6 @@ useEffect(() => {
       });
     }
 
-    // Sort by date descending
     return events.sort((a, b) => new Date(b.date) - new Date(a.date));
   };
 
@@ -757,8 +752,6 @@ useEffect(() => {
     setSearchResults(filtered.slice(0, 50));
   }, [reservationSearchQuery, reservationSourceTab, reservationSourceProducts, showEditReservationModal]);
 
-
-
   const handleReservationEditFieldChange = (field, value) => {
     setReservationEditForm((prev) => ({
       ...prev,
@@ -867,7 +860,6 @@ useEffect(() => {
     try {
       setSubmittingReservationEdit(true);
 
-      // Build replacementItem based on selected type
       let replacementItemPayload = null;
       if (reservationEditForm.productType === "shopify") {
         if (!selectedShopifyVariant || !selectedShopifyVariant.product) {
@@ -1139,7 +1131,7 @@ useEffect(() => {
             </div>
           </div>
 
-          {/* ======== UPDATED ITEMS SECTION ======== */}
+          {/* Items Section */}
           <div className="rounded-lg border border-zinc-200 bg-white p-6 shadow-sm">
             <h2 className="mb-4 text-lg font-semibold text-zinc-900">Items ({sale.items?.length || 0})</h2>
             <div className="divide-y divide-zinc-200">
@@ -1191,7 +1183,7 @@ useEffect(() => {
                             </span>
                           )}
                           {commissionAmount > 0 && (
-                            <span className="flex items-center gap-1 text-blue-600">
+                            <span className="flex items-center gap-1 rounded bg-blue-50 px-2 py-0.5 text-blue-700">
                               <span className="font-medium">Commission:</span>
                               {formatCurrency(commissionAmount)}
                               {commissionType === "percentage"
@@ -1218,7 +1210,7 @@ useEffect(() => {
             </div>
           </div>
 
-          {/* ======== NEW: COMMISSION SUMMARY SECTION ======== */}
+          {/* Commission Summary */}
           {commissionSummary.length > 0 && (
             <div className="rounded-lg border border-blue-200 bg-blue-50 p-6 shadow-sm">
               <h2 className="mb-4 text-lg font-semibold text-blue-900">Commission Summary</h2>
@@ -1244,6 +1236,9 @@ useEffect(() => {
                           className="rounded-full bg-blue-100 px-3 py-1 text-xs font-medium text-blue-800"
                         >
                           {svc.productName}: {formatCurrency(svc.commissionAmount)}
+                          {svc.commissionType === "percentage"
+                            ? ` (${svc.commissionValue}%)`
+                            : ` ($${svc.commissionValue} fixed)`}
                         </span>
                       ))}
                     </div>
@@ -1379,7 +1374,7 @@ useEffect(() => {
           )}
         </div>
 
-        {/* Right Column (Sidebar) - unchanged */}
+        {/* Right Column (Sidebar) */}
         <div className="space-y-6">
           {/* Customer Section */}
           <div className="rounded-lg border border-zinc-200 bg-white p-6 shadow-sm">
@@ -2191,6 +2186,7 @@ useEffect(() => {
         </div>
       )}
 
+      {/* Create Delivery Modal */}
       {showCreateDeliveryModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
           <div className="w-full max-w-2xl rounded-lg bg-white p-8 shadow-xl">
@@ -2206,7 +2202,6 @@ useEffect(() => {
             )}
 
             <form onSubmit={handleCreateDelivery} className="space-y-6">
-              {/* Recipient Info */}
               <div>
                 <h3 className="mb-4 font-semibold text-zinc-900">Recipient Information</h3>
                 <div className="grid gap-4 md:grid-cols-2">
@@ -2242,7 +2237,6 @@ useEffect(() => {
                 )}
               </div>
 
-              {/* Delivery Address */}
               <div>
                 <h3 className="mb-4 font-semibold text-zinc-900">Delivery Address</h3>
                 <div>
@@ -2260,7 +2254,6 @@ useEffect(() => {
                 </div>
               </div>
 
-              {/* Delivery Details */}
               <div>
                 <h3 className="mb-4 font-semibold text-zinc-900">Delivery Details</h3>
                 <div className="grid gap-4 md:grid-cols-2">
@@ -2289,7 +2282,6 @@ useEffect(() => {
                 </div>
               </div>
 
-              {/* Fee Details */}
               <div>
                 <h3 className="mb-4 font-semibold text-zinc-900">Fee Details</h3>
                 <div className="grid gap-4 md:grid-cols-2">
@@ -2314,7 +2306,6 @@ useEffect(() => {
                 </div>
               </div>
 
-              {/* Modal Actions */}
               <div className="flex gap-3 border-t border-zinc-200 pt-6">
                 <button
                   type="button"
@@ -2337,6 +2328,7 @@ useEffect(() => {
         </div>
       )}
 
+      {/* Collect Payment Modal */}
       {showCollectPaymentModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
           <div className="w-full max-w-lg rounded-lg bg-white p-8 shadow-xl">
@@ -2448,6 +2440,7 @@ useEffect(() => {
         </div>
       )}
 
+      {/* Reallocate Payment Modal */}
       {showReallocatePaymentModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
           <div className="w-full max-w-2xl rounded-lg bg-white p-8 shadow-xl">
