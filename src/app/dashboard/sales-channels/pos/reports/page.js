@@ -1,3 +1,5 @@
+// client/src/app/dashboard/sales-channels/pos/reports/page.js
+
 "use client";
 
 import { useEffect, useMemo, useState } from "react";

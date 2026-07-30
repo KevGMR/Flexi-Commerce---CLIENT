@@ -55,9 +55,9 @@ const cards = [
   },
   // NEW: Backdate Sales Card
   {
-    title: "Backdate Sales",
-    description: "Move sales from one date to another (admin only).",
-    href: "/dashboard/settings/backdate-sales",
+    title: "Backdate Shifts & Sales",
+    description: "Move shifts and sales from one date to another (admin only).",
+    href: "/dashboard/settings/backdate-shifts",
     permission: PERMISSIONS.BACKDATE_SALES,
   },
 ];
