@@ -8,15 +8,33 @@ import { apiFetch } from "@/lib/api-client";
 import { PERMISSIONS } from "@/lib/permissions";
 import { useSessionStore } from "@/store/session";
 
-function StatCard({ label, value, change, icon, tooltip }) {
+function StatCard({ label, value, change, icon, tooltip, color = "gray" }) {
+  const colorMap = {
+    gray: "bg-gray-50",
+    blue: "bg-blue-50",
+    green: "bg-green-50",
+    yellow: "bg-yellow-50",
+    red: "bg-red-50",
+    indigo: "bg-indigo-50",
+    purple: "bg-purple-50",
+  };
+  const textColorMap = {
+    gray: "text-gray-900",
+    blue: "text-blue-600",
+    green: "text-green-600",
+    yellow: "text-yellow-600",
+    red: "text-red-600",
+    indigo: "text-indigo-600",
+    purple: "text-purple-600",
+  };
   return (
-    <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
+    <div className={`rounded-lg border p-4 ${colorMap[color] || colorMap.gray}`}>
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-xs font-medium text-zinc-600">
             {tooltip ? <span title={tooltip}>{label}</span> : label}
           </p>
-          <p className="mt-1 text-2xl font-bold text-zinc-900">{value}</p>
+          <p className={`mt-1 text-2xl font-bold ${textColorMap[color] || textColorMap.gray}`}>{value}</p>
           {change !== undefined && change !== null && (
             <p className={`mt-1 text-xs font-medium ${change > 0 ? "text-green-600" : "text-red-600"}`}>
               {change > 0 ? "+" : ""}{change}% vs last period
@@ -300,10 +318,32 @@ export default function SalesReportsPage() {
           }));
         }
 
+        // ✅ Improved expense summary handling
         if (expenseSummaryRes?.data) {
           setExpenseSummary(expenseSummaryRes.data);
+        } else if (expenseSummaryRes?.__error) {
+          console.warn("Expense summary error:", expenseSummaryRes.__error);
+          // Set default summary with zeros so the UI doesn't break
+          setExpenseSummary({
+            totalExpenses: 0,
+            approvedExpenses: 0,
+            unapprovedExpenses: 0,
+            totalCount: 0,
+            approvedCount: 0,
+            unapprovedCount: 0,
+            byStatus: { approved: 0, draft: 0, submitted: 0, rejected: 0 },
+          });
         } else {
-          setExpenseSummary(null);
+          // No data – still set a default so cards show
+          setExpenseSummary({
+            totalExpenses: 0,
+            approvedExpenses: 0,
+            unapprovedExpenses: 0,
+            totalCount: 0,
+            approvedCount: 0,
+            unapprovedCount: 0,
+            byStatus: { approved: 0, draft: 0, submitted: 0, rejected: 0 },
+          });
         }
 
         const expenseItems = expenseRowsRes?.data?.items || [];
@@ -325,6 +365,18 @@ export default function SalesReportsPage() {
       } catch (fetchError) {
         console.error("Failed to fetch reports:", fetchError);
         setError("Failed to load sales reports");
+        // Ensure expenseSummary is not null so cards still show
+        if (!expenseSummary) {
+          setExpenseSummary({
+            totalExpenses: 0,
+            approvedExpenses: 0,
+            unapprovedExpenses: 0,
+            totalCount: 0,
+            approvedCount: 0,
+            unapprovedCount: 0,
+            byStatus: { approved: 0, draft: 0, submitted: 0, rejected: 0 },
+          });
+        }
       } finally {
         setLoading(false);
       }
@@ -722,20 +774,14 @@ export default function SalesReportsPage() {
                       )}
                     </div>
                     {currentOpenShift ? (
-                      <span
-                        className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                          currentOpenShift.status === "open"
-                            ? "bg-green-100 text-green-800"
-                            : "bg-zinc-200 text-zinc-700"
-                        }`}
-                      >
+                      <span className={`rounded-full px-3 py-1 text-xs font-semibold ${currentOpenShift.status === "open" ? "bg-green-100 text-green-800" : "bg-zinc-200 text-zinc-700"}`}>
                         {currentOpenShift.status}
                       </span>
                     ) : null}
                   </div>
 
                   {currentOpenShift ? (
-                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                    <div className="mt-4 grid gap-3 sm:grid-cols-3">
                       <div className="rounded-lg border border-white bg-white p-3 shadow-sm">
                         <p className="text-xs text-zinc-500">Opening cash</p>
                         <p className="mt-1 text-lg font-semibold text-zinc-900">{currency(currentOpenShift.openingCash)}</p>
@@ -748,38 +794,34 @@ export default function SalesReportsPage() {
                         <p className="text-xs text-zinc-500">Cash expenses</p>
                         <p className="mt-1 text-lg font-semibold text-zinc-900">{currency(currentOpenShift.cashExpenseTotal)}</p>
                       </div>
-                      <div className="rounded-lg border border-white bg-white p-3 shadow-sm">
-                        <p className="text-xs text-zinc-500">Expected closing till</p>
-                        <p className="mt-1 text-lg font-semibold text-zinc-900">{currency(currentOpenShift.expectedClosingCash)}</p>
-                      </div>
-                      <div className="rounded-lg border border-white bg-white p-3 shadow-sm sm:col-span-2">
-                        <p className="text-xs text-zinc-500">Counted till / variance</p>
-                        <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                          <div>
+                      {/* ✅ Removed: "Expected closing till" and "Counted till / variance" */}
+                      <div className="rounded-lg border border-white bg-white p-3 shadow-sm sm:col-span-3">
+                        <div className="flex items-center gap-4">
+                          <div className="flex-1">
+                            <label className="text-xs text-zinc-500">Counted till (enter actual cash count)</label>
                             <input
                               type="number"
                               min="0"
                               step="0.01"
-                              value={closingCashInput}
                               onChange={(event) => setClosingCashInput(event.target.value)}
-                              className="w-full rounded border border-zinc-300 px-3 py-2 text-sm"
-                              placeholder="Counted till amount"
+                              className="mt-1 w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                              placeholder="Enter counted till amount"
                             />
                           </div>
-                          <div className="flex items-center justify-between gap-2 rounded border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700">
-                            <span>
-                              Variance: <strong>{currency(Number(closingCashInput || 0) - Number(currentOpenShift.expectedClosingCash || 0))}</strong>
-                            </span>
+                          <div className="mt-5">
                             <button
                               type="button"
                               onClick={() => handleCloseCurrentShift(currentOpenShift)}
-                              disabled={shiftActionLoading || !canCloseShift}
-                              className="rounded bg-zinc-900 px-3 py-2 text-xs font-semibold text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
+                              disabled={shiftActionLoading || !canCloseShift || !closingCashInput}
+                              className="rounded bg-zinc-900 px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
                             >
-                              {shiftActionLoading ? "Closing..." : "Close open shift"}
+                              {shiftActionLoading ? "Closing..." : "Close Shift"}
                             </button>
                           </div>
                         </div>
+                        <p className="mt-2 text-[10px] text-zinc-400">
+                          Enter the actual cash counted in the till to close the shift.
+                        </p>
                       </div>
                     </div>
                   ) : null}
@@ -817,10 +859,17 @@ export default function SalesReportsPage() {
                             </span>
                           </div>
                           <div className="mt-3 grid gap-2 text-sm text-zinc-600 sm:grid-cols-3">
-                            <div>
-                              <span className="block text-xs text-zinc-500">Expected closing</span>
-                              <span className="font-medium text-zinc-900">{currency(session.expectedClosingCash)}</span>
-                            </div>
+                            {session.status === "closed" ? (
+                                <div>
+                                  <span className="block text-xs text-zinc-500">Expected closing</span>
+                                  <span className="font-medium text-zinc-900">{currency(session.expectedClosingCash)}</span>
+                                </div>
+                              ) : (
+                                <div>
+                                  <span className="block text-xs text-zinc-500">Status</span>
+                                  <span className="font-medium text-zinc-900 capitalize">{session.status}</span>
+                                </div>
+                              )}
                             <div>
                               <span className="block text-xs text-zinc-500">Cash expenses</span>
                               <span className="font-medium text-zinc-900">{currency(session.cashExpenseTotal)}</span>
@@ -993,13 +1042,17 @@ export default function SalesReportsPage() {
                         <span className="text-zinc-600" title="Approved operating expenses in the period">
                           Approved Expenses
                         </span>
-                        <span className="font-semibold text-red-600">-{currency(expenseSummary?.approvedExpenses || 0)}</span>
+                        <span className="font-semibold text-red-600">
+                          -{currency(expenseSummary?.approvedExpenses || 0)}
+                        </span>
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-zinc-600" title="Non-approved operating expenses in the period">
                           Unapproved Expenses
                         </span>
-                        <span className="font-semibold text-amber-600">-{currency(expenseSummary?.unapprovedExpenses || 0)}</span>
+                        <span className="font-semibold text-amber-600">
+                          -{currency(expenseSummary?.unapprovedExpenses || 0)}
+                        </span>
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-zinc-600" title="Approved expenses only used in profit calculations">
@@ -1155,14 +1208,33 @@ export default function SalesReportsPage() {
         </>
       ) : activeTab === "detailed-expenses" ? (
         <>
-          {expenseSummary ? (
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-              <StatCard label="Total Expenses" value={currency(expenseSummary.totalExpenses || 0)} icon="🧾" />
-              <StatCard label="Approved" value={currency(expenseSummary.approvedExpenses || 0)} icon="✅" />
-              <StatCard label="Unapproved" value={currency(expenseSummary.unapprovedExpenses || 0)} icon="⏳" />
-              <StatCard label="Expense Count" value={expenseSummary.totalCount || 0} icon="📋" />
-            </div>
-          ) : null}
+          {/* ✅ Expense cards always rendered – even if expenseSummary is null (fallback to zeros) */}
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <StatCard 
+              label="Total Expenses" 
+              value={currency(expenseSummary?.totalExpenses || 0)} 
+              icon="🧾" 
+              color="gray"
+            />
+            <StatCard 
+              label="Approved" 
+              value={currency(expenseSummary?.approvedExpenses || 0)} 
+              icon="✅" 
+              color="green"
+            />
+            <StatCard 
+              label="Unapproved" 
+              value={currency(expenseSummary?.unapprovedExpenses || 0)} 
+              icon="⏳" 
+              color="yellow"
+            />
+            <StatCard 
+              label="Expense Count" 
+              value={expenseSummary?.totalCount || 0} 
+              icon="📋" 
+              color="blue"
+            />
+          </div>
 
           <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white shadow-sm">
             {expenseRows.length === 0 ? (
