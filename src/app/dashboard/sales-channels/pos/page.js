@@ -1,3 +1,4 @@
+// client/src/app/dashboard/sales-channels/pos/page.js
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
@@ -983,112 +984,146 @@ export default function PosPage() {
     handleCloseSearch();
   };
 
-  const addToCart = (product) => {
-    if (product.serviceKind === "bundle" && product.bundleSubServices && product.bundleSubServices.length > 0) {
-      addBundleToCart(product);
-      return;
-    }
-
-    let parentItemIndex = null;
-    let isChild = false;
-    if (attachMode && attachingServiceIndex !== null) {
-      if (product.type === "service") {
-        setShowAttachModal(true);
-        setPendingServiceProduct(product);
-        return;
-      }
-      parentItemIndex = attachingServiceIndex;
-      isChild = true;
-    }
-
-    const isService = product.type === "service";
-    let laborCost = 0;
-    let price = product.price;
-    if (isService) {
-      const prodDefaults = serviceProductMap[product.id || product._id] || {};
-      laborCost = Number(prodDefaults.laborCost) || 0;
-      price = laborCost;
-    }
-
-    const newItem = {
-      type: product.type,
-      variant: product.id || product._id,
-      name: product.name,
-      price: isChild ? 0 : price,
-      originalPrice: isChild ? product.price : null,
+const addToCart = (product) => {
+  // ---------- FLEXI (physical product from your own DB) ----------
+  if (product.type === "flexi" && product.variantId) {
+    const cartItem = {
+      type: "flexi",
+      variant: product.variantId,          // cart's dedupe key
+      variantId: product.variantId,
+      productId: product.productId,
+      name: product.productName,
+      variantTitle: product.variantTitle || [],
+      sku: product.sku,
+      price: product.unitPrice,
+      originalPrice: null,
       quantity: 1,
       discount: 0,
-      serviceKind: product.serviceKind,
-      serviceBundleComponents: Array.isArray(product.serviceBundleComponents)
-        ? product.serviceBundleComponents.map((component) => ({ ...component }))
-        : undefined,
-      parentItemIndex: parentItemIndex,
+      parentItemIndex: null,
       assignedUser: null,
-      commissionType: null,
-      commissionValue: null,
-      commissionIsOverride: false,
-      commissionDisplay: null,
-      commissionAmount: 0,
-      defaultCommissionType: null,
-      defaultCommissionValue: null,
-      laborCost: isService ? laborCost : 0,
-      productCost: 0,
       isBundleChild: false,
       isBundleParent: false,
     };
-
-    if (isService) {
-      const assignedUserId = saleAssignedUser || null;
-      const assignedUser = assignedUserId
-        ? users.find(u => u._id === assignedUserId)
-        : null;
-
-      const productDefaults = serviceProductMap[product.id || product._id] || {
-        commissionType: product.commissionType || "percentage",
-        commissionValue: product.commissionValue || 0,
-      };
-
-      const commission = getEffectiveCommission(
-        {
-          _id: product.id || product._id,
-          commissionType: productDefaults.commissionType,
-          commissionValue: productDefaults.commissionValue,
-        },
-        assignedUser
-      );
-
-      const includeProduct = false;
-      const commissionAmount = computeCommissionAmount(
-        newItem.laborCost,
-        commission.type,
-        commission.value,
-        0,
-        includeProduct
-      );
-
-      newItem.commissionType = commission.type;
-      newItem.commissionValue = commission.value;
-      newItem.commissionIsOverride = commission.isOverride;
-      newItem.commissionDisplay = commission.display;
-      newItem.commissionAmount = commissionAmount;
-      newItem.defaultCommissionType = productDefaults.commissionType;
-      newItem.defaultCommissionValue = Number(productDefaults.commissionValue) || 0;
-      if (saleAssignedUser) {
-        newItem.assignedUser = saleAssignedUser;
-      }
-    }
-
     if (exchangeMode) {
-      upsertCartItem(exchangeCart, setExchangeCart, newItem);
+      upsertCartItem(exchangeCart, setExchangeCart, cartItem);
     } else {
-      if (product.type === "service") {
-        setAttachMode(false);
-        setAttachingServiceIndex(null);
-      }
-      upsertCartItem(cart, setCart, newItem);
+      upsertCartItem(cart, setCart, cartItem);
       handleCloseSearch();
     }
+    return;
+  }
+
+  // ---------- BUNDLE SERVICE ----------
+  if (
+    product.serviceKind === "bundle" &&
+    product.bundleSubServices &&
+    product.bundleSubServices.length > 0
+  ) {
+    addBundleToCart(product);
+    return;
+  }
+
+  // ---------- ATTACH MODE / SERVICE / SHOPIFY (existing logic) ----------
+  let parentItemIndex = null;
+  let isChild = false;
+  if (attachMode && attachingServiceIndex !== null) {
+    if (product.type === "service") {
+      setShowAttachModal(true);
+      setPendingServiceProduct(product);
+      return;
+    }
+    parentItemIndex = attachingServiceIndex;
+    isChild = true;
+  }
+
+  const isService = product.type === "service";
+  let laborCost = 0;
+  let price = product.price;
+  if (isService) {
+    const prodDefaults = serviceProductMap[product.id || product._id] || {};
+    laborCost = Number(prodDefaults.laborCost) || 0;
+    price = laborCost;
+  }
+
+  const newItem = {
+    type: product.type,
+    variant: product.id || product._id,
+    name: product.name,
+    price: isChild ? 0 : price,
+    originalPrice: isChild ? product.price : null,
+    quantity: 1,
+    discount: 0,
+    serviceKind: product.serviceKind,
+    serviceBundleComponents: Array.isArray(product.serviceBundleComponents)
+      ? product.serviceBundleComponents.map((component) => ({ ...component }))
+      : undefined,
+    parentItemIndex: parentItemIndex,
+    assignedUser: null,
+    commissionType: null,
+    commissionValue: null,
+    commissionIsOverride: false,
+    commissionDisplay: null,
+    commissionAmount: 0,
+    defaultCommissionType: null,
+    defaultCommissionValue: null,
+    laborCost: isService ? laborCost : 0,
+    productCost: 0,
+    isBundleChild: false,
+    isBundleParent: false,
   };
+
+  if (isService) {
+    const assignedUserId = saleAssignedUser || null;
+    const assignedUser = assignedUserId
+      ? users.find((u) => u._id === assignedUserId)
+      : null;
+
+    const productDefaults = serviceProductMap[product.id || product._id] || {
+      commissionType: product.commissionType || "percentage",
+      commissionValue: product.commissionValue || 0,
+    };
+
+    const commission = getEffectiveCommission(
+      {
+        _id: product.id || product._id,
+        commissionType: productDefaults.commissionType,
+        commissionValue: productDefaults.commissionValue,
+      },
+      assignedUser
+    );
+
+    const includeProduct = false;
+    const commissionAmount = computeCommissionAmount(
+      newItem.laborCost,
+      commission.type,
+      commission.value,
+      0,
+      includeProduct
+    );
+
+    newItem.commissionType = commission.type;
+    newItem.commissionValue = commission.value;
+    newItem.commissionIsOverride = commission.isOverride;
+    newItem.commissionDisplay = commission.display;
+    newItem.commissionAmount = commissionAmount;
+    newItem.defaultCommissionType = productDefaults.commissionType;
+    newItem.defaultCommissionValue = Number(productDefaults.commissionValue) || 0;
+    if (saleAssignedUser) {
+      newItem.assignedUser = saleAssignedUser;
+    }
+  }
+
+  if (exchangeMode) {
+    upsertCartItem(exchangeCart, setExchangeCart, newItem);
+  } else {
+    if (product.type === "service") {
+      setAttachMode(false);
+      setAttachingServiceIndex(null);
+    }
+    upsertCartItem(cart, setCart, newItem);
+    handleCloseSearch();
+  }
+};
 
   const updateServiceCosts = (index, field, value) => {
     const newCart = [...cart];
@@ -2322,6 +2357,16 @@ export default function PosPage() {
           productName: item.name,
           assignedUser: null,
         };
+      } else if (item.type === "flexi") {
+        return {
+          ...baseItem,
+          productId: item.productId || item.variant,
+          variantId: item.variantId || item.variant,
+          variantTitle: item.variantTitle || item.selectedOptions || [],
+          productName: item.name,
+          sku: item.sku || "",
+          assignedUser: null,
+        };
       } else {
         return {
           ...baseItem,
@@ -2548,6 +2593,16 @@ export default function PosPage() {
               shopifyVariantId: item.variant,
               sku: item.sku || undefined,
               productName: item.name,
+              assignedUser: null,
+            };
+          } else if (item.type === "flexi") {
+            return {
+              ...baseItem,
+              productId: item.productId || item.variant,
+              variantId: item.variantId || item.variant,
+              variantTitle: item.variantTitle || item.selectedOptions || [],
+              productName: item.name,
+              sku: item.sku || "",
               assignedUser: null,
             };
           } else {

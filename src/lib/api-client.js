@@ -186,6 +186,51 @@ export async function apiFetch(
   return data;
 }
 
+// ---------------------------------------------------------------------------
+// Products
+// ---------------------------------------------------------------------------
+export const productsApi = {
+  list: (params = {}) => {
+    const qs = new URLSearchParams(
+      Object.entries(params).filter(([, v]) => v !== "" && v != null),
+    ).toString();
+    return apiFetch(`/products${qs ? `?${qs}` : ""}`);
+  },
+
+  get: (id) => apiFetch(`/products/${id}`),
+
+  create: (body) =>
+    apiFetch("/products", { method: "POST", body }),
+
+  update: (id, body) =>
+    apiFetch(`/products/${id}`, { method: "PUT", body }),
+
+  remove: (id) =>
+    apiFetch(`/products/${id}`, { method: "DELETE" }),
+
+  /**
+   * Flattened catalogue for the POS.
+   * @param {{ locationId: string, search?: string, skip?: number, limit?: number }} params
+   */
+  posCatalog: (params) => {
+    if (!params?.locationId) {
+      return Promise.reject(new Error("locationId is required for posCatalog"));
+    }
+    const qs = new URLSearchParams(
+      Object.entries(params).filter(([, v]) => v !== "" && v != null),
+    ).toString();
+    return apiFetch(`/products/pos-catalog?${qs}`);
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Locations
+// ---------------------------------------------------------------------------
+export const locationsApi = {
+  list: () => apiFetch("/locations"),
+  get: (id) => apiFetch(`/locations/${id}`),
+};
+
 export function getBaseUrl() {
   return BASE_URL;
 }

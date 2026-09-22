@@ -1,3 +1,4 @@
+// client/src/store/session.js
 "use client";
 
 import { create } from "zustand";
