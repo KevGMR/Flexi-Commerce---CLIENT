@@ -1,8 +1,9 @@
 // IndexedDB utility for storing pending sales and deliveries when offline
 const DB_NAME = "FLEXI_POS";
-const DB_VERSION = 4; // Incremented to add idempotencyKey index
+const DB_VERSION = 5; // Bumped for flexi_products store
 const STORE_NAME = "pending_sales";
 const SHOPIFY_STORE_NAME = "shopify_products";
+const FLEXI_STORE_NAME = "flexi_products";
 const PENDING_DELIVERIES_STORE = "pending_deliveries";
 const PENDING_DELIVERY_UPDATES_STORE = "pending_delivery_updates";
 const CACHED_CATEGORIES_STORE = "cached_delivery_categories";
@@ -13,6 +14,7 @@ function getStoreNames() {
   return [
     STORE_NAME,
     SHOPIFY_STORE_NAME,
+    FLEXI_STORE_NAME,
     PENDING_DELIVERIES_STORE,
     PENDING_DELIVERY_UPDATES_STORE,
     CACHED_CATEGORIES_STORE,
@@ -32,14 +34,15 @@ export async function initDB() {
 
     request.onupgradeneeded = (event) => {
       const database = event.target.result;
-      
+
       // === Pending Sales Store (keyPath: "id", autoIncrement) ===
       if (!database.objectStoreNames.contains(STORE_NAME)) {
-        const store = database.createObjectStore(STORE_NAME, { keyPath: "id", autoIncrement: true });
-        // Add index for idempotencyKey (used for delete and lookup)
+        const store = database.createObjectStore(STORE_NAME, {
+          keyPath: "id",
+          autoIncrement: true,
+        });
         store.createIndex("idempotencyKey", "idempotencyKey", { unique: false });
       } else {
-        // For existing store, add index if missing
         const store = event.target.transaction.objectStore(STORE_NAME);
         if (!store.indexNames.contains("idempotencyKey")) {
           store.createIndex("idempotencyKey", "idempotencyKey", { unique: false });
@@ -48,8 +51,19 @@ export async function initDB() {
 
       // === Shopify Products Store ===
       if (!database.objectStoreNames.contains(SHOPIFY_STORE_NAME)) {
-        const store = database.createObjectStore(SHOPIFY_STORE_NAME, { keyPath: "id" });
+        const store = database.createObjectStore(SHOPIFY_STORE_NAME, {
+          keyPath: "id",
+        });
         store.createIndex("title", "title", { unique: false });
+      }
+
+      // === Flexi Products Store ===
+      if (!database.objectStoreNames.contains(FLEXI_STORE_NAME)) {
+        const store = database.createObjectStore(FLEXI_STORE_NAME, {
+          keyPath: "_id",
+        });
+        store.createIndex("locationId", "locationId", { unique: false });
+        store.createIndex("name", "name", { unique: false });
       }
 
       // === Pending Deliveries Store ===
@@ -89,7 +103,6 @@ export async function initDB() {
 export async function savePendingSale(saleData) {
   if (!db) await initDB();
 
-  // Ensure the sale has a status (default to "pending")
   if (!saleData.status) saleData.status = "pending";
 
   return new Promise((resolve, reject) => {
@@ -188,14 +201,13 @@ export async function deletePendingSale(idempotencyKey) {
     getRequest.onsuccess = () => {
       const record = getRequest.result;
       if (!record) {
-        // If not found, try to find by auto-increment id (backward compatibility)
         const id = parseInt(idempotencyKey, 10);
         if (!isNaN(id)) {
           const deleteByIdRequest = store.delete(id);
           deleteByIdRequest.onerror = () => reject(deleteByIdRequest.error);
           deleteByIdRequest.onsuccess = () => resolve();
         } else {
-          resolve(); // nothing to delete
+          resolve();
         }
         return;
       }
@@ -237,7 +249,6 @@ export async function getPendingSalesCount() {
 }
 
 // ===== DELIVERY FUNCTIONS =====
-// (unchanged - kept as-is)
 export async function savePendingDelivery(deliveryData) {
   if (!db) await initDB();
 
@@ -379,7 +390,6 @@ export async function getPendingDeliveriesCount(locationId = null) {
 }
 
 // ===== DELIVERY UPDATES (STATUS CHANGES) =====
-// (unchanged - kept as-is)
 export async function savePendingDeliveryUpdate(deliveryId, updateData) {
   if (!db) await initDB();
 
@@ -472,7 +482,6 @@ export async function deletePendingDeliveryUpdate(id) {
 }
 
 // ===== CACHED CATEGORIES =====
-// (unchanged - kept as-is)
 export async function cacheDeliveryCategories(locationId, categories) {
   if (!db) await initDB();
 
@@ -548,15 +557,19 @@ export async function clearCachedCategories(locationId = null) {
 function editDistance(a, b) {
   const aLower = a.toLowerCase();
   const bLower = b.toLowerCase();
-  const m = aLower.length, n = bLower.length;
-  const dp = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
+  const m = aLower.length,
+    n = bLower.length;
+  const dp = Array(m + 1)
+    .fill(null)
+    .map(() => Array(n + 1).fill(0));
   for (let i = 0; i <= m; i++) dp[i][0] = i;
   for (let j = 0; j <= n; j++) dp[0][j] = j;
   for (let i = 1; i <= m; i++) {
     for (let j = 1; j <= n; j++) {
-      dp[i][j] = aLower[i - 1] === bLower[j - 1]
-        ? dp[i - 1][j - 1]
-        : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+      dp[i][j] =
+        aLower[i - 1] === bLower[j - 1]
+          ? dp[i - 1][j - 1]
+          : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
     }
   }
   return dp[m][n];
@@ -565,48 +578,32 @@ function editDistance(a, b) {
 function calculateFuzzyScore(query, text) {
   const distance = editDistance(query, text);
   const maxLen = Math.max(query.length, text.length);
-  return 1 - (distance / maxLen);
+  return 1 - distance / maxLen;
 }
 
 function hasWordPrefixMatch(query, text) {
   const lowerQuery = query.toLowerCase();
   const lowerText = text.toLowerCase();
   const words = lowerText.split(/[\s-_,]+/);
-  return words.some(word => word.startsWith(lowerQuery));
+  return words.some((word) => word.startsWith(lowerQuery));
 }
 
-// Shopify product functions (unchanged)
+// ===== SHOPIFY PRODUCTS =====
 export async function setShopifyProducts(products) {
-  console.log("[setShopifyProducts] Called with", products?.length, "products, db exists:", !!db);
-  if (!db) {
-    console.log("[setShopifyProducts] DB not initialized, initializing...");
-    await initDB();
-    console.log("[setShopifyProducts] DB initialized, db:", !!db);
-  }
+  if (!db) await initDB();
   return new Promise((resolve, reject) => {
-    console.log("[setShopifyProducts] Creating transaction for store:", SHOPIFY_STORE_NAME);
     const transaction = db.transaction([SHOPIFY_STORE_NAME], "readwrite");
     const store = transaction.objectStore(SHOPIFY_STORE_NAME);
-    
+
     const clearRequest = store.clear();
-    
-    clearRequest.onerror = () => {
-      console.error("[setShopifyProducts] Failed to clear store:", clearRequest.error);
-      reject(clearRequest.error);
-    };
-    
+
+    clearRequest.onerror = () => reject(clearRequest.error);
+
     clearRequest.onsuccess = () => {
-      console.log("[setShopifyProducts] Cleared store, now adding", products.length, "products");
-      
       let addCount = 0;
       let hasError = false;
-      
-      if (products.length === 0) {
-        console.log("[setShopifyProducts] No products to add");
-      }
-      
+
       for (const product of products) {
-        console.log("[setShopifyProducts] Adding product", product.id, "title:", product.title);
         const addRequest = store.put({
           id: product.id,
           title: product.title,
@@ -615,45 +612,34 @@ export async function setShopifyProducts(products) {
           productType: product.productType,
           status: product.status,
           totalInventory: product.totalInventory,
-          variants: product.variants?.edges?.map(e => ({
-            id: e.node.id,
-            title: e.node.title,
-            sku: e.node.sku,
-            price: parseFloat(e.node.price),
-            inventoryQuantity: e.node.inventoryQuantity,
-            inventoryItemId: e.node.inventoryItem?.id,
-          })) || [],
-          images: product.images?.edges?.map(e => ({
-            url: e.node.url,
-            altText: e.node.altText,
-          })) || [],
+          variants:
+            product.variants?.edges?.map((e) => ({
+              id: e.node.id,
+              title: e.node.title,
+              sku: e.node.sku,
+              price: parseFloat(e.node.price),
+              inventoryQuantity: e.node.inventoryQuantity,
+              inventoryItemId: e.node.inventoryItem?.id,
+            })) || [],
+          images:
+            product.images?.edges?.map((e) => ({
+              url: e.node.url,
+              altText: e.node.altText,
+            })) || [],
           savedAt: new Date().toISOString(),
         });
-        
+
         addRequest.onerror = () => {
-          console.error("[setShopifyProducts] Failed to add product", product.id, ":", addRequest.error);
           hasError = true;
         };
-        
         addRequest.onsuccess = () => {
           addCount++;
-          console.log("[setShopifyProducts] Added product", product.id, `(${addCount}/${products.length})`);
-          if (addCount === products.length && hasError) {
-            console.warn(`[setShopifyProducts] Added ${addCount} products with some errors`);
-          }
         };
       }
     };
-    
-    transaction.onerror = () => {
-      console.error("[setShopifyProducts] Transaction error:", transaction.error);
-      reject(transaction.error);
-    };
-    
-    transaction.oncomplete = () => {
-      console.log("[setShopifyProducts] Transaction complete! Saved Shopify products.");
-      resolve();
-    };
+
+    transaction.onerror = () => reject(transaction.error);
+    transaction.oncomplete = () => resolve();
   });
 }
 
@@ -669,24 +655,18 @@ export async function getShopifyProducts() {
 }
 
 export async function searchShopifyProducts(query = "", limit = 50) {
-  console.log("[searchShopifyProducts] Called with query:", query, "limit:", limit, "db exists:", !!db);
   if (!db) await initDB();
-  
+
   return new Promise((resolve, reject) => {
     const transaction = db.transaction([SHOPIFY_STORE_NAME], "readonly");
     const store = transaction.objectStore(SHOPIFY_STORE_NAME);
     const request = store.getAll();
-    
-    request.onerror = () => {
-      console.error("[searchShopifyProducts] Error retrieving products:", request.error);
-      reject(request.error);
-    };
+
+    request.onerror = () => reject(request.error);
     request.onsuccess = () => {
       const allProducts = request.result || [];
-      console.log("[searchShopifyProducts] Retrieved", allProducts.length, "products from store");
-      
+
       if (!query.trim()) {
-        console.log("[searchShopifyProducts] No query, returning first", Math.min(limit, allProducts.length), "products");
         return resolve(allProducts.slice(0, limit));
       }
 
@@ -702,7 +682,10 @@ export async function searchShopifyProducts(query = "", limit = 50) {
           matchType = "word-prefix";
         }
 
-        const titleScore = calculateFuzzyScore(lowerQuery, product.title.toLowerCase());
+        const titleScore = calculateFuzzyScore(
+          lowerQuery,
+          product.title.toLowerCase()
+        );
         if (titleScore > 0.3) {
           matchScore = Math.max(matchScore, titleScore);
           matchType = matchType || "title";
@@ -730,13 +713,15 @@ export async function searchShopifyProducts(query = "", limit = 50) {
         }
 
         if (matchScore > 0) {
-          results.push({ ...product, _matchScore: matchScore, _matchType: matchType });
+          results.push({
+            ...product,
+            _matchScore: matchScore,
+            _matchType: matchType,
+          });
         }
       }
 
       results.sort((a, b) => b._matchScore - a._matchScore);
-      
-      console.log("[searchShopifyProducts] Found", results.length, "matching products for query:", query);
       resolve(results.slice(0, limit));
     };
   });
@@ -753,6 +738,244 @@ export async function clearShopifyProducts() {
   });
 }
 
+// ===== FLEXI PRODUCTS =====
+
+/**
+ * Replace the cached Flexi catalogue for a location.
+ * Clears existing rows for this location, then inserts fresh ones.
+ * Rows for other locations are untouched.
+ */
+export async function setFlexiProducts(locationId, products) {
+  if (!db) await initDB();
+  if (!locationId) throw new Error("locationId is required for setFlexiProducts");
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([FLEXI_STORE_NAME], "readwrite");
+    const store = transaction.objectStore(FLEXI_STORE_NAME);
+    const index = store.index("locationId");
+
+    const cursorRequest = index.openCursor(IDBKeyRange.only(locationId));
+    const toDelete = [];
+
+    cursorRequest.onsuccess = (event) => {
+      const cursor = event.target.result;
+      if (cursor) {
+        toDelete.push(cursor.primaryKey);
+        cursor.continue();
+      } else {
+        for (const key of toDelete) store.delete(key);
+
+        const savedAt = new Date().toISOString();
+        for (const product of products) {
+          store.put({
+            _id: product._id,
+            locationId,
+            name: product.name,
+            productType: product.productType || "",
+            vendor: product.vendor || "",
+            tags: product.tags || [],
+            images: product.images || [],
+            defaultImage: product.defaultImage || null,
+            variants: product.variants || [],
+            savedAt,
+          });
+        }
+      }
+    };
+
+    cursorRequest.onerror = () => reject(cursorRequest.error);
+    transaction.onerror = () => reject(transaction.error);
+    transaction.oncomplete = () => resolve();
+  });
+}
+
+/**
+ * Read cached Flexi products for a location.
+ * Returns rows sorted by name. Empty array if nothing cached.
+ */
+export async function getFlexiProducts(locationId) {
+  if (!db) await initDB();
+  if (!locationId) return [];
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([FLEXI_STORE_NAME], "readonly");
+    const store = transaction.objectStore(FLEXI_STORE_NAME);
+    const index = store.index("locationId");
+    const request = index.getAll(locationId);
+
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const rows = request.result || [];
+      rows.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+      resolve(rows);
+    };
+  });
+}
+
+/**
+ * Search cached Flexi products.
+ * Uses the same fuzzy scoring as Shopify products for consistency.
+ */
+export async function searchFlexiProducts(locationId, query = "", limit = 100) {
+  const allProducts = await getFlexiProducts(locationId);
+
+  if (!query.trim()) return allProducts.slice(0, limit);
+
+  const lowerQuery = query.toLowerCase().trim();
+  const results = [];
+
+  for (const product of allProducts) {
+    let matchScore = 0;
+    let matchType = null;
+
+    if (hasWordPrefixMatch(lowerQuery, product.name || "")) {
+      matchScore = 0.85;
+      matchType = "word-prefix";
+    }
+
+    const titleScore = calculateFuzzyScore(
+      lowerQuery,
+      (product.name || "").toLowerCase()
+    );
+    if (titleScore > 0.3) {
+      matchScore = Math.max(matchScore, titleScore);
+      matchType = matchType || "name";
+    }
+
+    for (const tag of product.tags || []) {
+      if (String(tag).toLowerCase().includes(lowerQuery)) {
+        matchScore = Math.max(matchScore, 0.6);
+        matchType = matchType || "tag";
+      }
+    }
+
+    for (const variant of product.variants || []) {
+      if (variant.sku) {
+        const sku = variant.sku.toLowerCase();
+        if (sku === lowerQuery) {
+          matchScore = 1.0;
+          matchType = "sku-exact";
+          break;
+        }
+        if (sku.startsWith(lowerQuery)) {
+          matchScore = Math.max(matchScore, 0.9);
+          matchType = "sku-partial";
+        }
+        if (sku.includes(lowerQuery)) {
+          matchScore = Math.max(matchScore, 0.7);
+          matchType = matchType || "sku-contains";
+        }
+      }
+    }
+
+    if (matchScore > 0) {
+      results.push({
+        ...product,
+        _matchScore: matchScore,
+        _matchType: matchType,
+      });
+    }
+  }
+
+  results.sort((a, b) => b._matchScore - a._matchScore);
+  return results.slice(0, limit);
+}
+
+/**
+ * Return cache metadata for a location.
+ * { savedAt, count } or null if nothing cached.
+ */
+export async function getFlexiCacheMeta(locationId) {
+  const products = await getFlexiProducts(locationId);
+  if (products.length === 0) return null;
+
+  return {
+    savedAt: products[0].savedAt || null,
+    count: products.length,
+  };
+}
+
+/**
+ * Decrement cached stock for a variant.
+ * Called after a successful sale so the grid stays accurate.
+ */
+export async function decrementFlexiCache(locationId, variantId, quantity) {
+  if (!db) await initDB();
+  if (!locationId || !variantId || !quantity) return false;
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([FLEXI_STORE_NAME], "readwrite");
+    const store = transaction.objectStore(FLEXI_STORE_NAME);
+    const index = store.index("locationId");
+    const request = index.getAll(locationId);
+
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const rows = request.result || [];
+      let touched = false;
+
+      for (const row of rows) {
+        let rowTouched = false;
+        const variants = (row.variants || []).map((v) => {
+          if (String(v._id) !== String(variantId)) return v;
+          rowTouched = true;
+          return {
+            ...v,
+            availableAtLocation:
+              typeof v.availableAtLocation === "number"
+                ? v.availableAtLocation - quantity
+                : v.availableAtLocation,
+            onHandAtLocation:
+              typeof v.onHandAtLocation === "number"
+                ? v.onHandAtLocation - quantity
+                : v.onHandAtLocation,
+          };
+        });
+
+        if (rowTouched) {
+          store.put({ ...row, variants });
+          touched = true;
+          break;
+        }
+      }
+
+      resolve(touched);
+    };
+  });
+}
+
+/**
+ * Clear cached Flexi products for a location, or all if no locationId.
+ */
+export async function clearFlexiProducts(locationId = null) {
+  if (!db) await initDB();
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([FLEXI_STORE_NAME], "readwrite");
+    const store = transaction.objectStore(FLEXI_STORE_NAME);
+
+    if (locationId) {
+      const index = store.index("locationId");
+      const cursorRequest = index.openCursor(IDBKeyRange.only(locationId));
+      cursorRequest.onsuccess = (event) => {
+        const cursor = event.target.result;
+        if (cursor) {
+          cursor.delete();
+          cursor.continue();
+        }
+      };
+      cursorRequest.onerror = () => reject(cursorRequest.error);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    } else {
+      const request = store.clear();
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve();
+    }
+  });
+}
+
+// ===== MAINTENANCE =====
 export async function clearAllIndexedDbData() {
   if (typeof indexedDB === "undefined") return;
   if (!db) await initDB();

@@ -14,6 +14,7 @@ import {
   setShopifyProducts,
   searchShopifyProducts,
   clearShopifyProducts,
+  decrementFlexiCache
 } from "@/lib/indexeddb";
 import { useSyncManager } from "@/hooks/useSyncManager";
 import { useSessionStore } from "@/store/session";
@@ -28,6 +29,7 @@ import {
 import SearchOverlay from "@/components/pos/SearchOverlay";
 import CustomerSelector from "@/components/pos/CustomerSelector";
 import DeliveryForm from "@/components/pos/DeliveryForm";
+import VariantPickerModal from "@/components/pos/VariantPickerModal";
 
 const paymentMethods = [
   { value: "cash", label: "Cash", icon: "💵" },
@@ -294,6 +296,7 @@ export default function PosPage() {
   const [showHeldSalesModal, setShowHeldSalesModal] = useState(false);
   const [loadingHeldSales, setLoadingHeldSales] = useState(false);
   const [heldSalesSearchQuery, setHeldSalesSearchQuery] = useState("");
+
 
   const cartContainerRef = useRef(null);
 
@@ -992,7 +995,13 @@ const addToCart = (product) => {
       variant: product.variantId,          // cart's dedupe key
       variantId: product.variantId,
       productId: product.productId,
-      name: product.productName,
+      name: (() => {
+        const opts = (product.variantTitle || [])
+          .map((o) => o.value)
+          .filter(Boolean)
+          .join(" / ");
+        return opts ? `${product.productName} — ${opts}` : product.productName;
+      })(),
       variantTitle: product.variantTitle || [],
       sku: product.sku,
       price: product.unitPrice,
@@ -2514,6 +2523,15 @@ const addToCart = (product) => {
     };
 
     setReceipt(receiptInfo);
+    // Update cached Flexi stock so the grid reflects this sale
+    const flexiItems = saleItems.filter((it) => it.type === "flexi" && it.variantId);
+    for (const it of flexiItems) {
+      try {
+        await decrementFlexiCache(locationId, it.variantId, it.quantity);
+      } catch (e) {
+        console.warn("[POS] cache decrement failed for", it.variantId, e);
+      }
+    }
     setShowReceipt(true);
     setStatus(
       isReservationSale
@@ -2679,6 +2697,16 @@ const addToCart = (product) => {
         offlinePayload.idempotencyKey = idempotencyKey;
 
         await savePendingSale(offlinePayload);
+        const offlineFlexiItems = saleItemsForOffline.filter(
+          (it) => it.type === "flexi" && it.variantId,
+        );
+        for (const it of offlineFlexiItems) {
+          try {
+            await decrementFlexiCache(locationId, it.variantId, it.quantity);
+          } catch (e) {
+            console.warn("[POS] offline cache decrement failed for", it.variantId, e);
+          }
+        }
         await updatePendingCounts();
 
         // Offline receipt also grouped
@@ -3177,6 +3205,10 @@ const addToCart = (product) => {
                   handleCloseSearch();
                 }}
                 onShopifyProductClick={handleProductClick}
+                onOpenVariantPicker={(p) => {
+                  setVariantPickerProduct(p);
+                  handleCloseSearch();
+                }}
                 onClose={handleCloseSearch}
               />
             ) : (
@@ -4177,6 +4209,17 @@ const addToCart = (product) => {
             )}
           </div>
         </div>
+      )}
+
+      {variantPickerProduct && (
+        <VariantPickerModal
+          product={variantPickerProduct}
+          onPick={(item) => {
+            addToCart(item);
+            setVariantPickerProduct(null);
+          }}
+          onClose={() => setVariantPickerProduct(null)}
+        />
       )}
     </div>
   );

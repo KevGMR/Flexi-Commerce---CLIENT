@@ -31,6 +31,35 @@ export const hasPartialPaymentSignal = (receipt) => {
   );
 };
 
+/**
+ * Compose a display name for a receipt line item.
+ *
+ * Priority:
+ *   1. If the item has a structured variantTitle and the name doesn't already
+ *      contain the variant values, append them after an em dash.
+ *   2. Otherwise fall back to `name` as-is.
+ */
+const buildItemDisplayName = (item) => {
+  const baseName = item.name || item.productName || "";
+  const variantParts = Array.isArray(item.variantTitle)
+    ? item.variantTitle
+        .map((o) => (o && typeof o === "object" ? o.value : null))
+        .filter(Boolean)
+    : [];
+  const variantLabel = variantParts.join(" / ");
+
+  if (!variantLabel) return baseName;
+  if (!baseName) return variantLabel;
+
+  // Avoid double-composing if name already contains all variant values
+  const alreadyIncluded = variantParts.every((v) =>
+    baseName.toLowerCase().includes(String(v).toLowerCase()),
+  );
+  if (alreadyIncluded) return baseName;
+
+  return `${baseName} — ${variantLabel}`;
+};
+
 export const buildReceiptPrintHtml = ({
   receipt,
   organizationName,
@@ -71,7 +100,7 @@ export const buildReceiptPrintHtml = ({
           (item) =>
             `<div style="margin-bottom: 8px; font-size: 12px;">
         <div style="display: flex; justify-content: space-between;">
-          <span>${item.name}</span>
+          <span>${buildItemDisplayName(item)}</span>
           <span style="color: #f97316;">$${(item.price * item.quantity).toFixed(2)}</span>
         </div>
         <div style="font-size: 11px; color: #666;">Qty: ${item.quantity} × $${item.price.toFixed(2)}</div>
@@ -86,7 +115,7 @@ export const buildReceiptPrintHtml = ({
           (item) =>
             `<div style="margin-bottom: 8px; font-size: 12px;">
         <div style="display: flex; justify-content: space-between;">
-          <span>${item.name}</span>
+          <span>${buildItemDisplayName(item)}</span>
           <span style="color: #4f46e5;">$${(item.price * item.quantity).toFixed(2)}</span>
         </div>
         <div style="font-size: 11px; color: #666;">Qty: ${item.quantity} × $${item.price.toFixed(2)}</div>
@@ -102,7 +131,7 @@ export const buildReceiptPrintHtml = ({
           (item) =>
             `<div style="margin-bottom: 8px; font-size: 12px;">
         <div style="display: flex; justify-content: space-between;">
-          <span>${item.name}</span>
+          <span>${buildItemDisplayName(item)}</span>
           <span ${isReturn ? 'style="color: #f97316;"' : ""}>$${(item.price * item.quantity).toFixed(2)}</span>
         </div>
         <div style="font-size: 11px; color: #666;">Qty: ${item.quantity} × $${item.price.toFixed(2)}</div>

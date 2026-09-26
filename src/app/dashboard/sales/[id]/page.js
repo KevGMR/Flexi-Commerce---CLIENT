@@ -1,3 +1,4 @@
+// client/src/app/dashboard/sales/[id]/page.js
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
@@ -8,6 +9,8 @@ import { searchShopifyProducts } from "@/lib/indexeddb";
 import { useSessionStore } from "@/store/session";
 import { printReceiptInBrowser } from "@/lib/receipt/browserPrint";
 import { mapSaleToReceipt } from "@/lib/receipt/receiptMappers";
+import RefundModal from "@/components/sales/RefundModal";
+import VoidConfirmModal from "@/components/sales/VoidConfirmModal";
 
 export default function SaleDetailPage() {
   const router = useRouter();
@@ -78,10 +81,15 @@ export default function SaleDetailPage() {
     notes: "",
   });
 
+  const [showRefundModal, setShowRefundModal] = useState(false);
+  const [showVoidModal, setShowVoidModal] = useState(false);
+  const [actionStatus, setActionStatus] = useState("");
+
   const canViewSalesHistory = permissions?.includes(PERMISSIONS.VIEW_SALE_HISTORY);
   const canCreateDeliveryFees = permissions?.includes(PERMISSIONS.DELIVERY_FEES_CREATE);
   const canCollectPayment = permissions?.includes(PERMISSIONS.CREATE_SALE);
   const canEditSale = permissions?.includes(PERMISSIONS.EDIT_SALE);
+  const canRefundSale = permissions?.includes(PERMISSIONS.REFUND_SALE);
 
   const roundCurrency = (value) => Math.round(Number(value || 0) * 100) / 100;
 
@@ -1058,18 +1066,30 @@ export default function SaleDetailPage() {
           >
             🖨️ Print
           </button>
-          {sale.status === "completed" && (
-            <>
-              <button className="rounded bg-orange-600 px-4 py-2 text-sm font-medium text-white hover:bg-orange-700">
-                💰 Refund
-              </button>
-              <button className="rounded bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700">
-                ✕ Void
-              </button>
-            </>
-          )}
+          {canRefundSale && sale.status === "completed" && (
+          <>
+            <button
+              onClick={() => setShowRefundModal(true)}
+              className="rounded bg-orange-600 px-4 py-2 text-sm font-medium text-white hover:bg-orange-700"
+            >
+              💰 Refund
+            </button>
+            <button
+              onClick={() => setShowVoidModal(true)}
+              className="rounded bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700"
+            >
+              ✕ Void
+            </button>
+          </>
+        )}
         </div>
       </div>
+
+      {actionStatus && (
+        <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-800">
+          {actionStatus}
+        </div>
+      )}
 
       {/* Main Content - Two Column Layout */}
       <div className="grid gap-6 lg:grid-cols-3">
@@ -2627,6 +2647,30 @@ export default function SaleDetailPage() {
             </form>
           </div>
         </div>
+      )}
+
+      {showRefundModal && (
+        <RefundModal
+          sale={sale}
+          onClose={() => setShowRefundModal(false)}
+          onSuccess={async () => {
+            await Promise.all([fetchSaleById(), fetchReceivable()]);
+            setActionStatus("Refund processed successfully");
+            setTimeout(() => setActionStatus(""), 3000);
+          }}
+        />
+      )}
+
+      {showVoidModal && (
+        <VoidConfirmModal
+          sale={sale}
+          onClose={() => setShowVoidModal(false)}
+          onSuccess={async () => {
+            await Promise.all([fetchSaleById(), fetchReceivable()]);
+            setActionStatus("Sale voided successfully");
+            setTimeout(() => setActionStatus(""), 3000);
+          }}
+        />
       )}
     </div>
   );

@@ -22,6 +22,7 @@ export default function SearchOverlay({
   onAddToCart,
   onShopifyProductClick,
   onClose,
+  onOpenVariantPicker
 }) {
   const selectedLocationId = useSessionStore((s) => s.selectedLocationId);
   const [activeTab, setActiveTab] = useState(readTab);
@@ -145,6 +146,7 @@ export default function SearchOverlay({
             locationId={selectedLocationId}
             searchQuery={searchQuery}
             onAddToCart={onAddToCart}
+            onOpenVariantPicker={onOpenVariantPicker}
           />
         )}
 

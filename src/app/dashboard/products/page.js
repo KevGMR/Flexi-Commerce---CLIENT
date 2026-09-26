@@ -32,9 +32,10 @@ export default function ProductsPage() {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
   const [error, setError] = useState(null);
+  const [pendingArchive, setPendingArchive] = useState(null);
+  const [archiving, setArchiving] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
+  const load = () => {
     setLoading(true);
     const params = { limit: 50 };
     if (search) params.search = search;
@@ -43,16 +44,42 @@ export default function ProductsPage() {
     productsApi
       .list(params)
       .then((data) => {
-        if (cancelled) return;
         setProducts(data.products || []);
         setTotal(data.total || 0);
         setError(null);
       })
-      .catch((e) => !cancelled && setError(e.message))
-      .finally(() => !cancelled && setLoading(false));
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  };
 
-    return () => { cancelled = true; };
+  useEffect(() => {
+    const handle = setTimeout(load, search ? 200 : 0);
+    return () => clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, status]);
+
+  const confirmArchive = async () => {
+    if (!pendingArchive) return;
+    setArchiving(true);
+    try {
+      await productsApi.update(pendingArchive._id, { status: "archived" });
+      setPendingArchive(null);
+      load();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setArchiving(false);
+    }
+  };
+
+  const unarchive = async (product) => {
+    try {
+      await productsApi.update(product._id, { status: "active" });
+      load();
+    } catch (e) {
+      setError(e.message);
+    }
+  };
 
   return (
     <div className="p-6 space-y-6">
@@ -107,17 +134,19 @@ export default function ProductsPage() {
               <th className="px-4 py-3">Vendor</th>
               <th className="px-4 py-3 text-right">Price</th>
               <th className="px-4 py-3 text-right">Stock</th>
+              <th className="px-4 py-3 w-24"></th>
             </tr>
           </thead>
           <tbody>
             {loading && (
-              <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-500">Loading…</td></tr>
+              <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-500">Loading…</td></tr>
             )}
             {!loading && products.length === 0 && (
-              <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-500">No products yet</td></tr>
+              <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-500">No products yet</td></tr>
             )}
             {products.map((p) => {
               const img = p.images?.find((i) => i.isDefault) || p.images?.[0];
+              const isArchived = p.status === "archived";
               return (
                 <tr key={p._id} className="border-b last:border-b-0 hover:bg-gray-50">
                   <td className="px-4 py-3">
@@ -156,12 +185,64 @@ export default function ProductsPage() {
                       </span>
                     )}
                   </td>
+                  <td className="px-4 py-3 text-right">
+                    {isArchived ? (
+                      <button
+                        type="button"
+                        onClick={() => unarchive(p)}
+                        className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+                      >
+                        Restore
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setPendingArchive(p)}
+                        className="text-xs text-red-600 hover:text-red-800 font-medium"
+                      >
+                        Archive
+                      </button>
+                    )}
+                  </td>
                 </tr>
               );
             })}
           </tbody>
         </table>
       </div>
+
+      {pendingArchive && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
+            <h2 className="text-lg font-semibold text-gray-900 mb-2">
+              Archive this product?
+            </h2>
+            <p className="text-sm text-gray-600 mb-1">
+              <span className="font-medium">{pendingArchive.name}</span> will be
+              hidden from the storefront and the POS. Existing sales and
+              reporting stay intact. You can restore it later.
+            </p>
+            <div className="mt-6 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setPendingArchive(null)}
+                disabled={archiving}
+                className="rounded border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmArchive}
+                disabled={archiving}
+                className="rounded bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {archiving ? "Archiving…" : "Archive"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

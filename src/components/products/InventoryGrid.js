@@ -1,5 +1,7 @@
 "use client";
 
+import NumberInput from "./NumberInput";
+
 export default function InventoryGrid({ locations, inventory, variants, onChange }) {
   const findQty = (variantId, locationId) => {
     const row = inventory.find(
@@ -57,12 +59,12 @@ export default function InventoryGrid({ locations, inventory, variants, onChange
               </td>
               {locations.map((l) => (
                 <td key={l._id} className="px-3 py-2 text-right">
-                  <input
-                    type="number"
-                    step="1"
+                  <NumberInput
                     value={findQty(v._id, l._id)}
+                    onChange={(val) => setQty(v._id, l._id, val)}
+                    emptyValue={0}
+                    step="1"
                     disabled={v.trackInventory === false}
-                    onChange={(e) => setQty(v._id, l._id, e.target.value)}
                     className="w-20 px-2 py-1 border rounded text-sm text-right disabled:bg-gray-100"
                   />
                 </td>

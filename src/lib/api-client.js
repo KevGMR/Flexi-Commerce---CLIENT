@@ -231,6 +231,61 @@ export const locationsApi = {
   get: (id) => apiFetch(`/locations/${id}`),
 };
 
+// ---------------------------------------------------------------------------
+// Product Images
+// ---------------------------------------------------------------------------
+export const productImagesApi = {
+  /**
+   * Ask the server for a signed upload target.
+   * Returns { url, resourceUrl, parameters }.
+   */
+  stagedUpload: ({ filename, mimeType, fileSize }) =>
+    apiFetch("/products/images/staged-upload", {
+      method: "POST",
+      body: { filename, mimeType, fileSize },
+    }),
+
+  /**
+   * After the file bytes are POSTed to the staged URL, register it with Shopify.
+   * Returns { shopifyFileId, url, width, height }.
+   */
+  finalize: ({ resourceUrl, alt }) =>
+    apiFetch("/products/images/finalize", {
+      method: "POST",
+      body: { resourceUrl, alt },
+    }),
+
+  /**
+   * Best-effort delete of an orphaned upload.
+   */
+  delete: (shopifyFileId) =>
+    apiFetch(`/products/images/${encodeURIComponent(shopifyFileId)}`, {
+      method: "DELETE",
+    }),
+};
+
+// ---------------------------------------------------------------------------
+// Option Presets
+// ---------------------------------------------------------------------------
+export const optionPresetsApi = {
+  list: () => apiFetch("/option-presets"),
+
+  create: ({ name, values }) =>
+    apiFetch("/option-presets", {
+      method: "POST",
+      body: { name, values },
+    }),
+
+  update: (id, { name, values }) =>
+    apiFetch(`/option-presets/${id}`, {
+      method: "PUT",
+      body: { name, values },
+    }),
+
+  remove: (id) =>
+    apiFetch(`/option-presets/${id}`, { method: "DELETE" }),
+};
+
 export function getBaseUrl() {
   return BASE_URL;
 }
