@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { optionPresetsApi } from "@/lib/api-client";
 import VariantImagePicker from "./VariantImagePicker";
 import NumberInput from "./NumberInput";
@@ -386,16 +386,14 @@ export default function VariantEditor({
                   <th className="px-3 py-2 text-center">Track</th>
                 </tr>
               </thead>
+
               <tbody>
                 {groupedVariants.map((group) => (
-                  <>
+                  <Fragment key={`grp-block-${group.key ?? "__ungrouped__"}`}>
                     {showGrouping && group.label && (
-                      <tr
-                        key={`grp-${group.key}`}
-                        className="bg-gray-100 border-b"
-                      >
+                      <tr className="bg-gray-100 border-b">
                         <td
-                          colSpan={7}
+                          colSpan={1 + options.filter((o) => o.name).length + 4}
                           className="px-3 py-1.5 text-xs font-semibold text-gray-700"
                         >
                           {options[0].name}: {group.label}
@@ -417,9 +415,7 @@ export default function VariantEditor({
                                 })
                               }
                               className="w-10 h-10 rounded border bg-gray-100 overflow-hidden flex items-center justify-center text-xs text-gray-500 hover:border-blue-400"
-                              title={
-                                variantImage ? "Change image" : "Assign image"
-                              }
+                              title={variantImage ? "Change image" : "Assign image"}
                             >
                               {variantImage?.url ? (
                                 // eslint-disable-next-line @next/next/no-img-element
@@ -458,7 +454,6 @@ export default function VariantEditor({
                             />
                           </td>
                           <td className="px-3 py-2 text-right">
-                          <td className="px-3 py-2 text-right">
                             <NumberInput
                               value={v.compareAtPrice}
                               onChange={(val) => updateVariantField(key, "compareAtPrice", val)}
@@ -467,26 +462,22 @@ export default function VariantEditor({
                               className="w-24 px-2 py-1 border rounded text-sm text-right"
                             />
                           </td>
-                          </td>
                           <td className="px-3 py-2 text-center">
                             <input
                               type="checkbox"
                               checked={v.trackInventory !== false}
                               onChange={(e) =>
-                                updateVariantField(
-                                  key,
-                                  "trackInventory",
-                                  e.target.checked,
-                                )
+                                updateVariantField(key, "trackInventory", e.target.checked)
                               }
                             />
                           </td>
                         </tr>
                       );
                     })}
-                  </>
+                  </Fragment>
                 ))}
               </tbody>
+
             </table>
           </div>
         </div>

@@ -19,7 +19,7 @@ export const navItems = [
     permission: PERMISSIONS.VIEW_PRODUCT,
     children: [
       { label: "Services", href: "/dashboard/products/services", permission: PERMISSIONS.VIEW_PRODUCT, icon: "Wrench" },
-      { label: "Collections", href: "/dashboard/collections", permission: PERMISSIONS.VIEW_PRODUCT, icon: "Folder" },
+      { label: "Collections", href: "/dashboard/products/collections", permission: PERMISSIONS.VIEW_PRODUCT, icon: "Folder" },
       { label: "Inventory", href: "/dashboard/inventory", permission: PERMISSIONS.VIEW_PRODUCT, icon: "Cube" },
       { label: "Purchase Orders", href: "/dashboard/purchase-orders", permission: PERMISSIONS.VIEW_PRODUCT, icon: "Clipboard" },
       { label: "Transfers", href: "/dashboard/transfers", permission: PERMISSIONS.VIEW_PRODUCT, icon: "ArrowsRightLeft" },

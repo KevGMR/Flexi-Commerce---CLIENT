@@ -31,6 +31,9 @@ import CustomerSelector from "@/components/pos/CustomerSelector";
 import DeliveryForm from "@/components/pos/DeliveryForm";
 import VariantPickerModal from "@/components/pos/VariantPickerModal";
 
+import CartLine from "@/components/pos/CartLine";
+import BundleManageModal from "@/components/pos/BundleManageModal";
+
 const paymentMethods = [
   { value: "cash", label: "Cash", icon: "💵" },
   { value: "card", label: "Card", icon: "💳" },
@@ -296,6 +299,8 @@ export default function PosPage() {
   const [showHeldSalesModal, setShowHeldSalesModal] = useState(false);
   const [loadingHeldSales, setLoadingHeldSales] = useState(false);
   const [heldSalesSearchQuery, setHeldSalesSearchQuery] = useState("");
+
+  const [manageBundleIndex, setManageBundleIndex] = useState(null);
 
 
   const cartContainerRef = useRef(null);
@@ -892,6 +897,174 @@ export default function PosPage() {
       return;
     }
     setTargetCart([...targetCart, cartItem]);
+  };
+
+const assignUserToServiceItem = (index, userId) => {
+  const newCart = [...cart];
+  const updatedItem = { ...newCart[index] };
+  updatedItem.assignedUser = userId || null;
+
+  const isBundleChildItem = updatedItem.isBundleChild === true;
+
+  if (isBundleChildItem) {
+    const bundleId = updatedItem.variant;
+    const subServiceIndex = updatedItem.subServiceIndex;
+    if (subServiceIndex !== undefined) {
+      const overrideKey = `${bundleId}:${subServiceIndex}`;
+      const userObj = userId ? users.find((u) => u._id === userId) : null;
+
+      let effectiveCommissionType =
+        updatedItem.defaultCommissionType || "percentage";
+      let effectiveCommissionValue = updatedItem.defaultCommissionValue || 0;
+      let isOverride = false;
+      let overrideDisplay = null;
+
+      if (userObj && userObj.commissionOverrides) {
+        const override = userObj.commissionOverrides.find(
+          (ov) => ov.serviceId === overrideKey,
+        );
+        if (override) {
+          effectiveCommissionType = override.commissionType;
+          effectiveCommissionValue = override.commissionValue;
+          isOverride = true;
+          overrideDisplay =
+            effectiveCommissionType === "percentage"
+              ? `${effectiveCommissionValue}%`
+              : `$${effectiveCommissionValue.toFixed(2)}`;
+        }
+      }
+
+      updatedItem.commissionType = effectiveCommissionType;
+      updatedItem.commissionValue = effectiveCommissionValue;
+      updatedItem.commissionIsOverride = isOverride;
+      updatedItem.commissionDisplay = isOverride
+        ? overrideDisplay
+        : updatedItem.commissionDisplay;
+
+      newCart[index] = updatedItem;
+
+      const parentIdx = updatedItem.parentItemIndex;
+      if (parentIdx !== null && parentIdx !== undefined) {
+        const parent = newCart[parentIdx];
+        if (parent && parent.isBundleParent) {
+          const bundleTotal = parent.price;
+          const children = newCart.filter(
+            (it) => it.isBundleChild && it.parentItemIndex === parentIdx,
+          );
+          const updatedChildren = recalculateBundleCommissions(
+            children,
+            bundleTotal,
+          );
+          const childIndices = newCart
+            .map((it, idx) =>
+              it.isBundleChild && it.parentItemIndex === parentIdx ? idx : -1,
+            )
+            .filter((idx) => idx !== -1);
+          for (let i = 0; i < childIndices.length; i++) {
+            newCart[childIndices[i]] = updatedChildren[i];
+          }
+        }
+      }
+    }
+  } else {
+    const productDefaults = serviceProductMap[updatedItem.variant];
+    if (productDefaults) {
+      const userObj = userId ? users.find((u) => u._id === userId) : null;
+      const commission = getEffectiveCommission(
+        {
+          _id: updatedItem.variant,
+          commissionType: productDefaults.commissionType,
+          commissionValue: productDefaults.commissionValue,
+        },
+        userObj,
+      );
+      updatedItem.commissionType = commission.type;
+      updatedItem.commissionValue = commission.value;
+      updatedItem.commissionIsOverride = commission.isOverride;
+      updatedItem.commissionDisplay = commission.display;
+      updatedItem.commissionAmount = computeCommissionAmount(
+        updatedItem.laborCost || 0,
+        commission.type,
+        commission.value,
+        0,
+        false,
+      );
+      newCart[index] = updatedItem;
+    }
+  }
+
+  if (!isBundleChildItem) {
+    newCart[index] = updatedItem;
+  }
+
+  setCart(newCart);
+};
+
+  const bulkAssignBundleChildren = (parentIndex, userId) => {
+    const newCart = [...cart];
+
+    const childIndices = newCart
+      .map((it, idx) =>
+        it.isBundleChild && it.parentItemIndex === parentIndex ? idx : -1,
+      )
+      .filter((idx) => idx !== -1);
+
+    if (childIndices.length === 0) return;
+
+    const userObj = userId ? users.find((u) => u._id === userId) : null;
+    const parent = newCart[parentIndex];
+
+    for (const idx of childIndices) {
+      const child = { ...newCart[idx] };
+      child.assignedUser = userId || null;
+
+      const subServiceIndex = child.subServiceIndex;
+      let effectiveCommissionType =
+        child.defaultCommissionType || "percentage";
+      let effectiveCommissionValue = child.defaultCommissionValue || 0;
+      let isOverride = false;
+      let overrideDisplay = null;
+
+      if (userObj && userObj.commissionOverrides && subServiceIndex !== undefined) {
+        const overrideKey = `${child.variant}:${subServiceIndex}`;
+        const override = userObj.commissionOverrides.find(
+          (ov) => ov.serviceId === overrideKey,
+        );
+        if (override) {
+          effectiveCommissionType = override.commissionType;
+          effectiveCommissionValue = override.commissionValue;
+          isOverride = true;
+          overrideDisplay =
+            effectiveCommissionType === "percentage"
+              ? `${effectiveCommissionValue}%`
+              : `$${effectiveCommissionValue.toFixed(2)}`;
+        }
+      }
+
+      child.commissionType = effectiveCommissionType;
+      child.commissionValue = effectiveCommissionValue;
+      child.commissionIsOverride = isOverride;
+      child.commissionDisplay = isOverride
+        ? overrideDisplay
+        : child.defaultCommissionType === "percentage"
+          ? `${child.defaultCommissionValue}%`
+          : `$${Number(child.defaultCommissionValue || 0).toFixed(2)}`;
+
+      newCart[idx] = child;
+    }
+
+    if (parent && parent.isBundleParent) {
+      const bundleTotal = parent.price;
+      const children = newCart.filter(
+        (it) => it.isBundleChild && it.parentItemIndex === parentIndex,
+      );
+      const updatedChildren = recalculateBundleCommissions(children, bundleTotal);
+      for (let i = 0; i < childIndices.length; i++) {
+        newCart[childIndices[i]] = updatedChildren[i];
+      }
+    }
+
+    setCart(newCart);
   };
 
   // Add a bundle to cart – all children start with their own laborCost
@@ -3221,298 +3394,55 @@ const addToCart = (product) => {
                   </div>
                 ) : (
                   <div className="space-y-2">
+
                     {cart.map((item, index) => {
-                      const isService = item.type === "service";
-                      const isChild = item.parentItemIndex !== null && item.parentItemIndex !== undefined && !item.isBundleParent;
-                      const isBundleParent = item.isBundleParent === true;
-                      const isBundleChild = item.isBundleChild === true;
-                      const isAttachActive = attachMode && attachingServiceIndex === index;
+                      // Never render bundle children inline — they live only inside the Manage modal
+                      if (item.isBundleChild === true) {
+                        return null;
+                      }
 
                       return (
-                        <div key={index} className={`bg-gray-50 rounded-lg p-3 ${isChild ? "ml-4 border-l-2 border-blue-300" : ""}`}>
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <h4 className="font-medium text-gray-900 text-sm truncate">{item.name}</h4>
-                                {isBundleParent && <span className="text-[10px] bg-purple-100 text-purple-600 px-1.5 py-0.5 rounded whitespace-nowrap">Bundle</span>}
-                                {isBundleChild && <span className="text-[10px] bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded whitespace-nowrap">Bundle item</span>}
-                                {isChild && !isBundleChild && <span className="text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded whitespace-nowrap">attached</span>}
-                                {isService && <span className="text-[10px] bg-purple-100 text-purple-600 px-1.5 py-0.5 rounded whitespace-nowrap">service</span>}
-                              </div>
-                              {isBundleParent && (
-                                <div className="text-xs text-gray-500 mt-1">
-                                  {item.quantity} × {cart.filter(i => i.parentItemIndex === index && i.isBundleChild).length} sub‑services
-                                </div>
-                              )}
-                              {isService && !isBundleParent && (
-                                <div className="mt-1 space-y-1">
-                                  <div className="flex items-center gap-1">
-                                    <label className="text-[10px] text-gray-500">Labor:</label>
-                                    <input
-                                      type="number"
-                                      step="0.01"
-                                      min="0"
-                                      value={item.laborCost || 0}
-                                      onChange={(e) => {
-                                        if (isBundleChild) {
-                                          updateBundleChildCosts(index, "laborCost", e.target.value);
-                                        } else {
-                                          updateServiceCosts(index, "laborCost", e.target.value);
-                                        }
-                                      }}
-                                      className="w-16 px-1 py-0.5 text-xs border border-gray-300 rounded"
-                                    />
-                                    <span className="text-[10px] text-gray-500">= ${item.price.toFixed(2)}</span>
-                                  </div>
-                                  {isBundleChild && item.commissionDeductionTiming && (
-                                    <div className="text-[10px] text-gray-400">
-                                      Timing: {item.commissionDeductionTiming === "before_commission" ? "Before Commission" : "After Deductions"}
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-                              {!isService && !isBundleParent && !isBundleChild && (
-                                <div className="flex items-center gap-2 mt-1">
-                                  {editingPriceIndex === index ? (
-                                    <input autoFocus type="number" step="0.01" value={editingPriceValue} onChange={(e) => setEditingPriceValue(e.target.value)} onBlur={() => savePriceEdit(index)} onKeyDown={(e) => e.key === "Enter" && savePriceEdit(index)} className="w-20 px-2 py-1 border border-blue-300 rounded text-sm" />
-                                  ) : (
-                                    <button onClick={() => handlePriceEdit(index)} className="text-sm text-gray-500 hover:text-blue-600 flex items-center gap-1" title="Click to edit price">
-                                      ${item.price.toFixed(2)} <span className="text-xs">✎</span>
-                                    </button>
-                                  )}
-                                </div>
-                              )}
-                              {useSessionStore.getState().can(PERMISSIONS.POS_APPLY_DISCOUNT) && !isChild && !isBundleParent && !isBundleChild && (
-                                <div className="mt-1">
-                                  {editingDiscountIndex === index ? (
-                                    <div className="flex items-center gap-2">
-                                      <select value={discountType} onChange={(e) => setDiscountType(e.target.value)} className="px-2 py-1 border border-green-300 rounded text-xs">
-                                        <option value="fixed">$</option>
-                                        <option value="percentage">%</option>
-                                      </select>
-                                      <input autoFocus type="number" step="0.01" placeholder="0" value={discountValue} onChange={(e) => setDiscountValue(e.target.value)} onBlur={() => saveDiscountEdit(index)} onKeyDown={(e) => e.key === "Enter" && saveDiscountEdit(index)} className="w-20 px-2 py-1 border border-green-300 rounded text-xs" />
-                                      <button onClick={() => { setEditingDiscountIndex(null); setDiscountValue(""); }} className="text-xs text-gray-500">✕</button>
-                                    </div>
-                                  ) : (
-                                    <button onClick={() => handleDiscountEdit(index)} className="text-xs text-green-600 hover:text-green-700 flex items-center gap-1" title="Click to apply discount">
-                                      {item.discount > 0 ? (
-                                        <>
-                                          <span className="line-through text-gray-400">${(item.price * item.quantity).toFixed(2)}</span>
-                                          <span className="font-medium">-${item.discount.toFixed(2)} 🏷️</span>
-                                        </>
-                                      ) : (
-                                        <span>+ Add Discount</span>
-                                      )}
-                                    </button>
-                                  )}
-                                </div>
-                              )}
-
-                              {isService && !isBundleParent && (
-                                <div className="mt-1">
-                                  <select
-                                    value={item.assignedUser || ""}
-                                    onChange={(e) => {
-                                      const userId = e.target.value || null;
-                                      const newCart = [...cart];
-                                      const updatedItem = { ...newCart[index] };
-                                      updatedItem.assignedUser = userId;
-
-                                      const isBundleChild = updatedItem.isBundleChild === true;
-
-                                      if (isBundleChild) {
-                                        const bundleId = updatedItem.variant;
-                                        const subServiceIndex = updatedItem.subServiceIndex;
-                                        if (subServiceIndex !== undefined) {
-                                          const overrideKey = `${bundleId}:${subServiceIndex}`;
-                                          const user = userId ? users.find(u => u._id === userId) : null;
-                                          
-                                          // Start with defaults from the bundle definition
-                                          let effectiveCommissionType = updatedItem.defaultCommissionType || "percentage";
-                                          let effectiveCommissionValue = updatedItem.defaultCommissionValue || 0;
-                                          let isOverride = false;
-                                          let overrideDisplay = null;
-
-                                          if (user && user.commissionOverrides) {
-                                            const override = user.commissionOverrides.find(ov => ov.serviceId === overrideKey);
-                                            if (override) {
-                                              // ✅ Override found – use it
-                                              effectiveCommissionType = override.commissionType;
-                                              effectiveCommissionValue = override.commissionValue;
-                                              isOverride = true;
-                                              overrideDisplay = effectiveCommissionType === "percentage"
-                                                ? `${effectiveCommissionValue}%`
-                                                : `$${effectiveCommissionValue.toFixed(2)}`;
-                                              
-                                              console.log(`✅ Override applied for ${updatedItem.name}:`, {
-                                                type: effectiveCommissionType,
-                                                value: effectiveCommissionValue,
-                                                isOverride,
-                                              });
-                                            } else {
-                                              console.log(`❌ No override for ${updatedItem.name} (key: ${overrideKey})`);
-                                            }
-                                          }
-
-                                          // Update the child with the effective commission
-                                          updatedItem.commissionType = effectiveCommissionType;
-                                          updatedItem.commissionValue = effectiveCommissionValue;
-                                          updatedItem.commissionIsOverride = isOverride;
-                                          updatedItem.commissionDisplay = isOverride ? overrideDisplay : updatedItem.commissionDisplay;
-
-                                          // ✅ IMPORTANT: Place the updated child back into the cart BEFORE recalculating
-                                          newCart[index] = updatedItem;
-
-                                          // Now recalculate commissions for the entire bundle
-                                          const parentIdx = updatedItem.parentItemIndex;
-                                          if (parentIdx !== null && parentIdx !== undefined) {
-                                            const parent = newCart[parentIdx];
-                                            if (parent && parent.isBundleParent) {
-                                              const bundleTotal = parent.price;
-                                              const children = newCart.filter(
-                                                (it) => it.isBundleChild && it.parentItemIndex === parentIdx
-                                              );
-                                              
-                                              console.log("Children before recalculation:", children.map(c => ({
-                                                name: c.name,
-                                                commissionType: c.commissionType,
-                                                commissionValue: c.commissionValue,
-                                                price: c.price,
-                                              })));
-                                              
-                                              const updatedChildren = recalculateBundleCommissions(children, bundleTotal);
-                                              
-                                              console.log("Children after recalculation:", updatedChildren.map(c => ({
-                                                name: c.name,
-                                                commissionType: c.commissionType,
-                                                commissionValue: c.commissionValue,
-                                                commissionAmount: c.commissionAmount,
-                                              })));
-                                              
-                                              const childIndices = newCart
-                                                .map((it, idx) => (it.isBundleChild && it.parentItemIndex === parentIdx ? idx : -1))
-                                                .filter(idx => idx !== -1);
-                                              for (let i = 0; i < childIndices.length; i++) {
-                                                newCart[childIndices[i]] = updatedChildren[i];
-                                              }
-                                            }
-                                          }
-                                        }
-                                      } else {
-                                        // Regular service logic
-                                        const productDefaults = serviceProductMap[updatedItem.variant];
-                                        if (productDefaults) {
-                                          const user = userId ? users.find(u => u._id === userId) : null;
-                                          const commission = getEffectiveCommission(
-                                            { _id: updatedItem.variant, commissionType: productDefaults.commissionType, commissionValue: productDefaults.commissionValue },
-                                            user
-                                          );
-                                          const includeProduct = false;
-                                          updatedItem.commissionType = commission.type;
-                                          updatedItem.commissionValue = commission.value;
-                                          updatedItem.commissionIsOverride = commission.isOverride;
-                                          updatedItem.commissionDisplay = commission.display;
-                                          updatedItem.commissionAmount = computeCommissionAmount(
-                                            updatedItem.laborCost || 0,
-                                            commission.type,
-                                            commission.value,
-                                            0,
-                                            includeProduct
-                                          );
-                                          newCart[index] = updatedItem;
-                                        }
-                                      }
-
-                                      // If it's not a bundle child, we already set newCart[index] above, but for safety:
-                                      if (!isBundleChild) {
-                                        newCart[index] = updatedItem;
-                                      }
-
-                                      setCart(newCart);
-                                    }}
-                                    className="text-xs border border-gray-300 rounded px-1 py-0.5 w-full max-w-[120px]"
-                                  >
-                                    <option value="">Assign user</option>
-                                    {users.map((user) => (
-                                      <option key={user._id} value={user._id}>{user.fullname || user.email}</option>
-                                    ))}
-                                  </select>
-                                </div>
-                              )}
-
-                              {isService && !isBundleParent && (
-                                <div className="text-xs mt-1 flex items-center gap-2">
-                                  <span className="text-gray-500">
-                                    Commission: <span className="font-medium text-gray-700">
-                                      {item.commissionType === "percentage"
-                                        ? `${item.commissionValue}% ($${item.commissionAmount?.toFixed(2) || "0.00"})`
-                                        : `$${item.commissionValue?.toFixed(2)}`}
-                                    </span>
-                                  </span>
-                                  {item.commissionIsOverride ? (
-                                    <span className="text-[10px] bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded font-medium">Override</span>
-                                  ) : (
-                                    <span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">Default</span>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-
-                            {/* Right side actions */}
-                            <div className="flex flex-col items-end gap-1 flex-shrink-0">
-                              <button onClick={() => removeFromCart(index)} className="text-red-500 hover:text-red-700">✕</button>
-                              {!isService && !isChild && !isBundleParent && !isBundleChild && cart.some(item => item.type === "service") && (
-                                <button onClick={() => openAttachQuantityModal(index)} className="text-[10px] text-blue-600 hover:text-blue-800 whitespace-nowrap">
-                                  Attach
-                                </button>
-                              )}
-                              {isChild && !isBundleChild && (
-                                <button onClick={() => detachFromService(index)} className="text-[10px] text-red-500 hover:text-red-700 whitespace-nowrap">
-                                  Detach
-                                </button>
-                              )}
-                              {isService && !isBundleParent && !isBundleChild && (
-                                <button
-                                  onClick={() => toggleAttachMode(index)}
-                                  className={`text-[10px] p-1 rounded-full border ${isAttachActive ? "border-blue-500 bg-blue-100 text-blue-700" : "border-gray-300 bg-gray-100 text-gray-500 hover:bg-gray-200"}`}
-                                  title={isAttachActive ? "Stop attaching" : "Start attaching"}
-                                >
-                                  📎
-                                </button>
-                              )}
-                              {isService && isAttachActive && (
-                                <span className="text-[9px] text-blue-600 whitespace-nowrap">Attaching...</span>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Quantity controls and item total */}
-                          <div className="flex items-center justify-between mt-2">
-                            <div className="flex items-center gap-2">
-                              {isBundleParent ? (
-                                <>
-                                  <button onClick={() => updateBundleParentQuantity(index, item.quantity - 1)} className="w-8 h-8 bg-white border border-gray-300 rounded hover:bg-gray-100 font-bold">−</button>
-                                  <span className="w-12 text-center font-medium">{item.quantity}</span>
-                                  <button onClick={() => updateBundleParentQuantity(index, item.quantity + 1)} className="w-8 h-8 bg-white border border-gray-300 rounded hover:bg-gray-100 font-bold">+</button>
-                                </>
-                              ) : isBundleChild ? (
-                                <span className="w-12 text-center font-medium text-gray-500">{item.quantity}</span>
-                              ) : (
-                                <>
-                                  <button onClick={() => updateQuantity(index, item.quantity - 1)} className="w-8 h-8 bg-white border border-gray-300 rounded hover:bg-gray-100 font-bold">−</button>
-                                  <span className="w-12 text-center font-medium">{item.quantity}</span>
-                                  <button onClick={() => updateQuantity(index, item.quantity + 1)} className="w-8 h-8 bg-white border border-gray-300 rounded hover:bg-gray-100 font-bold">+</button>
-                                </>
-                              )}
-                            </div>
-                            <div className="text-right">
-                              <p className="font-bold text-gray-900">${((item.price * item.quantity) - (item.discount || 0)).toFixed(2)}</p>
-                              {item.discount > 0 && <p className="text-xs text-green-600">Saved ${item.discount.toFixed(2)}</p>}
-                            </div>
-                          </div>
-                        </div>
+                        <CartLine
+                          key={index}
+                          item={item}
+                          index={index}
+                          cart={cart}
+                          users={users}
+                          onOpenManage={setManageBundleIndex}
+                          onRemove={removeFromCart}
+                          onPriceEdit={handlePriceEdit}
+                          onPriceSave={savePriceEdit}
+                          onPriceCancel={() => {
+                            setEditingPriceIndex(null);
+                            setEditingPriceValue("");
+                          }}
+                          editingPriceIndex={editingPriceIndex}
+                          editingPriceValue={editingPriceValue}
+                          setEditingPriceValue={setEditingPriceValue}
+                          onDiscountEdit={handleDiscountEdit}
+                          onDiscountSave={saveDiscountEdit}
+                          onDiscountCancel={() => {
+                            setEditingDiscountIndex(null);
+                            setDiscountValue("");
+                          }}
+                          editingDiscountIndex={editingDiscountIndex}
+                          discountType={discountType}
+                          setDiscountType={setDiscountType}
+                          discountValue={discountValue}
+                          setDiscountValue={setDiscountValue}
+                          onUpdateQuantity={updateQuantity}
+                          onUpdateBundleParentQuantity={updateBundleParentQuantity}
+                          onUpdateServiceCosts={updateServiceCosts}
+                          onAssignUser={assignUserToServiceItem}
+                          attachMode={attachMode}
+                          attachingServiceIndex={attachingServiceIndex}
+                          onToggleAttach={toggleAttachMode}
+                          onDetach={detachFromService}
+                          onOpenAttachQuantity={openAttachQuantityModal}
+                        />
                       );
                     })}
+
                   </div>
                 )}
               </div>
@@ -4221,6 +4151,26 @@ const addToCart = (product) => {
           onClose={() => setVariantPickerProduct(null)}
         />
       )}
+
+      {manageBundleIndex !== null && cart[manageBundleIndex] && (
+        <BundleManageModal
+          parent={cart[manageBundleIndex]}
+          children={cart
+            .map((it, idx) => ({ item: it, index: idx }))
+            .filter(
+              ({ item }) =>
+                item.isBundleChild && item.parentItemIndex === manageBundleIndex,
+            )}
+          users={users}
+          onAssign={assignUserToServiceItem}
+          onBulkAssign={(userId) =>
+            bulkAssignBundleChildren(manageBundleIndex, userId)
+          }
+          onRemoveChild={removeFromCart}
+          onClose={() => setManageBundleIndex(null)}
+        />
+      )}
+
     </div>
   );
 }

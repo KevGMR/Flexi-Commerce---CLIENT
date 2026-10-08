@@ -286,6 +286,48 @@ export const optionPresetsApi = {
     apiFetch(`/option-presets/${id}`, { method: "DELETE" }),
 };
 
+// ---------------------------------------------------------------------------
+// Collections
+// ---------------------------------------------------------------------------
+export const collectionsApi = {
+  list: (params = {}) => {
+    const qs = new URLSearchParams(
+      Object.entries(params).filter(([, v]) => v !== "" && v != null),
+    ).toString();
+    return apiFetch(`/collections${qs ? `?${qs}` : ""}`);
+  },
+
+  get: (id) => apiFetch(`/collections/${id}`),
+
+  create: (body) =>
+    apiFetch("/collections", { method: "POST", body }),
+
+  update: (id, body) =>
+    apiFetch(`/collections/${id}`, { method: "PUT", body }),
+
+  remove: (id) =>
+    apiFetch(`/collections/${id}`, { method: "DELETE" }),
+
+  listProducts: (id, params = {}) => {
+    const qs = new URLSearchParams(
+      Object.entries(params).filter(([, v]) => v !== "" && v != null),
+    ).toString();
+    return apiFetch(`/collections/${id}/products${qs ? `?${qs}` : ""}`);
+  },
+
+  addProducts: (id, productIds) =>
+    apiFetch(`/collections/${id}/products`, {
+      method: "POST",
+      body: { productIds },
+    }),
+
+  removeProducts: (id, productIds) =>
+    apiFetch(`/collections/${id}/products`, {
+      method: "DELETE",
+      body: { productIds },
+    }),
+};
+
 export function getBaseUrl() {
   return BASE_URL;
 }

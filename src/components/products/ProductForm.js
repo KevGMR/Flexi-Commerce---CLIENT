@@ -9,6 +9,7 @@ import MediaUploader from "./MediaUploader";
 import DiscardChangesModal from "./DiscardChangesModal";
 import NumberInput from "./NumberInput";
 import { useUnsavedChanges } from "@/hooks/useUnsavedChanges";
+import CollectionPicker from "@/components/collections/CollectionPicker";
 
 const EMPTY = {
   name: "",
@@ -25,6 +26,7 @@ const EMPTY = {
   compareAtPrice: null,
   trackInventory: true,
   variants: [],
+  collectionIds: [],
 };
 
 function Section({ title, children, action }) {
@@ -109,6 +111,7 @@ export default function ProductForm({ productId = null }) {
           options: p.options || [],
           metafields: p.metafields || [],
           images: p.images || [],
+          collectionIds: (p.collectionIds || []).map((c) => c._id || c),
         });
         setVariants(data.variants || []);
         setInventory(data.inventory || []);
@@ -427,6 +430,14 @@ export default function ProductForm({ productId = null }) {
               </Field>
             </div>
           </Section>
+
+          <Section title="Collections">
+            <CollectionPicker
+              value={form.collectionIds || []}
+              onChange={(ids) => update({ collectionIds: ids })}
+            />
+          </Section>
+
         </div>
       </div>
 
