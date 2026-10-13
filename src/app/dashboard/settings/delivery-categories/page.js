@@ -27,7 +27,13 @@ export default function deliveryCategoriesPage() {
       { status: "completed", displayName: "Completed", order: 2 },
     ],
     childOptions: [
-      { optionName: "", price: 0, estimatedDays: 1 },
+      {
+        optionName: "",
+        price: 0,
+        estimatedDays: 1,
+        requiresAddress: true,
+        requiresLandmark: false,
+      },
     ],
   });
 
@@ -109,7 +115,13 @@ export default function deliveryCategoriesPage() {
       ...prev,
       childOptions: [
         ...prev.childOptions,
-        { optionName: "", price: 0, estimatedDays: 1 },
+        {
+          optionName: "",
+          price: 0,
+          estimatedDays: 1,
+          requiresAddress: true,
+          requiresLandmark: false,
+        },
       ],
     }));
   };
@@ -129,6 +141,8 @@ export default function deliveryCategoriesPage() {
       : 1,
     isActive: option.isActive !== false,
     description: option.description || "",
+    requiresAddress: option.requiresAddress !== false,
+    requiresLandmark: option.requiresLandmark === true,
   });
 
   const hasOptionChanged = (originalOption, nextPayload) => {
@@ -138,7 +152,9 @@ export default function deliveryCategoriesPage() {
       currentPayload.price !== nextPayload.price ||
       currentPayload.estimatedDays !== nextPayload.estimatedDays ||
       currentPayload.isActive !== nextPayload.isActive ||
-      currentPayload.description !== nextPayload.description
+      currentPayload.description !== nextPayload.description ||
+      currentPayload.requiresAddress !== nextPayload.requiresAddress ||
+      currentPayload.requiresLandmark !== nextPayload.requiresLandmark
     );
   };
 
@@ -323,6 +339,8 @@ export default function deliveryCategoriesPage() {
         estimatedDays: option.estimatedDays || 1,
         description: option.description || "",
         isActive: option.isActive !== false,
+        requiresAddress: option.requiresAddress !== false,
+        requiresLandmark: option.requiresLandmark === true,
       },
     });
   };
@@ -536,42 +554,80 @@ export default function deliveryCategoriesPage() {
                   Delivery Options *
                 </label>
                 {categoryForm.childOptions.map((option, index) => (
-                  <div key={index} className="flex gap-2 mb-2">
-                    <input
-                      type="text"
-                      placeholder="Option Name (e.g., Same Day)"
-                      value={option.optionName}
-                      onChange={(e) => handleOptionChange(index, "optionName", e.target.value)}
-                      className="flex-1 px-3 py-2 border border-gray-300 rounded-md"
-                      required
-                    />
-                    <input
-                      type="number"
-                      placeholder="Price"
-                      value={option.price}
-                      onChange={(e) => handleOptionChange(index, "price", parseFloat(e.target.value))}
-                      className="w-28 px-3 py-2 border border-gray-300 rounded-md"
-                      step="0.01"
-                      min="0"
-                      required
-                    />
-                    <input
-                      type="number"
-                      placeholder="Days"
-                      value={option.estimatedDays}
-                      onChange={(e) => handleOptionChange(index, "estimatedDays", parseInt(e.target.value))}
-                      className="w-20 px-3 py-2 border border-gray-300 rounded-md"
-                      min="0"
-                    />
-                    {categoryForm.childOptions.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => removeOption(index)}
-                        className="px-3 py-2 text-red-600 hover:bg-red-50 rounded-md"
-                      >
-                        ✕
-                      </button>
-                    )}
+                  <div
+                    key={index}
+                    className="border border-gray-200 rounded-md p-3 mb-2 space-y-2"
+                  >
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        placeholder="Option Name (e.g., Same Day)"
+                        value={option.optionName}
+                        onChange={(e) => handleOptionChange(index, "optionName", e.target.value)}
+                        className="flex-1 px-3 py-2 border border-gray-300 rounded-md"
+                        required
+                      />
+                      <input
+                        type="number"
+                        placeholder="Price"
+                        value={option.price}
+                        onChange={(e) => handleOptionChange(index, "price", parseFloat(e.target.value))}
+                        className="w-28 px-3 py-2 border border-gray-300 rounded-md"
+                        step="0.01"
+                        min="0"
+                        required
+                      />
+                      <input
+                        type="number"
+                        placeholder="Days"
+                        value={option.estimatedDays}
+                        onChange={(e) => handleOptionChange(index, "estimatedDays", parseInt(e.target.value))}
+                        className="w-20 px-3 py-2 border border-gray-300 rounded-md"
+                        min="0"
+                      />
+                      {categoryForm.childOptions.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removeOption(index)}
+                          className="px-3 py-2 text-red-600 hover:bg-red-50 rounded-md"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                    <div className="flex gap-4 text-xs">
+                      <label className="flex items-center gap-1.5">
+                        <input
+                          type="checkbox"
+                          checked={option.requiresAddress !== false}
+                          onChange={(e) =>
+                            handleOptionChange(index, "requiresAddress", e.target.checked)
+                          }
+                          className="h-3.5 w-3.5 text-indigo-600 rounded"
+                        />
+                        <span className="text-gray-700">Requires address</span>
+                      </label>
+                      <label className="flex items-center gap-1.5">
+                        <input
+                          type="checkbox"
+                          checked={option.requiresLandmark === true}
+                          onChange={(e) =>
+                            handleOptionChange(index, "requiresLandmark", e.target.checked)
+                          }
+                          disabled={option.requiresAddress === false}
+                          className="h-3.5 w-3.5 text-indigo-600 rounded disabled:opacity-40"
+                        />
+                        <span
+                          className={
+                            option.requiresAddress === false
+                              ? "text-gray-400"
+                              : "text-gray-700"
+                          }
+                        >
+                          Requires landmark
+                        </span>
+                      </label>
+                    </div>
                   </div>
                 ))}
                 <button
@@ -700,6 +756,69 @@ export default function deliveryCategoriesPage() {
                     Active
                   </label>
                 </div>
+
+                {/* NEW — fulfillment requirements */}
+                <div className="border-t border-gray-200 pt-4">
+                  <p className="text-xs font-medium text-gray-700 mb-2">
+                    Fulfillment requirements
+                  </p>
+
+                  <div className="flex items-center mb-2">
+                    <input
+                      type="checkbox"
+                      id="requiresAddress"
+                      checked={editingOption.data.requiresAddress !== false}
+                      onChange={(e) =>
+                        setEditingOption((prev) => ({
+                          ...prev,
+                          data: {
+                            ...prev.data,
+                            requiresAddress: e.target.checked,
+                          },
+                        }))
+                      }
+                      className="h-4 w-4 text-indigo-600 border-gray-300 rounded"
+                    />
+                    <label
+                      htmlFor="requiresAddress"
+                      className="ml-2 block text-sm text-gray-700"
+                    >
+                      Requires street address
+                    </label>
+                  </div>
+                  <p className="ml-6 text-xs text-gray-500 -mt-1 mb-3">
+                    Uncheck for pickup or in-person options.
+                  </p>
+
+                  <div className="flex items-center">
+                    <input
+                      type="checkbox"
+                      id="requiresLandmark"
+                      checked={editingOption.data.requiresLandmark === true}
+                      onChange={(e) =>
+                        setEditingOption((prev) => ({
+                          ...prev,
+                          data: {
+                            ...prev.data,
+                            requiresLandmark: e.target.checked,
+                          },
+                        }))
+                      }
+                      disabled={editingOption.data.requiresAddress === false}
+                      className="h-4 w-4 text-indigo-600 border-gray-300 rounded disabled:opacity-40"
+                    />
+                    <label
+                      htmlFor="requiresLandmark"
+                      className={`ml-2 block text-sm ${
+                        editingOption.data.requiresAddress === false
+                          ? "text-gray-400"
+                          : "text-gray-700"
+                      }`}
+                    >
+                      Requires landmark
+                    </label>
+                  </div>
+                </div>
               </div>
 
               <div className="flex gap-2 mt-6">
@@ -823,6 +942,14 @@ export default function deliveryCategoriesPage() {
                               ${option.price.toFixed(2)} • {option.estimatedDays}d
                               {option.description && ` • ${option.description}`}
                             </div>
+                            {(option.requiresAddress === false ||
+                              option.requiresLandmark === true) && (
+                              <div className="text-xs text-gray-500 mt-0.5">
+                                {option.requiresAddress === false
+                                  ? "No address required"
+                                  : "Address + landmark required"}
+                              </div>
+                            )}
                           </div>
                           {canManage && (
                             <div className="flex gap-1 ml-2">

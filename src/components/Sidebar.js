@@ -35,6 +35,7 @@ import {
   MapPinIcon,
   TagIcon,
   ShieldCheckIcon,
+  GlobeAltIcon
 } from "@heroicons/react/24/outline";
 
 // Map icon names to components
@@ -66,6 +67,7 @@ const iconMap = {
   MapPin: MapPinIcon,
   Tag: TagIcon,
   ShieldCheck: ShieldCheckIcon,
+  GlobeAlt: GlobeAltIcon
 };
 
 function NavLink({ item, depth = 0, isActive, collapsed }) {

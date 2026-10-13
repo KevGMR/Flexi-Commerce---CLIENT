@@ -66,11 +66,25 @@ export const navItems = [
     ],
   },
   {
+    label: "Storefront",
+    href: "/dashboard/sales-channels/storefront",
+    icon: "GlobeAlt",
+    permission: PERMISSIONS.VIEW_SETTINGS,
+    children: [
+      { label: "Overview", href: "/dashboard/sales-channels/storefront", permission: PERMISSIONS.VIEW_SETTINGS, icon: "ComputerDesktop" },
+      { label: "Orders", href: "/dashboard/sales-channels/storefront/orders", permission: PERMISSIONS.VIEW_SALE_HISTORY, icon: "ShoppingBag" },
+      { label: "Brand", href: "/dashboard/settings/storefront", permission: PERMISSIONS.VIEW_SETTINGS, icon: "Tag" },
+      { label: "Domain", href: "/dashboard/settings/website", permission: PERMISSIONS.VIEW_SETTINGS, icon: "GlobeAlt" },
+      { label: "Delivery", href: "/dashboard/settings/delivery-categories", permission: PERMISSIONS.MANAGE_INVENTORY, icon: "Truck" },
+    ],
+  },
+  {
     label: "Settings",
     href: "/dashboard/settings",
     icon: "Cog",
     permission: PERMISSIONS.VIEW_SETTINGS,
     children: [
+      { label: "Organization", href: "/dashboard/settings/organization", permission: PERMISSIONS.VIEW_SETTINGS, icon: "Cog" },
       { label: "User Info", href: "/dashboard/settings/user-info", permission: PERMISSIONS.VIEW_SETTINGS, icon: "User" },
       { label: "Users", href: "/dashboard/settings/users", permission: PERMISSIONS.VIEW_USERS, icon: "Users" },
       { label: "Invitations", href: "/dashboard/settings/invitations", permission: PERMISSIONS.VIEW_USERS, icon: "Envelope" },

@@ -24,6 +24,7 @@ export default function OrdersPage() {
     categoryStatus: "",
     requiresDelivery: "",
     search: "",
+    salesChannel: "",
   });
   const [searchInput, setSearchInput] = useState("");
   const [pagination, setPagination] = useState({
@@ -34,7 +35,8 @@ export default function OrdersPage() {
   const [exportLoading, setExportLoading] = useState(false);
   const [exportError, setExportError] = useState("");
 
-  const canViewSalesHistory = permissions?.includes(PERMISSIONS.VIEW_SALE_HISTORY);
+  const canViewSalesHistory =
+    permissions?.includes(PERMISSIONS.VIEW_SALE_HISTORY);
 
   useEffect(() => {
     if (!canViewSalesHistory) {
@@ -51,29 +53,35 @@ export default function OrdersPage() {
           page: pagination.page,
         });
 
-        // Handle dates with proper timezone conversion
         if (filters.startDate) {
-          const [year, month, day] = filters.startDate.split('-').map(Number);
+          const [year, month, day] = filters.startDate.split("-").map(Number);
           const startOfDay = new Date(year, month - 1, day);
           params.append("startDate", startOfDay.toISOString());
         }
         if (filters.endDate) {
-          const [year, month, day] = filters.endDate.split('-').map(Number);
+          const [year, month, day] = filters.endDate.split("-").map(Number);
           const endOfDay = new Date(year, month - 1, day + 1);
           params.append("endDate", endOfDay.toISOString());
         }
-        if (filters.paymentMethod) params.append("paymentMethod", filters.paymentMethod);
-        if (filters.shopifySyncStatus) params.append("shopifySyncStatus", filters.shopifySyncStatus);
-        if (filters.paymentStatus) params.append("paymentStatus", filters.paymentStatus);
+        if (filters.paymentMethod)
+          params.append("paymentMethod", filters.paymentMethod);
+        if (filters.shopifySyncStatus)
+          params.append("shopifySyncStatus", filters.shopifySyncStatus);
+        if (filters.paymentStatus)
+          params.append("paymentStatus", filters.paymentStatus);
         if (filters.locationId) params.append("locationId", filters.locationId);
-        if (filters.deliveryCategory) params.append("deliveryCategory", filters.deliveryCategory);
-        if (filters.categoryStatus) params.append("categoryStatus", filters.categoryStatus);
-        if (filters.requiresDelivery) params.append("requiresDelivery", filters.requiresDelivery);
+        if (filters.deliveryCategory)
+          params.append("deliveryCategory", filters.deliveryCategory);
+        if (filters.categoryStatus)
+          params.append("categoryStatus", filters.categoryStatus);
+        if (filters.requiresDelivery)
+          params.append("requiresDelivery", filters.requiresDelivery);
         if (filters.search) params.append("search", filters.search);
+        if (filters.salesChannel)
+          params.append("salesChannel", filters.salesChannel);
 
         const response = await apiFetch(`/sales?${params.toString()}`);
 
-        // Handle API response: {success: true, data: {sales: [...], pagination: {...}}}
         let salesData = [];
         if (response?.data?.sales && Array.isArray(response.data.sales)) {
           salesData = response.data.sales;
@@ -84,7 +92,7 @@ export default function OrdersPage() {
         }
 
         setSales(salesData);
-        
+
         if (response?.data?.pagination) {
           setPagination((prev) => ({
             ...prev,
@@ -111,33 +119,35 @@ export default function OrdersPage() {
 
   const handleFilterChange = (key, value) => {
     setFilters((prev) => {
-      const updated = {
-        ...prev,
-        [key]: value,
-      };
-      
-      // If startDate is changed and is greater than endDate, update endDate to match
-      if (key === 'startDate' && value && updated.endDate && value > updated.endDate) {
+      const updated = { ...prev, [key]: value };
+
+      if (
+        key === "startDate" &&
+        value &&
+        updated.endDate &&
+        value > updated.endDate
+      ) {
         updated.endDate = value;
       }
-      
-      // If endDate is changed and is less than startDate, update startDate to match
-      if (key === 'endDate' && value && updated.startDate && value < updated.startDate) {
+
+      if (
+        key === "endDate" &&
+        value &&
+        updated.startDate &&
+        value < updated.startDate
+      ) {
         updated.startDate = value;
       }
-      
+
       return updated;
     });
-    setPagination((prev) => ({
-      ...prev,
-      page: 1,
-    }));
+    setPagination((prev) => ({ ...prev, page: 1 }));
   };
 
   const formatCurrency = (value) => {
     return new Intl.NumberFormat("en-US", {
       style: "currency",
-      currency: "USD",
+      currency: "KES",
     }).format(value || 0);
   };
 
@@ -164,8 +174,8 @@ export default function OrdersPage() {
   const escapeCsvValue = (value) => {
     if (value === null || value === undefined) return "";
     const str = String(value);
-    if (str.includes(",") || str.includes("\"") || str.includes("\n")) {
-      return `"${str.replace(/"/g, "\"\"")}"`;
+    if (str.includes(",") || str.includes('"') || str.includes("\n")) {
+      return `"${str.replace(/"/g, '""')}"`;
     }
     return str;
   };
@@ -184,20 +194,34 @@ export default function OrdersPage() {
 
       if (filters.startDate) {
         const [year, month, day] = filters.startDate.split("-").map(Number);
-        params.append("startDate", new Date(year, month - 1, day).toISOString());
+        params.append(
+          "startDate",
+          new Date(year, month - 1, day).toISOString(),
+        );
       }
       if (filters.endDate) {
         const [year, month, day] = filters.endDate.split("-").map(Number);
-        params.append("endDate", new Date(year, month - 1, day + 1).toISOString());
+        params.append(
+          "endDate",
+          new Date(year, month - 1, day + 1).toISOString(),
+        );
       }
-      if (filters.paymentMethod) params.append("paymentMethod", filters.paymentMethod);
-      if (filters.shopifySyncStatus) params.append("shopifySyncStatus", filters.shopifySyncStatus);
-      if (filters.paymentStatus) params.append("paymentStatus", filters.paymentStatus);
+      if (filters.paymentMethod)
+        params.append("paymentMethod", filters.paymentMethod);
+      if (filters.shopifySyncStatus)
+        params.append("shopifySyncStatus", filters.shopifySyncStatus);
+      if (filters.paymentStatus)
+        params.append("paymentStatus", filters.paymentStatus);
       if (filters.locationId) params.append("locationId", filters.locationId);
-      if (filters.deliveryCategory) params.append("deliveryCategory", filters.deliveryCategory);
-      if (filters.categoryStatus) params.append("categoryStatus", filters.categoryStatus);
-      if (filters.requiresDelivery) params.append("requiresDelivery", filters.requiresDelivery);
+      if (filters.deliveryCategory)
+        params.append("deliveryCategory", filters.deliveryCategory);
+      if (filters.categoryStatus)
+        params.append("categoryStatus", filters.categoryStatus);
+      if (filters.requiresDelivery)
+        params.append("requiresDelivery", filters.requiresDelivery);
       if (filters.search) params.append("search", filters.search);
+      if (filters.salesChannel)
+        params.append("salesChannel", filters.salesChannel);
 
       const response = await apiFetch(`/sales?${params.toString()}`);
 
@@ -217,6 +241,7 @@ export default function OrdersPage() {
 
       const headers = [
         "Receipt Number",
+        "Sales Channel",
         "Transaction ID",
         "Date",
         "Time",
@@ -251,16 +276,20 @@ export default function OrdersPage() {
       ];
 
       const rows = exportSales.flatMap((sale) => {
-        const dt = sale.completedAt || sale.createdAt ? new Date(sale.completedAt || sale.createdAt) : null;
+        const dt =
+          sale.completedAt || sale.createdAt
+            ? new Date(sale.completedAt || sale.createdAt)
+            : null;
         const dateStr = dt ? dt.toLocaleDateString() : "";
         const timeStr = dt ? dt.toLocaleTimeString() : "";
 
-        const paymentMethods = (sale.payments || []).map((p) => {
-          return `${p.method}:${p.amount}`;
-        }).join("; ");
+        const paymentMethods = (sale.payments || [])
+          .map((p) => `${p.method}:${p.amount}`)
+          .join("; ");
 
         const orderPrefix = [
           sale.receiptNumber,
+          sale.salesChannel || "pos",
           sale.transactionId,
           dateStr,
           timeStr,
@@ -296,19 +325,23 @@ export default function OrdersPage() {
         const items = Array.isArray(sale.items) ? sale.items : [];
 
         if (items.length === 0) {
-          return [[
-            ...orderPrefix,
-            "",
-            "",
-            "",
-            "",
-            ...orderSuffix,
-          ].map(escapeCsvValue)];
+          return [
+            [
+              ...orderPrefix,
+              "",
+              "",
+              "",
+              "",
+              ...orderSuffix,
+            ].map(escapeCsvValue),
+          ];
         }
 
         const itemRows = items.map((item) => {
           const parsedQuantity = Number(item?.quantity);
-          const soldQuantity = Number.isFinite(parsedQuantity) ? parsedQuantity : 0;
+          const soldQuantity = Number.isFinite(parsedQuantity)
+            ? parsedQuantity
+            : 0;
 
           return {
             productName: item?.productName || "Unknown",
@@ -322,17 +355,23 @@ export default function OrdersPage() {
           const showOrderFields = index === 0;
 
           return [
-            ...(showOrderFields ? orderPrefix : Array(orderPrefix.length).fill("")),
+            ...(showOrderFields
+              ? orderPrefix
+              : Array(orderPrefix.length).fill("")),
             itemRow.productName,
             itemRow.productSku,
             itemRow.soldQuantity,
             itemRow.itemUnitPrice,
-            ...(showOrderFields ? orderSuffix : Array(orderSuffix.length).fill("")),
+            ...(showOrderFields
+              ? orderSuffix
+              : Array(orderSuffix.length).fill("")),
           ].map(escapeCsvValue);
         });
       });
 
-      const csv = [headers.map(escapeCsvValue), ...rows].map((row) => row.join(",")).join("\n");
+      const csv = [headers.map(escapeCsvValue), ...rows]
+        .map((row) => row.join(","))
+        .join("\n");
       const blob = new Blob([csv], { type: "text/csv" });
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -351,8 +390,12 @@ export default function OrdersPage() {
   if (!canViewSalesHistory) {
     return (
       <div className="space-y-4 rounded-lg border border-zinc-200 bg-white p-6 shadow-sm">
-        <h1 className="text-2xl font-semibold text-zinc-900">Sales History</h1>
-        <p className="text-sm text-zinc-600">You don't have permission to view sales history.</p>
+        <h1 className="text-2xl font-semibold text-zinc-900">
+          Sales History
+        </h1>
+        <p className="text-sm text-zinc-600">
+          You don't have permission to view sales history.
+        </p>
       </div>
     );
   }
@@ -363,8 +406,10 @@ export default function OrdersPage() {
     <div className="space-y-6">
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-3xl font-bold text-zinc-900">Sales History</h1>
-          <p className="mt-1 text-sm text-zinc-600">View and manage all POS transactions</p>
+          <h1 className="text-3xl font-bold text-zinc-900">Orders</h1>
+          <p className="mt-1 text-sm text-zinc-600">
+            View and manage all sales — POS and storefront
+          </p>
         </div>
         {canViewSalesHistory && (
           <div className="flex flex-col items-end gap-1">
@@ -387,7 +432,9 @@ export default function OrdersPage() {
       <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <div className="lg:col-span-2">
-            <label className="block text-xs font-medium text-zinc-700">Receipt # / Idempotency Key</label>
+            <label className="block text-xs font-medium text-zinc-700">
+              Receipt # / Idempotency Key
+            </label>
             <div className="mt-1 flex gap-2">
               <input
                 type="text"
@@ -415,8 +462,26 @@ export default function OrdersPage() {
               )}
             </div>
           </div>
+
           <div>
-            <label className="block text-xs font-medium text-zinc-700">Status</label>
+            <label className="block text-xs font-medium text-zinc-700">
+              Sales Channel
+            </label>
+            <select
+              value={filters.salesChannel}
+              onChange={(e) => handleFilterChange("salesChannel", e.target.value)}
+              className="mt-1 block w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+            >
+              <option value="">All Channels</option>
+              <option value="pos">POS</option>
+              <option value="storefront">Storefront</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-zinc-700">
+              Status
+            </label>
             <select
               value={filters.status}
               onChange={(e) => handleFilterChange("status", e.target.value)}
@@ -429,11 +494,16 @@ export default function OrdersPage() {
               <option value="partial_refund">Partial Refund</option>
             </select>
           </div>
+
           <div>
-            <label className="block text-xs font-medium text-zinc-700">Payment Status</label>
+            <label className="block text-xs font-medium text-zinc-700">
+              Payment Status
+            </label>
             <select
               value={filters.paymentStatus}
-              onChange={(e) => handleFilterChange("paymentStatus", e.target.value)}
+              onChange={(e) =>
+                handleFilterChange("paymentStatus", e.target.value)
+              }
               className="mt-1 block w-full rounded border border-zinc-300 px-3 py-2 text-sm"
             >
               <option value="">All</option>
@@ -443,11 +513,16 @@ export default function OrdersPage() {
               <option value="failed">Failed</option>
             </select>
           </div>
+
           <div>
-            <label className="block text-xs font-medium text-zinc-700">Shopify Sync</label>
+            <label className="block text-xs font-medium text-zinc-700">
+              Shopify Sync
+            </label>
             <select
               value={filters.shopifySyncStatus}
-              onChange={(e) => handleFilterChange("shopifySyncStatus", e.target.value)}
+              onChange={(e) =>
+                handleFilterChange("shopifySyncStatus", e.target.value)
+              }
               className="mt-1 block w-full rounded border border-zinc-300 px-3 py-2 text-sm"
             >
               <option value="">All</option>
@@ -457,8 +532,11 @@ export default function OrdersPage() {
               <option value="partial">Partial</option>
             </select>
           </div>
+
           <div>
-            <label className="block text-xs font-medium text-zinc-700">Location</label>
+            <label className="block text-xs font-medium text-zinc-700">
+              Location
+            </label>
             <select
               value={filters.locationId}
               onChange={(e) => handleFilterChange("locationId", e.target.value)}
@@ -472,11 +550,16 @@ export default function OrdersPage() {
               ))}
             </select>
           </div>
+
           <div>
-            <label className="block text-xs font-medium text-zinc-700">Payment Method</label>
+            <label className="block text-xs font-medium text-zinc-700">
+              Payment Method
+            </label>
             <select
               value={filters.paymentMethod}
-              onChange={(e) => handleFilterChange("paymentMethod", e.target.value)}
+              onChange={(e) =>
+                handleFilterChange("paymentMethod", e.target.value)
+              }
               className="mt-1 block w-full rounded border border-zinc-300 px-3 py-2 text-sm"
             >
               <option value="">All Methods</option>
@@ -488,8 +571,11 @@ export default function OrdersPage() {
               <option value="credit">Credit/Account</option>
             </select>
           </div>
+
           <div>
-            <label className="block text-xs font-medium text-zinc-700">Start Date</label>
+            <label className="block text-xs font-medium text-zinc-700">
+              Start Date
+            </label>
             <input
               type="date"
               value={filters.startDate}
@@ -497,8 +583,11 @@ export default function OrdersPage() {
               className="mt-1 block w-full rounded border border-zinc-300 px-3 py-2 text-sm"
             />
           </div>
+
           <div>
-            <label className="block text-xs font-medium text-zinc-700">End Date</label>
+            <label className="block text-xs font-medium text-zinc-700">
+              End Date
+            </label>
             <input
               type="date"
               value={filters.endDate}
@@ -506,11 +595,16 @@ export default function OrdersPage() {
               className="mt-1 block w-full rounded border border-zinc-300 px-3 py-2 text-sm"
             />
           </div>
+
           <div>
-            <label className="block text-xs font-medium text-zinc-700">Delivery Category</label>
+            <label className="block text-xs font-medium text-zinc-700">
+              Delivery Category
+            </label>
             <select
               value={filters.deliveryCategory}
-              onChange={(e) => handleFilterChange("deliveryCategory", e.target.value)}
+              onChange={(e) =>
+                handleFilterChange("deliveryCategory", e.target.value)
+              }
               className="mt-1 block w-full rounded border border-zinc-300 px-3 py-2 text-sm"
             >
               <option value="">All Categories</option>
@@ -520,11 +614,16 @@ export default function OrdersPage() {
               <option value="Shipping">Shipping</option>
             </select>
           </div>
+
           <div>
-            <label className="block text-xs font-medium text-zinc-700">Delivery Status</label>
+            <label className="block text-xs font-medium text-zinc-700">
+              Delivery Status
+            </label>
             <select
               value={filters.categoryStatus}
-              onChange={(e) => handleFilterChange("categoryStatus", e.target.value)}
+              onChange={(e) =>
+                handleFilterChange("categoryStatus", e.target.value)
+              }
               className="mt-1 block w-full rounded border border-zinc-300 px-3 py-2 text-sm"
             >
               <option value="">All Statuses</option>
@@ -534,11 +633,16 @@ export default function OrdersPage() {
               <option value="failed">Failed</option>
             </select>
           </div>
+
           <div>
-            <label className="block text-xs font-medium text-zinc-700">Delivery Type</label>
+            <label className="block text-xs font-medium text-zinc-700">
+              Delivery Type
+            </label>
             <select
               value={filters.requiresDelivery}
-              onChange={(e) => handleFilterChange("requiresDelivery", e.target.value)}
+              onChange={(e) =>
+                handleFilterChange("requiresDelivery", e.target.value)
+              }
               className="mt-1 block w-full rounded border border-zinc-300 px-3 py-2 text-sm"
             >
               <option value="">All Types</option>
@@ -549,7 +653,6 @@ export default function OrdersPage() {
         </div>
       </div>
 
-      {/* Error Message */}
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-4">
           <p className="text-sm text-red-700">{error}</p>
@@ -558,7 +661,8 @@ export default function OrdersPage() {
 
       {filters.search && (
         <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm text-blue-700">
-          Searching exact match for: <span className="font-medium">{filters.search}</span>
+          Searching exact match for:{" "}
+          <span className="font-medium">{filters.search}</span>
         </div>
       )}
 
@@ -566,39 +670,75 @@ export default function OrdersPage() {
       <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white shadow-sm">
         {loading ? (
           <div className="p-6 text-center">
-            <p className="text-sm text-zinc-600">Loading sales data...</p>
+            <p className="text-sm text-zinc-600">Loading orders…</p>
           </div>
         ) : sales.length === 0 ? (
           <div className="p-6 text-center">
-            <p className="text-sm text-zinc-600">No sales found</p>
+            <p className="text-sm text-zinc-600">No orders found</p>
           </div>
         ) : (
           <>
             <table className="w-full">
               <thead className="border-b border-zinc-200 bg-zinc-50">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-zinc-900">Receipt #</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-zinc-900">Date</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-zinc-900">Payment Method</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-zinc-900">Customer</th>
-                  <th className="px-6 py-3 text-right text-xs font-semibold text-zinc-900">Amount</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-zinc-900">Status</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-zinc-900">Delivery</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-zinc-900">Delivery Status</th>
-                  <th className="px-6 py-3 text-left text-xs font-semibold text-zinc-900">Sync</th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-zinc-900">
+                    Receipt #
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-zinc-900">
+                    Channel
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-zinc-900">
+                    Date
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-zinc-900">
+                    Payment
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-zinc-900">
+                    Customer
+                  </th>
+                  <th className="px-6 py-3 text-right text-xs font-semibold text-zinc-900">
+                    Amount
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-zinc-900">
+                    Status
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-zinc-900">
+                    Delivery
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-zinc-900">
+                    Delivery Status
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-semibold text-zinc-900">
+                    Sync
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-200">
                 {sales.map((sale) => (
                   <tr
                     key={sale._id}
-                    onClick={() => router.push(`/dashboard/sales/${sale._id}`)}
+                    onClick={() =>
+                      router.push(`/dashboard/sales/${sale._id}`)
+                    }
                     className="cursor-pointer hover:bg-zinc-50"
                   >
                     <td className="px-6 py-4 text-sm font-medium text-blue-600 hover:underline">
                       {sale.receiptNumber}
                     </td>
-                    <td className="px-6 py-4 text-sm text-zinc-600">{formatDate(sale.createdAt)}</td>
+                    <td className="px-6 py-4">
+                      {sale.salesChannel === "storefront" ? (
+                        <span className="inline-block rounded bg-purple-100 px-2 py-1 text-xs font-medium text-purple-800">
+                          🌐 Storefront
+                        </span>
+                      ) : (
+                        <span className="inline-block rounded bg-zinc-100 px-2 py-1 text-xs font-medium text-zinc-600">
+                          POS
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-6 py-4 text-sm text-zinc-600">
+                      {formatDate(sale.createdAt)}
+                    </td>
                     <td className="px-6 py-4 text-sm text-zinc-600 capitalize">
                       {sale.payments?.[0]?.method || "N/A"}
                     </td>
@@ -621,7 +761,9 @@ export default function OrdersPage() {
                     </td>
                     <td className="px-6 py-4 text-sm text-zinc-600">
                       {sale.deliveryCategory ? (
-                        <span className="font-medium text-zinc-900">{sale.deliveryCategory}</span>
+                        <span className="font-medium text-zinc-900">
+                          {sale.deliveryCategory}
+                        </span>
                       ) : (
                         <span className="text-zinc-400">—</span>
                       )}
@@ -630,13 +772,17 @@ export default function OrdersPage() {
                       {sale.categoryStatus || sale.deliveryStatus ? (
                         <span
                           className={`inline-block rounded px-2 py-1 text-xs font-medium capitalize ${
-                            (sale.categoryStatus || sale.deliveryStatus) === "delivered"
+                            (sale.categoryStatus || sale.deliveryStatus) ===
+                            "delivered"
                               ? "bg-green-100 text-green-800"
-                              : (sale.categoryStatus || sale.deliveryStatus) === "pending"
+                              : (sale.categoryStatus ||
+                                    sale.deliveryStatus) === "pending"
                                 ? "bg-yellow-100 text-yellow-800"
-                                : (sale.categoryStatus || sale.deliveryStatus) === "in-transit"
+                                : (sale.categoryStatus ||
+                                      sale.deliveryStatus) === "in-transit"
                                   ? "bg-blue-100 text-blue-800"
-                                  : (sale.categoryStatus || sale.deliveryStatus) === "failed"
+                                  : (sale.categoryStatus ||
+                                        sale.deliveryStatus) === "failed"
                                     ? "bg-red-100 text-red-800"
                                     : "bg-gray-100 text-gray-800"
                           }`}
@@ -663,11 +809,11 @@ export default function OrdersPage() {
               </tbody>
             </table>
 
-            {/* Pagination */}
             {totalPages > 1 && (
               <div className="flex items-center justify-between border-t border-zinc-200 px-6 py-4">
                 <div className="text-sm text-zinc-600">
-                  Page {pagination.page} of {totalPages} ({pagination.total} total)
+                  Page {pagination.page} of {totalPages} ({pagination.total}{" "}
+                  total)
                 </div>
                 <div className="flex gap-2">
                   <button
