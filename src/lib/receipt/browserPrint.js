@@ -4,6 +4,8 @@ export const printReceiptInBrowser = ({
   receipt,
   organizationName,
   locationLabel,
+  location = null,
+  receiptConfig = {},
 }) => {
   if (!receipt) return;
 
@@ -14,6 +16,8 @@ export const printReceiptInBrowser = ({
     receipt,
     organizationName,
     locationLabel,
+    location,
+    receiptConfig,
   });
 
   printWindow.document.write(html);

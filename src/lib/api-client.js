@@ -235,6 +235,11 @@ export const productsApi = {
 export const locationsApi = {
   list: () => apiFetch("/locations"),
   get: (id) => apiFetch(`/locations/${id}`),
+  updateReceipt: (id, body) =>
+    apiFetch(`/locations/${id}/receipt`, {
+      method: "PATCH",
+      body,
+    }),
 };
 
 // ---------------------------------------------------------------------------

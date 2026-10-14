@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { apiFetch } from "@/lib/api-client";
 import { useSessionStore } from "@/store/session";
 import { PERMISSIONS } from "@/lib/permissions";
@@ -126,29 +127,48 @@ export default function LocationsPage() {
           <div className="space-y-3">
             {locations.map((loc) => (
               <div key={loc._id} className="border border-zinc-200 rounded p-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="text-sm font-semibold text-zinc-900">{loc.name}</div>
-                    <div className="text-xs text-zinc-500">{loc.locationType}</div>
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-semibold text-zinc-900">
+                      {loc.name}
+                    </div>
+                    <div className="text-xs text-zinc-500">
+                      {loc.locationType}
+                    </div>
                   </div>
-                  {loc.isDefault && (
-                    <span className="text-xs px-2 py-1 rounded bg-green-50 text-green-700">Default</span>
-                  )}
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {loc.isDefault && (
+                      <span className="text-xs px-2 py-1 rounded bg-green-50 text-green-700">
+                        Default
+                      </span>
+                    )}
+                    <Link
+                      href={`/dashboard/settings/locations/${loc._id}/receipt`}
+                      className="text-xs px-2.5 py-1 rounded border border-zinc-300 text-zinc-700 hover:bg-zinc-50"
+                    >
+                      Receipt settings
+                    </Link>
+                  </div>
                 </div>
+
                 <div className="mt-2 text-xs text-zinc-600">
                   {loc.address?.street || loc.address?.city ? (
                     <span>
-                      {loc.address?.street || ""} {loc.address?.city || ""}
+                      {loc.address?.street || ""}
+                      {loc.address?.street && loc.address?.city ? ", " : ""}
+                      {loc.address?.city || ""}
                     </span>
                   ) : (
                     <span>No address provided</span>
                   )}
                 </div>
+
                 {loc.shopifyLocationName && (
                   <div className="mt-1 text-xs text-blue-600">
                     Shopify: {loc.shopifyLocationName}
                   </div>
                 )}
+
                 <div className="mt-1 text-xs text-zinc-600">
                   Tax mode: {loc.taxMode || "Inherit org default"}
                 </div>
@@ -320,7 +340,7 @@ export default function LocationsPage() {
 
         {!canManage && (
           <p className="mt-3 text-xs text-zinc-500">
-            You don’t have permission to manage locations.
+            You don't have permission to manage locations.
           </p>
         )}
       </div>

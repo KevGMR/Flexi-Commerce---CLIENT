@@ -1893,6 +1893,8 @@ const addToCart = (product) => {
       receipt,
       organizationName: activeOrganization?.name,
       locationLabel: getLocationLabel(locationId),
+      location: locationSettings,
+      receiptConfig: locationSettings?.receipt || {},
     });
   };
 
@@ -4117,6 +4119,8 @@ const addToCart = (product) => {
                                   receipt: proformaReceipt,
                                   organizationName: activeOrganization?.name,
                                   locationLabel: getLocationLabel(locationId),
+                                  location: locationSettings,
+                                  receiptConfig: locationSettings?.receipt || {},
                                 });
                               }}
                               className="rounded bg-green-600 px-3 py-1 text-xs font-medium text-white hover:bg-green-700"
