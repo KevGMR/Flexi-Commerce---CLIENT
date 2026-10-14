@@ -140,6 +140,22 @@ export default function StorefrontSettingsPage() {
 
   return (
     <div className="p-6 max-w-3xl mx-auto">
+      <div className="mb-6 rounded-lg border border-gray-200 bg-gray-50 p-4 flex items-center justify-between">
+        <div>
+          <p className="text-sm font-medium text-gray-900">
+            Homepage sections
+          </p>
+          <p className="text-xs text-gray-500">
+            Add, edit, and reorder the sections on your homepage.
+          </p>
+        </div>
+        <a
+          href="/dashboard/settings/storefront/homepage"
+          className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium hover:bg-gray-50"
+        >
+          Edit homepage
+        </a>
+      </div>
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900">Storefront branding</h1>
         <p className="mt-1 text-sm text-gray-600">

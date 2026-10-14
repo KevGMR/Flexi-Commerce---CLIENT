@@ -358,10 +358,8 @@ export default function CollectionForm({ collectionId = null }) {
             >
               <div className="space-y-4">
                 <ProductPicker
-                  excludeIds={[
-                    ...(collectionId ? [] : []), // populated from list below? see note
-                  ]}
-                  onPick={handleAddProduct}
+                  value={pendingAdds}
+                  onChange={(ids) => setPendingAdds(ids)}
                 />
 
                 {collectionId && (

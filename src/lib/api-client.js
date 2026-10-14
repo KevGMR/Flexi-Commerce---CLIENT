@@ -221,6 +221,12 @@ export const productsApi = {
     ).toString();
     return apiFetch(`/products/pos-catalog?${qs}`);
   },
+
+  listByIds: (ids) =>
+    apiFetch("/products/by-ids", {
+      method: "POST",
+      body: { ids },
+    }),
 };
 
 // ---------------------------------------------------------------------------

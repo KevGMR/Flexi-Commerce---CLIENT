@@ -1,3 +1,4 @@
+// client/src/components/collections/SingleImageUploader.js
 "use client";
 
 import { useRef, useState } from "react";

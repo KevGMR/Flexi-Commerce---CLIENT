@@ -73,6 +73,7 @@ export const navItems = [
     children: [
       { label: "Overview", href: "/dashboard/sales-channels/storefront", permission: PERMISSIONS.VIEW_SETTINGS, icon: "ComputerDesktop" },
       { label: "Orders", href: "/dashboard/sales-channels/storefront/orders", permission: PERMISSIONS.VIEW_SALE_HISTORY, icon: "ShoppingBag" },
+      { label: "Homepage", href: "/dashboard/settings/storefront/homepage", permission: PERMISSIONS.VIEW_SETTINGS, icon: "DocumentText" },  // ← add
       { label: "Brand", href: "/dashboard/settings/storefront", permission: PERMISSIONS.VIEW_SETTINGS, icon: "Tag" },
       { label: "Domain", href: "/dashboard/settings/website", permission: PERMISSIONS.VIEW_SETTINGS, icon: "GlobeAlt" },
       { label: "Delivery", href: "/dashboard/settings/delivery-categories", permission: PERMISSIONS.MANAGE_INVENTORY, icon: "Truck" },
