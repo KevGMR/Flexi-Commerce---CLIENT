@@ -69,6 +69,8 @@ export const buildReceiptPrintHtml = ({
     footerParagraphs: [],
     thankYouLine: "Thank you for your purchase!",
     termsLine: "",
+    showReceiptTitle: true,
+    showOrganizationName: true,
     showLocationName: true,
     showLocationAddress: true,
     showLocationPhone: true,
@@ -295,8 +297,8 @@ export const buildReceiptPrintHtml = ({
         <div class="receipt">
           <div class="header">
             ${logoHtml}
-            <h3 style="margin: 0; ${isReturn ? "color: #f97316;" : ""}">${titleText}</h3>
-            <h3 style="margin: 0;">${organizationName || "RECEIPT"}</h3>
+            ${cfg.showReceiptTitle ? `<h3 style="margin: 0; ${isReturn ? "color: #f97316;" : ""}">${titleText}</h3>` : ""}
+            ${cfg.showOrganizationName ? `<h3 style="margin: 0;">${organizationName || "RECEIPT"}</h3>` : ""}
             ${locationNameHtml}
             ${addressHtml}
             ${phoneHtml}

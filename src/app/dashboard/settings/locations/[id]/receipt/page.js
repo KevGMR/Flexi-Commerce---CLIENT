@@ -11,6 +11,8 @@ const DEFAULT_CONFIG = {
   footerParagraphs: [],
   thankYouLine: "Thank you for your purchase!",
   termsLine: "",
+  showReceiptTitle: true,
+  showOrganizationName: true,
   showLocationName: true,
   showLocationAddress: true,
   showLocationPhone: true,
@@ -214,6 +216,16 @@ export default function ReceiptSettingsPage() {
           {/* What to show */}
           <Section title="What to show">
             <div className="space-y-3">
+                <Toggle
+                label="Receipt title"
+                checked={config.showReceiptTitle}
+                onChange={(v) => update({ showReceiptTitle: v })}
+              />
+              <Toggle
+                label="Organization name"
+                checked={config.showOrganizationName}
+                onChange={(v) => update({ showOrganizationName: v })}
+              />
               <Toggle
                 label="Location name"
                 checked={config.showLocationName}
@@ -438,7 +450,12 @@ function ReceiptPreview({ config, organizationName, location }) {
 
         {/* Header */}
         <div className="text-center border-b border-dashed border-neutral-400 pb-2">
-          <div className="font-bold">{organizationName || "YOUR STORE"}</div>
+        {config.showReceiptTitle && (
+            <div className="text-[10px] font-bold tracking-wide">RECEIPT</div>
+            )}
+          {config.showOrganizationName && (
+            <div className="font-bold">{organizationName || "YOUR STORE"}</div>
+          )}
           {config.showLocationName && location?.name && (
             <div>{location.name}</div>
           )}
