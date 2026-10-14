@@ -182,7 +182,7 @@ export const buildReceiptPrintHtml = ({
 
   // Configurable header components
   const logoHtml = cfg.logoUrl
-    ? `<div style="text-align: center; margin-bottom: 8px;"><img src="${cfg.logoUrl}" alt="" style="max-width: 180px; max-height: 60px; object-fit: contain;" /></div>`
+    ? `<div style="text-align: center; margin-bottom: 8px;"><img src="${cfg.logoUrl}" alt="" style="max-width: 150px; max-height: 150px; object-fit: contain;" /></div>`
     : "";
 
   const locationNameHtml =
