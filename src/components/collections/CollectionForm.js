@@ -22,7 +22,7 @@ const EMPTY = {
   seoTitle: "",
   seoDescription: "",
   status: "active",
-  published: false,
+  published: true,
 };
 
 function Section({ title, children, action }) {
