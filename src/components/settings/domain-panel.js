@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { apiFetch } from "@/lib/api-client";
 
 export function DomainPanel({ website, orgId, onUpdated }) {
@@ -13,6 +13,10 @@ export function DomainPanel({ website, orgId, onUpdated }) {
   const currentDomain = website?.domain || "";
   const verified = website?.domainVerified === true;
   const verification = website?.domainVerification || {};
+
+    useEffect(() => {
+        if (verified) setInfo("");
+    }, [verified]);
 
   const handleAdd = async () => {
     const clean = domainInput.toLowerCase().trim();
