@@ -41,6 +41,11 @@ const SECTION_TYPES = [
     label: "Image + text",
     description: "Side-by-side image and text block. Good for storytelling.",
   },
+  {
+    type: "announcement",
+    label: "Announcement",
+    description: "A single-line inline banner. Good for hours, promos, notices.",
+  },
 ];
 
 const DEFAULT_CONFIGS = {
@@ -88,6 +93,11 @@ const DEFAULT_CONFIGS = {
     imagePosition: "left",
     ctaLabel: "",
     ctaHref: "",
+  },
+  announcement: {
+    text: "",
+    href: "",
+    tone: "muted",
   },
 };
 

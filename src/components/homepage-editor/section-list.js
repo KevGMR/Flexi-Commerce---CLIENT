@@ -9,6 +9,7 @@ import { TrustStripForm } from "./section-forms/trust-strip-form";
 import { BannerForm } from "./section-forms/banner-form";
 import { FeaturedCategoryForm } from "./section-forms/featured-category-form";
 import { ImageTextForm } from "./section-forms/image-text-form";
+import { AnnouncementForm } from "./section-forms/announcement-form";
 
 const TYPE_LABELS = {
   hero: "Hero",
@@ -19,6 +20,7 @@ const TYPE_LABELS = {
   banner: "Banner",
   "featured-category": "Featured categories",
   "image-text": "Image + text",
+  announcement: "Announcement",
 };
 
 export function SectionList({ sections, orgId, onUpdate, onRemove, onMove }) {
@@ -182,6 +184,8 @@ function SectionForm({ section, orgId, onChange }) {
       return <FeaturedCategoryForm {...props} />;
     case "image-text":
       return <ImageTextForm {...props} />;
+    case "announcement":
+      return <AnnouncementForm {...props} />;
     default:
       return (
         <p className="text-sm text-red-600">
