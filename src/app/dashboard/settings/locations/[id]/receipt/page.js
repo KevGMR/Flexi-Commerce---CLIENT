@@ -22,6 +22,8 @@ const DEFAULT_CONFIG = {
   showNotes: true,
   showDeliveryBlock: true,
   customTaxIdLabel: "Tax ID",
+  locationNameMaxWords: 0,
+  locationAddressMaxWords: 0,
 };
 
 export default function ReceiptSettingsPage() {
@@ -226,16 +228,71 @@ export default function ReceiptSettingsPage() {
                 checked={config.showOrganizationName}
                 onChange={(v) => update({ showOrganizationName: v })}
               />
-              <Toggle
-                label="Location name"
-                checked={config.showLocationName}
-                onChange={(v) => update({ showLocationName: v })}
-              />
-              <Toggle
-                label="Location address"
-                checked={config.showLocationAddress}
-                onChange={(v) => update({ showLocationAddress: v })}
-              />
+              <div>
+                <Toggle
+                  label="Location name"
+                  checked={config.showLocationName}
+                  onChange={(v) => update({ showLocationName: v })}
+                />
+                {config.showLocationName && (
+                  <div className="ml-6 mt-1 flex items-center gap-2">
+                    <label className="text-xs text-gray-500">
+                      Max words:
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="50"
+                      value={config.locationNameMaxWords ?? 0}
+                      onChange={(e) =>
+                        update({
+                          locationNameMaxWords: Math.max(
+                            0,
+                            Math.min(50, Number(e.target.value) || 0),
+                          ),
+                        })
+                      }
+                      className="w-16 rounded border border-gray-300 px-2 py-1 text-xs"
+                    />
+                    <span className="text-xs text-gray-400">
+                      (0 = no limit)
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <Toggle
+                  label="Location address"
+                  checked={config.showLocationAddress}
+                  onChange={(v) => update({ showLocationAddress: v })}
+                />
+                {config.showLocationAddress && (
+                  <div className="ml-6 mt-1 flex items-center gap-2">
+                    <label className="text-xs text-gray-500">
+                      Max words:
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="50"
+                      value={config.locationAddressMaxWords ?? 0}
+                      onChange={(e) =>
+                        update({
+                          locationAddressMaxWords: Math.max(
+                            0,
+                            Math.min(50, Number(e.target.value) || 0),
+                          ),
+                        })
+                      }
+                      className="w-16 rounded border border-gray-300 px-2 py-1 text-xs"
+                    />
+                    <span className="text-xs text-gray-400">
+                      (0 = no limit)
+                    </span>
+                  </div>
+                )}
+              </div>
               <Toggle
                 label="Location phone"
                 checked={config.showLocationPhone}
@@ -406,6 +463,15 @@ function Toggle({ label, checked, onChange }) {
   );
 }
 
+function clampWords(text, maxWords) {
+  if (!text) return "";
+  const n = Number(maxWords);
+  if (!Number.isFinite(n) || n <= 0) return text;
+  const words = String(text).trim().split(/\s+/);
+  if (words.length <= n) return text;
+  return words.slice(0, n).join(" ");
+}
+
 // ---------------------------------------------------------------------------
 // Preview
 // ---------------------------------------------------------------------------
@@ -457,16 +523,21 @@ function ReceiptPreview({ config, organizationName, location }) {
             <div className="font-bold">{organizationName || "YOUR STORE"}</div>
           )}
           {config.showLocationName && location?.name && (
-            <div>{location.name}</div>
+            <div>
+              {clampWords(location.name, config.locationNameMaxWords)}
+            </div>
           )}
           {showAddress && (
             <div>
-              {[
-                location?.address?.street,
-                location?.address?.city,
-              ]
-                .filter(Boolean)
-                .join(", ")}
+              {clampWords(
+                [
+                  location?.address?.street,
+                  location?.address?.city,
+                ]
+                  .filter(Boolean)
+                  .join(", "),
+                config.locationAddressMaxWords,
+              )}
             </div>
           )}
           {config.showLocationPhone && location?.phone && (

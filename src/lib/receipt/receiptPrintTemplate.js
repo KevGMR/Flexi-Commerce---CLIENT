@@ -46,6 +46,15 @@ const buildItemDisplayName = (item) => {
   return `${baseName} — ${variantLabel}`;
 };
 
+const clampWords = (text, maxWords) => {
+  if (!text) return "";
+  const n = Number(maxWords);
+  if (!Number.isFinite(n) || n <= 0) return text;
+  const words = String(text).trim().split(/\s+/);
+  if (words.length <= n) return text;
+  return words.slice(0, n).join(" ") + "…";
+};
+
 /**
  * Build receipt HTML.
  *
@@ -80,6 +89,8 @@ export const buildReceiptPrintHtml = ({
     showNotes: true,
     showDeliveryBlock: true,
     customTaxIdLabel: "Tax ID",
+    locationNameMaxWords: 0,
+    locationAddressMaxWords: 0,
     ...receiptConfig,
   };
 
@@ -187,7 +198,7 @@ export const buildReceiptPrintHtml = ({
 
   const locationNameHtml =
     cfg.showLocationName && locationLabel
-      ? `<div style="font-size: 12px;">${locationLabel}</div>`
+      ? `<div style="font-size: 12px;">${clampWords(locationLabel, cfg.locationNameMaxWords)}</div>`
       : "";
 
   const addressParts = location
@@ -200,7 +211,7 @@ export const buildReceiptPrintHtml = ({
     : [];
   const addressHtml =
     cfg.showLocationAddress && addressParts.length > 0
-      ? `<div style="font-size: 11px;">${addressParts.join(", ")}</div>`
+      ? `<div style="font-size: 11px;">${clampWords(addressParts.join(", "), cfg.locationAddressMaxWords)}</div>`
       : "";
 
   const phoneHtml =
