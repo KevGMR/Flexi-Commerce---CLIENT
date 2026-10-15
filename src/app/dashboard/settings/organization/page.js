@@ -5,10 +5,13 @@ import { apiFetch } from "@/lib/api-client";
 import { useSessionStore } from "@/store/session";
 import { PERMISSIONS } from "@/lib/permissions";
 
+import { AnnouncementSection } from "@/components/settings/announcement-section";
+
 export default function OrganizationSettingsPage() {
   const { activeOrganization, setActiveOrganization, can } = useSessionStore();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savingAnnouncement, setSavingAnnouncement] = useState(false);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
 
@@ -22,11 +25,11 @@ export default function OrganizationSettingsPage() {
     taxRate: 0,
   });
 
-    // Any user with VIEW_SETTINGS can see the page; the server enforces
-    // Owner/Manager for writes.
-    const canEdit = can?.(PERMISSIONS.VIEW_SETTINGS) ?? false;
-  // If MANAGE_ORG doesn't exist in your permissions config, replace with a
-  // permission you already use for org settings, or hardcode `true` for now.
+  // The full website subdocument from the server. Passed to child sections
+  // (AnnouncementSection) which send their own partial updates.
+  const [website, setWebsite] = useState(null);
+
+  const canEdit = can?.(PERMISSIONS.VIEW_SETTINGS) ?? false;
 
   useEffect(() => {
     const loadOrg = async () => {
@@ -49,6 +52,7 @@ export default function OrganizationSettingsPage() {
             taxMode: org.settings?.taxMode || "inclusive",
             taxRate: org.settings?.taxRate || 0,
           });
+          setWebsite(org.website || null);
         }
       } catch (err) {
         setError(err?.message || "Failed to load organization.");
@@ -101,6 +105,7 @@ export default function OrganizationSettingsPage() {
       const updated = res?.organization;
       if (updated) {
         setActiveOrganization(updated);
+        if (updated.website) setWebsite(updated.website);
       }
       setStatus("Organization settings saved.");
       setTimeout(() => setStatus(""), 3000);
@@ -108,6 +113,35 @@ export default function OrganizationSettingsPage() {
       setError(err?.message || "Failed to save.");
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Independent save path for the announcement section. Sends ONLY
+  // `website.announcement` — the server merges it into the existing
+  // website doc, so homepage.sections and other fields stay untouched.
+  const handleSaveAnnouncement = async ({ announcement }) => {
+    setError("");
+    setStatus("");
+    setSavingAnnouncement(true);
+    try {
+      const res = await apiFetch(
+        `/organizations/${activeOrganization._id}`,
+        {
+          method: "PUT",
+          body: { website: { announcement } },
+        },
+      );
+      const updated = res?.organization;
+      if (updated) {
+        setActiveOrganization(updated);
+        if (updated.website) setWebsite(updated.website);
+      }
+      setStatus("Announcement saved.");
+      setTimeout(() => setStatus(""), 3000);
+    } catch (err) {
+      setError(err?.message || "Failed to save announcement.");
+    } finally {
+      setSavingAnnouncement(false);
     }
   };
 
@@ -120,8 +154,8 @@ export default function OrganizationSettingsPage() {
   }
 
   return (
-    <div className="p-6 max-w-3xl mx-auto">
-      <div className="mb-6">
+    <div className="p-6 max-w-3xl mx-auto space-y-6">
+      <div>
         <h1 className="text-2xl font-bold text-gray-900">Organization</h1>
         <p className="mt-1 text-sm text-gray-600">
           Basic profile and regional settings for your organization.
@@ -129,12 +163,12 @@ export default function OrganizationSettingsPage() {
       </div>
 
       {error && (
-        <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-4">
+        <div className="rounded-md border border-red-200 bg-red-50 p-4">
           <p className="text-sm text-red-800">{error}</p>
         </div>
       )}
       {status && (
-        <div className="mb-4 rounded-md border border-green-200 bg-green-50 p-4">
+        <div className="rounded-md border border-green-200 bg-green-50 p-4">
           <p className="text-sm text-green-800">{status}</p>
         </div>
       )}
@@ -278,6 +312,13 @@ export default function OrganizationSettingsPage() {
           </div>
         )}
       </form>
+
+      <AnnouncementSection
+        website={website}
+        onSave={handleSaveAnnouncement}
+        saving={savingAnnouncement}
+        canEdit={canEdit}
+      />
     </div>
   );
 }
