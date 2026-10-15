@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api-client";
 import { useSessionStore } from "@/store/session";
+import { DomainPanel } from "@/components/settings/domain-panel";
 
-const ROOT_DOMAIN = "localhost:3001"; // dev; update when deployed
+const ROOT_DOMAIN =
+  process.env.NEXT_PUBLIC_STOREFRONT_ROOT_DOMAIN || "flexisolutions.tech";
 
 export default function WebsiteSettingsPage() {
   const { activeOrganization, setActiveOrganization } = useSessionStore();
@@ -15,79 +17,60 @@ export default function WebsiteSettingsPage() {
 
   const [form, setForm] = useState({
     subdomain: "",
-    domain: "",
     published: false,
   });
 
-  const [originalDomain, setOriginalDomain] = useState("");
-  const [originalDomainVerified, setOriginalDomainVerified] = useState(false);
+  const [website, setWebsite] = useState(null);
+
+  const load = useCallback(async () => {
+    if (!activeOrganization?._id) {
+      setLoading(false);
+      return;
+    }
+    try {
+      const res = await apiFetch(`/organizations/${activeOrganization._id}`);
+      const org = res?.organization;
+      if (org) {
+        setForm({
+          subdomain: org.website?.subdomain || "",
+          published: org.website?.published === true,
+        });
+        setWebsite(org.website || {});
+      }
+    } catch (err) {
+      setError(err?.message || "Failed to load organization.");
+    } finally {
+      setLoading(false);
+    }
+  }, [activeOrganization?._id]);
 
   useEffect(() => {
-    const loadOrg = async () => {
-      if (!activeOrganization?._id) {
-        setLoading(false);
-        return;
-      }
-      try {
-        const res = await apiFetch(
-          `/organizations/${activeOrganization._id}`,
-        );
-        const org = res?.organization;
-        if (org) {
-          setForm({
-            subdomain: org.website?.subdomain || "",
-            domain: org.website?.domain || "",
-            published: org.website?.published === true,
-          });
-          setOriginalDomain(org.website?.domain || "");
-          setOriginalDomainVerified(
-            org.website?.domainVerified === true,
-          );
-        }
-      } catch (err) {
-        setError(err?.message || "Failed to load organization.");
-      } finally {
-        setLoading(false);
-      }
-    };
-    loadOrg();
-  }, [activeOrganization?._id]);
+    load();
+  }, [load]);
 
   const update = (field, value) => {
     setForm((prev) => ({ ...prev, [field]: value }));
   };
 
-  const domainChanged =
-    form.domain.toLowerCase().trim() !== originalDomain.toLowerCase().trim();
-
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
     setStatus("");
-
     setSaving(true);
     try {
-      const res = await apiFetch(
-        `/organizations/${activeOrganization._id}`,
-        {
-          method: "PUT",
-          body: {
-            website: {
-              subdomain: form.subdomain.toLowerCase().trim(),
-              domain: form.domain.toLowerCase().trim(),
-              // If the domain changed, clear verification
-              domainVerified: domainChanged ? false : originalDomainVerified,
-              published: form.published,
-            },
+      const res = await apiFetch(`/organizations/${activeOrganization._id}`, {
+        method: "PUT",
+        body: {
+          website: {
+            subdomain: form.subdomain.toLowerCase().trim(),
+            published: form.published,
           },
         },
-      );
-
+      });
       const updated = res?.organization;
       if (updated) {
         setActiveOrganization(updated);
-        setOriginalDomain(updated.website?.domain || "");
-        setOriginalDomainVerified(updated.website?.domainVerified === true);
+        setWebsite(updated.website || {});
       }
       setStatus("Website settings saved.");
       setTimeout(() => setStatus(""), 3000);
@@ -111,8 +94,8 @@ export default function WebsiteSettingsPage() {
     : "(not set)";
 
   return (
-    <div className="p-6 max-w-3xl mx-auto">
-      <div className="mb-6">
+    <div className="p-6 max-w-3xl mx-auto space-y-6">
+      <div>
         <h1 className="text-2xl font-bold text-gray-900">Website</h1>
         <p className="mt-1 text-sm text-gray-600">
           Where your storefront is published and how customers reach it.
@@ -120,12 +103,12 @@ export default function WebsiteSettingsPage() {
       </div>
 
       {error && (
-        <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-4">
+        <div className="rounded-md border border-red-200 bg-red-50 p-4">
           <p className="text-sm text-red-800">{error}</p>
         </div>
       )}
       {status && (
-        <div className="mb-4 rounded-md border border-green-200 bg-green-50 p-4">
+        <div className="rounded-md border border-green-200 bg-green-50 p-4">
           <p className="text-sm text-green-800">{status}</p>
         </div>
       )}
@@ -134,7 +117,6 @@ export default function WebsiteSettingsPage() {
         onSubmit={handleSubmit}
         className="space-y-6 bg-white rounded-lg border border-gray-200 p-6"
       >
-        {/* Subdomain */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
             Subdomain
@@ -160,51 +142,6 @@ export default function WebsiteSettingsPage() {
           </p>
         </div>
 
-        {/* Custom domain */}
-        <div className="border-t border-gray-200 pt-6">
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Custom domain
-          </label>
-          <input
-            type="text"
-            value={form.domain}
-            onChange={(e) => update("domain", e.target.value.toLowerCase())}
-            placeholder="shop.example.com"
-            className="block w-full px-3 py-2 border border-gray-300 rounded-md font-mono text-sm focus:border-indigo-500 focus:outline-none"
-          />
-          <p className="mt-1 text-xs text-gray-500">
-            Optional. Requires DNS setup before it goes live.
-          </p>
-
-          {originalDomain && !domainChanged && (
-            <div className="mt-3 flex items-center gap-2 text-sm">
-              {originalDomainVerified ? (
-                <>
-                  <span className="inline-block h-2 w-2 rounded-full bg-green-500" />
-                  <span className="text-green-700">Verified</span>
-                </>
-              ) : (
-                <>
-                  <span className="inline-block h-2 w-2 rounded-full bg-yellow-500" />
-                  <span className="text-yellow-700">
-                    Pending verification
-                  </span>
-                </>
-              )}
-            </div>
-          )}
-
-          {domainChanged && form.domain && (
-            <div className="mt-3 rounded-md border border-blue-200 bg-blue-50 p-3">
-              <p className="text-xs text-blue-800">
-                Saving a new domain resets verification. You'll need to
-                reconfigure DNS after saving.
-              </p>
-            </div>
-          )}
-        </div>
-
-        {/* Published */}
         <div className="border-t border-gray-200 pt-6">
           <label className="flex items-start gap-3 cursor-pointer">
             <input
@@ -235,6 +172,15 @@ export default function WebsiteSettingsPage() {
           </button>
         </div>
       </form>
+
+      <DomainPanel
+        website={website}
+        orgId={activeOrganization?._id}
+        onUpdated={(updatedOrg) => {
+          setActiveOrganization(updatedOrg);
+          setWebsite(updatedOrg.website || {});
+        }}
+      />
     </div>
   );
 }
