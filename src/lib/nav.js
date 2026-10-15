@@ -3,6 +3,12 @@ import { PERMISSIONS } from "./permissions";
 export const navItems = [
   { label: "Home", href: "/dashboard/home", icon: "Home" },
   {
+    label: "My commissions",
+    href: "/dashboard/my-commissions",
+    icon: "CurrencyDollar",
+    permission: PERMISSIONS.VIEW_OWN_COMMISSIONS,
+  },
+  {
     label: "Orders",
     href: "/dashboard/orders",
     icon: "ShoppingBag",

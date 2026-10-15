@@ -22,6 +22,8 @@ export const PERMISSIONS = {
   VIEW_REPORTS: "view_reports",
   EXPORT_REPORTS: "export_reports",
   VIEW_FINANCIAL_REPORTS: "view_financial_reports",
+  // Attendant self-service
+  VIEW_OWN_COMMISSIONS: "view_own_commissions",
 
   // Finance Permissions
   MANAGE_FINANCE: "manage_finance",
@@ -147,5 +149,8 @@ export const PERMISSION_GROUPS = {
   customers: [
     PERMISSIONS.VIEW_CUSTOMERS,
     PERMISSIONS.CREATE_CUSTOMERS,
+  ],
+    attendant: [
+    PERMISSIONS.VIEW_OWN_COMMISSIONS,
   ],
 };

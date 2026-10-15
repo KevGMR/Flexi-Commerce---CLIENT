@@ -7,6 +7,7 @@ import { TopbarNew } from "@/components/topbar/TopbarNew";
 import { useSessionStore } from "@/store/session";
 import { buildLoginRedirect } from "@/lib/auth-redirect";
 import { refreshActiveOrganizationContext } from "@/lib/orgs";
+import { PERMISSIONS } from "@/lib/permissions";
 
 export default function DashboardLayout({ children }) {
   const router = useRouter();
@@ -17,6 +18,7 @@ export default function DashboardLayout({ children }) {
   const activeOrganization = useSessionStore((s) => s.activeOrganization);
   const permissionsRefreshed = useSessionStore((s) => s.permissionsRefreshed);
   const refreshPermissions = useSessionStore((s) => s.refreshPermissions);
+  const can = useSessionStore((s) => s.can);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const lastRefreshedOrgId = useRef(null);
   const organizationKey =
@@ -62,6 +64,36 @@ export default function DashboardLayout({ children }) {
       refreshPermissions();
     }
   }, [accessToken, activeOrganization, permissionsRefreshed, refreshPermissions]);
+
+  // Attendant lockdown: users with only VIEW_OWN_COMMISSIONS can only see
+  // My commissions + their own user info. Everything else redirects back.
+  useEffect(() => {
+    if (!hydrated || !accessToken || !permissionsRefreshed) return;
+
+    const isAttendantOnly =
+      can(PERMISSIONS.VIEW_OWN_COMMISSIONS) &&
+      !can(PERMISSIONS.VIEW_REPORTS) &&
+      !can(PERMISSIONS.VIEW_SALE_HISTORY);
+
+    if (!isAttendantOnly) return;
+
+    const allowedPrefixes = [
+      "/dashboard/my-commissions",
+      "/dashboard/settings/user-info",
+    ];
+
+    const isAllowed = allowedPrefixes.some((p) => pathname.startsWith(p));
+    if (!isAllowed) {
+      router.replace("/dashboard/my-commissions");
+    }
+  }, [
+    hydrated,
+    accessToken,
+    permissionsRefreshed,
+    can,
+    pathname,
+    router,
+  ]);
 
   const isAuthed = Boolean(accessToken);
 
