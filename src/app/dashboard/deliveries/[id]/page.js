@@ -612,3 +612,5 @@ export default function DeliveryDetailPage() {
     </div>
   );
 }
+
+

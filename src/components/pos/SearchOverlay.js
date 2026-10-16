@@ -39,41 +39,66 @@ export default function SearchOverlay({
 
   // Services + Shopify searches (Flexi handles its own data)
   const performSearch = useCallback(async () => {
-    const query = searchQuery.trim();
-    if (!query) {
+  const query = searchQuery.trim();
+  if (!query) {
+    setResults({ services: [], shopify: [] });
+    setLoading(false);
+    return;
+  }
+
+  const currentSearchId = ++searchIdRef.current;
+  setLoading(true);
+
+  // Run them independently with individual timeouts
+  const withTimeout = (promise, ms, label) =>
+    Promise.race([
+      promise,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error(`${label} timed out`)), ms)
+      ),
+    ]);
+
+  const servicesPromise = withTimeout(
+    apiFetch(`/products?type=service&search=${encodeURIComponent(query)}&limit=50`),
+    8000,
+    "services"
+  ).catch((err) => {
+    console.error("[Search] services failed:", err.message);
+    return { products: [] };
+  });
+
+  const shopifyPromise = withTimeout(
+    searchShopifyProducts(query, 50),
+    5000,
+    "shopify"
+  ).catch((err) => {
+    console.error("[Search] shopify failed:", err.message);
+    return [];
+  });
+
+  try {
+    const [serviceRes, shopifyRes] = await Promise.all([
+      servicesPromise,
+      shopifyPromise,
+    ]);
+
+    if (currentSearchId === searchIdRef.current) {
+      setResults({
+        services: serviceRes?.products || [],
+        shopify: shopifyRes || [],
+      });
+    }
+  } catch (err) {
+    console.error("Search failed:", err);
+    if (currentSearchId === searchIdRef.current) {
       setResults({ services: [], shopify: [] });
+    }
+  } finally {
+    if (currentSearchId === searchIdRef.current) {
       setLoading(false);
-      return;
     }
-
-    const currentSearchId = ++searchIdRef.current;
-    setLoading(true);
-
-    try {
-      const [serviceRes, shopifyRes] = await Promise.all([
-        apiFetch(
-          `/products?type=service&search=${encodeURIComponent(query)}&limit=50`,
-        ),
-        searchShopifyProducts(query, 50),
-      ]);
-
-      if (currentSearchId === searchIdRef.current) {
-        setResults({
-          services: serviceRes?.products || [],
-          shopify: shopifyRes || [],
-        });
-      }
-    } catch (err) {
-      console.error("Search failed:", err);
-      if (currentSearchId === searchIdRef.current) {
-        setResults({ services: [], shopify: [] });
-      }
-    } finally {
-      if (currentSearchId === searchIdRef.current) {
-        setLoading(false);
-      }
-    }
-  }, [searchQuery]);
+  }
+}, [searchQuery]);
 
   useEffect(() => {
     const timer = setTimeout(performSearch, 200);
