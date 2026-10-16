@@ -20,7 +20,7 @@ export default function CompleteCheckoutModal({
   onRemoveSplitPayment,
   onAddSplitPayment,
   onUseSplitPaymentChange,
-  onComplete,pos/CompleteCheckoutModal
+  onComplete,
   onClose,
   status,
   error,
