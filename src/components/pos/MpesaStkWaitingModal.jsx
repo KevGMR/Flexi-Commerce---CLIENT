@@ -3,18 +3,18 @@
 import { useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api-client";
 
+const TIMEOUT_MS = 90_000;
+
 /**
  * Modal shown while the POS waits for the customer to enter their M-Pesa PIN.
  * Polls /sales/:id/payment-status every 3s.
  *
- * Props:
- *   open        boolean
- *   saleId      string
- *   phone       string  — formatted phone for display
- *   amount      number
- *   onSuccess   (receiptNumber?) => void   — cart clears, print receipt
- *   onCancel    () => void                 — DELETE /:id/pending, restore cart
- *   onManualPaid(reference) => void        — mark-paid-manual
+ * States:
+ *   waiting  — spinner, "customer should enter PIN"
+ *   timeout  — 90s elapsed, no callback. Retry or mark-paid-manual.
+ *   error    — callback delivered a decline
+ *   manual   — cashier entering the M-Pesa reference by hand
+ *   success  — internal, immediately hands off to onSuccess
  */
 export function MpesaStkWaitingModal({
   open,
@@ -25,12 +25,13 @@ export function MpesaStkWaitingModal({
   onCancel,
   onManualPaid,
 }) {
-  const [status, setStatus] = useState("waiting"); // waiting | error | manual
+  const [status, setStatus] = useState("waiting");
   const [error, setError] = useState("");
   const [reference, setReference] = useState("");
   const [cancelling, setCancelling] = useState(false);
   const [marking, setMarking] = useState(false);
   const pollRef = useRef(null);
+  const timeoutRef = useRef(null);
 
   // Polling loop
   useEffect(() => {
@@ -47,13 +48,12 @@ export function MpesaStkWaitingModal({
           setStatus("error");
           setError("Payment was declined or failed. Retry or mark as paid.");
         }
-      } catch (e) {
-        // Ignore transient polling errors — the modal stays in "waiting"
+      } catch {
+        // Transient polling errors — stay in waiting
       }
     };
 
     pollRef.current = setInterval(tick, 3000);
-    // Fire once immediately so we don't wait 3s for the first check
     tick();
 
     return () => {
@@ -62,7 +62,28 @@ export function MpesaStkWaitingModal({
     };
   }, [open, saleId, status, onSuccess]);
 
-  // Reset internal state when the modal opens fresh
+  // 90s timeout
+  useEffect(() => {
+    if (!open || status !== "waiting") {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+      return;
+    }
+    timeoutRef.current = setTimeout(() => {
+      setStatus("timeout");
+    }, TIMEOUT_MS);
+
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+    };
+  }, [open, saleId, status]);
+
+  // Reset on open
   useEffect(() => {
     if (open) {
       setStatus("waiting");
@@ -99,6 +120,20 @@ export function MpesaStkWaitingModal({
     }
   };
 
+  const handleRetry = async () => {
+    // Cancel the pending sale, then ask the parent to reopen the checkout
+    // modal so the cashier can re-enter the phone / pick a different method.
+    if (cancelling) return;
+    setCancelling(true);
+    try {
+      await apiFetch(`/sales/${saleId}/pending`, { method: "DELETE" });
+      onCancel?.();
+    } catch (e) {
+      setError(e?.message || "Failed to retry — try again");
+      setCancelling(false);
+    }
+  };
+
   if (!open) return null;
 
   return (
@@ -106,24 +141,22 @@ export function MpesaStkWaitingModal({
       <div className="w-full max-w-md rounded-lg bg-white shadow-xl">
         <div className="border-b border-gray-200 px-6 py-4">
           <h2 className="text-lg font-semibold text-gray-900">
-            Waiting for M-Pesa
+            {status === "timeout" ? "No response from customer" : "Waiting for M-Pesa"}
           </h2>
           <p className="mt-1 text-sm text-gray-500">
-            Customer should receive an STK prompt on their phone.
+            {status === "timeout"
+              ? "The customer hasn't confirmed the prompt. Retry, mark paid, or cancel."
+              : "Customer should receive an STK prompt on their phone."}
           </p>
         </div>
 
         <div className="px-6 py-6 space-y-4">
           <div className="rounded-lg bg-gray-50 p-4 text-center">
-            <p className="text-xs uppercase tracking-wide text-gray-500">
-              Phone
-            </p>
+            <p className="text-xs uppercase tracking-wide text-gray-500">Phone</p>
             <p className="mt-1 text-lg font-mono font-semibold text-gray-900">
               {phone || "—"}
             </p>
-            <p className="mt-3 text-xs uppercase tracking-wide text-gray-500">
-              Amount
-            </p>
+            <p className="mt-3 text-xs uppercase tracking-wide text-gray-500">Amount</p>
             <p className="mt-1 text-2xl font-bold text-gray-900">
               KES {Number(amount || 0).toFixed(2)}
             </p>
@@ -135,6 +168,15 @@ export function MpesaStkWaitingModal({
               <span className="text-sm text-gray-700">
                 Waiting for customer to enter PIN…
               </span>
+            </div>
+          )}
+
+          {status === "timeout" && (
+            <div className="rounded border border-amber-200 bg-amber-50 p-3">
+              <p className="text-sm text-amber-800">
+                No callback received after 90 seconds. The customer may not
+                have seen the prompt.
+              </p>
             </div>
           )}
 
@@ -188,6 +230,32 @@ export function MpesaStkWaitingModal({
                 className="w-full rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
               >
                 Back to waiting
+              </button>
+            </>
+          ) : status === "timeout" ? (
+            <>
+              <button
+                type="button"
+                onClick={() => setStatus("manual")}
+                className="w-full rounded-lg bg-green-600 px-4 py-3 text-sm font-semibold text-white hover:bg-green-700"
+              >
+                Mark as paid manually
+              </button>
+              <button
+                type="button"
+                onClick={handleRetry}
+                disabled={cancelling}
+                className="w-full rounded-lg border border-blue-300 bg-blue-50 px-4 py-2 text-sm font-medium text-blue-800 hover:bg-blue-100 disabled:opacity-50"
+              >
+                {cancelling ? "Cancelling…" : "Retry — keep cart"}
+              </button>
+              <button
+                type="button"
+                onClick={handleCancel}
+                disabled={cancelling}
+                className="w-full rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              >
+                {cancelling ? "Cancelling…" : "Cancel — keep cart"}
               </button>
             </>
           ) : (

@@ -2536,9 +2536,6 @@ const addToCart = (product) => {
   };
 
     const handleStartStk = async (phone) => {
-    // Build the sale payload identically to handleCompleteCheckout, but
-    // with useStk: true and no payments array. The server creates a pending
-    // sale and returns the saleId we need to poll.
     if (!phone) {
       setError("Enter the customer's M-Pesa phone number.");
       return;
@@ -2645,40 +2642,43 @@ const addToCart = (product) => {
     setStatus("Creating pending sale…");
     setError("");
 
+    let createdSaleId = null;
     try {
       const res = await apiFetch("/sales", { method: "POST", body: payload });
       const saleData = res?.data || res;
-      const saleId = saleData?.saleId || saleData?._id;
-      if (!saleId) throw new Error("Server did not return a saleId");
+      createdSaleId = saleData?.saleId || saleData?._id;
+      if (!createdSaleId) throw new Error("Server did not return a saleId");
 
       setShowCompleteCheckoutModal(false);
 
       const amount = cartTotal + (deliveryEnabled ? finalDeliveryFee || 0 : 0);
 
-      const stkRes = await apiFetch(`/sales/${saleId}/mpesa-stk`, {
+      const stkRes = await apiFetch(`/sales/${createdSaleId}/mpesa-stk`, {
         method: "POST",
         body: { phone },
       });
 
-      setStkState({
-        saleId,
-        phone: stkRes?.customerMessage ? phone : phone,
-        amount,
-      });
+      setStkState({ saleId: createdSaleId, phone, amount });
       setStatus("");
     } catch (err) {
       const msg = err?.message || "Failed to start STK";
       setError(msg);
       setStatus("");
-      // If the sale was created but STK failed, clean it up
-      // (best-effort; ignore errors)
-      try {
-        const maybeSaleId =
-          err?.details?.saleId || err?.saleId || err?.data?.saleId;
-        if (maybeSaleId) {
-          await apiFetch(`/sales/${maybeSaleId}/pending`, { method: "DELETE" });
+
+      // If the sale was created but the STK call failed, delete the pending
+      // sale so it doesn't linger. Cart stays intact.
+      if (createdSaleId) {
+        try {
+          await apiFetch(`/sales/${createdSaleId}/pending`, { method: "DELETE" });
+          console.log("[POS] cleaned up orphaned pending sale", createdSaleId);
+        } catch (cleanupErr) {
+          console.warn(
+            "[POS] cleanup failed for",
+            createdSaleId,
+            cleanupErr.message,
+          );
         }
-      } catch {}
+      }
     }
   };
 
