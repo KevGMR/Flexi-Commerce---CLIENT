@@ -148,6 +148,12 @@ export default function LocationsPage() {
                     >
                       Receipt settings
                     </Link>
+                    <Link
+                      href={`/dashboard/settings/locations/${location._id}/payment-methods`}
+                      className="text-sm text-indigo-600 hover:text-indigo-800"
+                    >
+                      Payment methods
+                    </Link>
                   </div>
                 </div>
 

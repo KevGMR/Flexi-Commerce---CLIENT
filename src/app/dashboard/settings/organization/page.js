@@ -6,12 +6,16 @@ import { useSessionStore } from "@/store/session";
 import { PERMISSIONS } from "@/lib/permissions";
 
 import { AnnouncementSection } from "@/components/settings/announcement-section";
+import { PaymentMethodsSection } from "@/components/settings/payment-methods-section";
+import { DarajaSection } from "@/components/settings/daraja-section";
 
 export default function OrganizationSettingsPage() {
   const { activeOrganization, setActiveOrganization, can } = useSessionStore();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savingAnnouncement, setSavingAnnouncement] = useState(false);
+  const [savingPayment, setSavingPayment] = useState(false);
+  const [savingDaraja, setSavingDaraja] = useState(false);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
 
@@ -25,9 +29,9 @@ export default function OrganizationSettingsPage() {
     taxRate: 0,
   });
 
-  // The full website subdocument from the server. Passed to child sections
-  // (AnnouncementSection) which send their own partial updates.
   const [website, setWebsite] = useState(null);
+  const [paymentMethods, setPaymentMethods] = useState([]);
+  const [daraja, setDaraja] = useState(null);
 
   const canEdit = can?.(PERMISSIONS.VIEW_SETTINGS) ?? false;
 
@@ -38,9 +42,7 @@ export default function OrganizationSettingsPage() {
         return;
       }
       try {
-        const res = await apiFetch(
-          `/organizations/${activeOrganization._id}`,
-        );
+        const res = await apiFetch(`/organizations/${activeOrganization._id}`);
         const org = res?.organization;
         if (org) {
           setForm({
@@ -53,6 +55,8 @@ export default function OrganizationSettingsPage() {
             taxRate: org.settings?.taxRate || 0,
           });
           setWebsite(org.website || null);
+          setPaymentMethods(Array.isArray(org.paymentMethods) ? org.paymentMethods : []);
+          setDaraja(org.daraja || null);
         }
       } catch (err) {
         setError(err?.message || "Failed to load organization.");
@@ -60,48 +64,35 @@ export default function OrganizationSettingsPage() {
         setLoading(false);
       }
     };
-
     loadOrg();
   }, [activeOrganization?._id]);
 
-  const update = (field, value) => {
-    setForm((prev) => ({ ...prev, [field]: value }));
-  };
+  const update = (field, value) => setForm((p) => ({ ...p, [field]: value }));
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
     setStatus("");
-
-    if (!form.name.trim()) {
-      setError("Name is required");
+    if (!form.name.trim() || !form.slug.trim()) {
+      setError("Name and slug are required");
       return;
     }
-    if (!form.slug.trim()) {
-      setError("Slug is required");
-      return;
-    }
-
     setSaving(true);
     try {
-      const res = await apiFetch(
-        `/organizations/${activeOrganization._id}`,
-        {
-          method: "PUT",
-          body: {
-            name: form.name.trim(),
-            slug: form.slug.trim(),
-            settings: {
-              currency: form.currency,
-              language: form.language,
-              timezone: form.timezone,
-              taxMode: form.taxMode,
-              taxRate: Number(form.taxRate) || 0,
-            },
+      const res = await apiFetch(`/organizations/${activeOrganization._id}`, {
+        method: "PUT",
+        body: {
+          name: form.name.trim(),
+          slug: form.slug.trim(),
+          settings: {
+            currency: form.currency,
+            language: form.language,
+            timezone: form.timezone,
+            taxMode: form.taxMode,
+            taxRate: Number(form.taxRate) || 0,
           },
         },
-      );
-
+      });
       const updated = res?.organization;
       if (updated) {
         setActiveOrganization(updated);
@@ -116,21 +107,15 @@ export default function OrganizationSettingsPage() {
     }
   };
 
-  // Independent save path for the announcement section. Sends ONLY
-  // `website.announcement` — the server merges it into the existing
-  // website doc, so homepage.sections and other fields stay untouched.
   const handleSaveAnnouncement = async ({ announcement }) => {
     setError("");
     setStatus("");
     setSavingAnnouncement(true);
     try {
-      const res = await apiFetch(
-        `/organizations/${activeOrganization._id}`,
-        {
-          method: "PUT",
-          body: { website: { announcement } },
-        },
-      );
+      const res = await apiFetch(`/organizations/${activeOrganization._id}`, {
+        method: "PUT",
+        body: { website: { announcement } },
+      });
       const updated = res?.organization;
       if (updated) {
         setActiveOrganization(updated);
@@ -142,6 +127,52 @@ export default function OrganizationSettingsPage() {
       setError(err?.message || "Failed to save announcement.");
     } finally {
       setSavingAnnouncement(false);
+    }
+  };
+
+  const handleSavePaymentMethods = async () => {
+    setError("");
+    setStatus("");
+    setSavingPayment(true);
+    try {
+      const res = await apiFetch(`/organizations/${activeOrganization._id}`, {
+        method: "PUT",
+        body: { website: { paymentMethods } },
+      });
+      const updated = res?.organization;
+      if (updated) {
+        setActiveOrganization(updated);
+        if (updated.website) setWebsite(updated.website);
+      }
+      setStatus("Payment methods saved.");
+      setTimeout(() => setStatus(""), 3000);
+    } catch (err) {
+      setError(err?.message || "Failed to save payment methods.");
+    } finally {
+      setSavingPayment(false);
+    }
+  };
+
+  const handleSaveDaraja = async ({ daraja: patch }) => {
+    setError("");
+    setStatus("");
+    setSavingDaraja(true);
+    try {
+      const res = await apiFetch(`/organizations/${activeOrganization._id}`, {
+        method: "PUT",
+        body: { daraja: patch },
+      });
+      const updated = res?.organization;
+      if (updated) {
+        setActiveOrganization(updated);
+        setDaraja(updated.daraja || null);
+      }
+      setStatus("Daraja settings saved.");
+      setTimeout(() => setStatus(""), 3000);
+    } catch (err) {
+      setError(err?.message || "Failed to save Daraja settings.");
+    } finally {
+      setSavingDaraja(false);
     }
   };
 
@@ -262,7 +293,6 @@ export default function OrganizationSettingsPage() {
 
         <div className="border-t border-gray-200 pt-6">
           <h3 className="text-sm font-semibold text-gray-900 mb-3">Tax</h3>
-
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -293,8 +323,7 @@ export default function OrganizationSettingsPage() {
                 className="block w-full px-3 py-2 border border-gray-300 rounded-md focus:border-indigo-500 focus:outline-none disabled:bg-gray-50"
               />
               <p className="mt-1 text-xs text-gray-500">
-                Enter as decimal (0.16 for 16% VAT). Individual locations can
-                override.
+                Enter as decimal (0.16 for 16% VAT).
               </p>
             </div>
           </div>
@@ -317,6 +346,34 @@ export default function OrganizationSettingsPage() {
         website={website}
         onSave={handleSaveAnnouncement}
         saving={savingAnnouncement}
+        canEdit={canEdit}
+      />
+
+      <div className="rounded-lg border border-gray-200 bg-white p-6">
+        <PaymentMethodsSection
+          value={paymentMethods}
+          onChange={setPaymentMethods}
+          mode="org"
+        />
+        {canEdit && (
+          <div className="mt-4 flex justify-end border-t border-gray-200 pt-4">
+            <button
+              type="button"
+              onClick={handleSavePaymentMethods}
+              disabled={savingPayment}
+              className="px-4 py-2 bg-indigo-600 text-white rounded-md text-sm font-medium hover:bg-indigo-700 disabled:opacity-50"
+            >
+              {savingPayment ? "Saving…" : "Save payment methods"}
+            </button>
+          </div>
+        )}
+      </div>
+
+      <DarajaSection
+        daraja={daraja}
+        orgId={activeOrganization?._id}
+        onSave={handleSaveDaraja}
+        saving={savingDaraja}
         canEdit={canEdit}
       />
     </div>
