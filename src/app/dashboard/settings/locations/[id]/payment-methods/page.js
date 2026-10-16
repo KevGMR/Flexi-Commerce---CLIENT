@@ -45,9 +45,11 @@ export default function LocationPaymentMethodsPage() {
               ? false
               : null,
         );
-
+        
         const org = orgRes?.organization;
-        setOrgDefaults(Array.isArray(org?.paymentMethods) ? org.paymentMethods : []);
+        setOrgDefaults(
+          Array.isArray(org?.website?.paymentMethods) ? org.website.paymentMethods : [],
+        );
         setOrgDarajaEnabled(
           org?.daraja?.enabled === true && org?.daraja?.mpesaStkEnabled === true,
         );

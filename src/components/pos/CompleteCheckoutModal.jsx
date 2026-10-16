@@ -14,6 +14,7 @@ export default function CompleteCheckoutModal({
   useSplitPayment,
   locationId,
   paymentMethods,
+  mpesaStkAvailable,
   onNoteChange,
   onPaymentMethodChange,
   onSplitPaymentChange,
@@ -28,11 +29,15 @@ export default function CompleteCheckoutModal({
   deliveryInfo,
   deliveryFee,
   deliveryEnabled,
+  onStartStk
 }) {
   const [isProductsExpanded, setIsProductsExpanded] = useState(true);
   const [isServicesExpanded, setIsServicesExpanded] = useState(true);
   const [showDeliveryModal, setShowDeliveryModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const [stkPhone, setStkPhone] = useState("");
+  const [stkStarting, setStkStarting] = useState(false);
 
   if (!isOpen) return null;
 
@@ -262,6 +267,26 @@ export default function CompleteCheckoutModal({
   const handleCompleteSale = async () => {
     setIsSubmitting(true);
     try {
+      if (selectedPaymentMethod === 'mpesa_stk' && !useSplitPayment) {
+        if (!stkPhone.trim()) {
+          alert('Enter the customer M-Pesa phone number first.');
+          setIsSubmitting(false);
+          return;
+        }
+        if (typeof onStartStk !== 'function') {
+          alert('M-Pesa STK is not wired to the POS page.');
+          setIsSubmitting(false);
+          return;
+        }
+        setStkStarting(true);
+        try {
+          await onStartStk(stkPhone.trim());
+        } finally {
+          setStkStarting(false);
+        }
+        return;
+      }
+
       await onComplete({
         notes,
         paymentMethod: selectedPaymentMethod,
@@ -493,28 +518,68 @@ export default function CompleteCheckoutModal({
                   </div>
 
                   {!useSplitPayment ? (
-                    <div className="grid grid-cols-3 gap-2">
-                      {paymentMethods.map((method, idx) => {
-                        const value = typeof method === 'string' ? method : method.value || method;
-                        const label = typeof method === 'string' ? method : method.label || method.value || method;
-                        const icon = typeof method === 'object' && method.icon ? method.icon : '';
-                        const isSelected = selectedPaymentMethod === value;
-                        
-                        return (
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-3 gap-2">
+                        {paymentMethods.map((method, idx) => {
+                          const value = typeof method === 'string' ? method : method.key || method.value || method;
+                          const label = typeof method === 'string' ? method : method.label || method.value || method;
+                          const icon = typeof method === 'object' && method.icon ? method.icon : '';
+                          const isSelected = selectedPaymentMethod === value;
+
+                          return (
+                            <button
+                              key={`method-${idx}`}
+                              type="button"
+                              onClick={() => onPaymentMethodChange(value)}
+                              className={`p-3 rounded-lg border-2 transition-all flex flex-col items-center justify-center gap-1 ${
+                                isSelected
+                                  ? 'border-blue-500 bg-blue-50'
+                                  : 'border-gray-200 bg-white hover:border-gray-300'
+                              }`}
+                            >
+                              {icon && <span className="text-2xl">{icon}</span>}
+                              <span className="text-xs font-medium">{label}</span>
+                            </button>
+                          );
+                        })}
+
+                        {mpesaStkAvailable && (
                           <button
-                            key={`method-${idx}`}
-                            onClick={() => onPaymentMethodChange(value)}
+                            key="method-mpesa-stk"
+                            type="button"
+                            onClick={() => onPaymentMethodChange('mpesa_stk')}
                             className={`p-3 rounded-lg border-2 transition-all flex flex-col items-center justify-center gap-1 ${
-                              isSelected
+                              selectedPaymentMethod === 'mpesa_stk'
                                 ? 'border-blue-500 bg-blue-50'
                                 : 'border-gray-200 bg-white hover:border-gray-300'
                             }`}
                           >
-                            {icon && <span className="text-2xl">{icon}</span>}
-                            <span className="text-xs font-medium">{label}</span>
+                            <span className="text-2xl">⚡</span>
+                            <span className="text-xs font-medium">M-Pesa Prompt</span>
                           </button>
-                        );
-                      })}
+                        )}
+                      </div>
+
+                      {selectedPaymentMethod === 'mpesa_stk' && (
+                        <div className="rounded border border-blue-200 bg-blue-50 p-3 space-y-2">
+                          <label className="block text-xs font-medium text-blue-900">
+                            Customer M-Pesa phone number
+                          </label>
+                          <input
+                            type="tel"
+                            inputMode="numeric"
+                            value={stkPhone}
+                            onChange={(e) => setStkPhone(e.target.value)}
+                            placeholder="07XX XXX XXX"
+                            className="w-full rounded border border-blue-300 bg-white px-3 py-2 text-sm font-mono"
+                          />
+                          <p className="text-[11px] text-blue-800">
+                            An STK prompt will be sent to this number. The cart
+                            is not cleared until the customer enters their PIN
+                            and the payment confirms.
+                          </p>
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <div className="space-y-3">
@@ -642,7 +707,7 @@ export default function CompleteCheckoutModal({
                   </button>
                   <button
                     onClick={handleCompleteSale}
-                    disabled={isSubmitting}
+                    disabled={isSubmitting || stkStarting}
                     className={`flex-1 px-4 py-3 rounded-lg font-semibold transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 ${
                       isReservation
                         ? 'bg-amber-600 hover:bg-amber-700 text-white'
@@ -650,9 +715,11 @@ export default function CompleteCheckoutModal({
                     }`}
                   >
                     {isSubmitting && <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>}
-                    {isSubmitting
+                    {isSubmitting || stkStarting
                       ? 'Processing...'
-                      : `${isReservation ? 'Create Reservation' : 'Complete Sale'} (${formatMoney(total)})`}
+                      : selectedPaymentMethod === 'mpesa_stk'
+                        ? `Send M-Pesa Prompt (${formatMoney(total)})`
+                        : `${isReservation ? 'Create Reservation' : 'Complete Sale'} (${formatMoney(total)})`}
                   </button>
                 </div>
                 {isReservation && (

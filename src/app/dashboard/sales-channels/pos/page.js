@@ -22,6 +22,7 @@ import DeliveryCheckoutModal from "@/components/pos/DeliveryCheckoutModal";
 import CompleteCheckoutModal from "@/components/pos/CompleteCheckoutModal";
 import PreviousShiftBlockModal from "@/components/pos/PreviousShiftBlockModal";
 import { printReceiptInBrowser } from "@/lib/receipt/browserPrint";
+import { MpesaStkWaitingModal } from "@/components/pos/MpesaStkWaitingModal";
 import {
   hasPartialPaymentSignal,
   toNonNegativeAmount,
@@ -157,6 +158,10 @@ export default function PosPage() {
     updatePendingCounts,
   } = useSyncManager();
 
+  const [effectivePaymentMethods, setEffectivePaymentMethods] = useState([]);
+  const [mpesaStkAvailable, setMpesaStkAvailable] = useState(false);
+  const [stkState, setStkState] = useState(null);
+  // stkState shape: { saleId, phone, amount } | null
   const [locationId, setLocationId] = useState(() => selectedLocationId || "");
   const [cart, setCart] = useState([]);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState("cash");
@@ -422,6 +427,73 @@ export default function PosPage() {
     };
     fetchLocationSettings();
   }, [locationId]);
+
+    useEffect(() => {
+    if (!locationId || !activeOrganization?._id) return;
+
+    const loadPaymentMethods = async () => {
+      try {
+        // Org defaults
+        const orgRes = await apiFetch(`/organizations/${activeOrganization._id}`);
+        const org = orgRes?.organization;
+        const orgMethods = Array.isArray(org?.website?.paymentMethods)
+          ? org.website.paymentMethods
+          : [];
+
+        // Location override (may be empty → inherit)
+        const locMethods = Array.isArray(locationSettings?.paymentMethods)
+          ? locationSettings.paymentMethods
+          : [];
+
+        const source = locMethods.length > 0 ? locMethods : orgMethods;
+        const enabled = source
+          .filter((m) => m.enabled !== false)
+          .map((m) => ({
+            key: m.key,
+            label: m.label,
+            icon: m.icon || "",
+            isDefault: m.isDefault === true,
+          }));
+
+        setEffectivePaymentMethods(enabled);
+
+        // Set the default method if nothing is selected yet
+        if (enabled.length > 0 && !enabled.some((m) => m.key === selectedPaymentMethod)) {
+          const def = enabled.find((m) => m.isDefault) || enabled[0];
+          setSelectedPaymentMethod(def.key);
+        }
+
+        // Resolve STK availability
+        const orgStkOn =
+          org?.daraja?.enabled === true && org?.daraja?.mpesaStkEnabled === true;
+        const locOverride =
+          locationSettings?.mpesaStkEnabled === true
+            ? true
+            : locationSettings?.mpesaStkEnabled === false
+              ? false
+              : null;
+        const stkAvailable =
+          locOverride === false
+            ? false
+            : locOverride === true
+              ? orgStkOn
+              : orgStkOn;
+        setMpesaStkAvailable(stkAvailable);
+      } catch (err) {
+        console.warn("[POS] Failed to load payment methods:", err.message);
+        // Fall back to safe defaults so the POS still works
+        setEffectivePaymentMethods([
+          { key: "cash", label: "Cash", icon: "💵", isDefault: true },
+          { key: "card", label: "Card", icon: "💳", isDefault: false },
+          { key: "mpesa", label: "M-Pesa", icon: "📱", isDefault: false },
+        ]);
+        setMpesaStkAvailable(false);
+      }
+    };
+
+    loadPaymentMethods();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [locationId, activeOrganization?._id, locationSettings?.paymentMethods, locationSettings?.mpesaStkEnabled]);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -2453,6 +2525,262 @@ const addToCart = (product) => {
     setShowCompleteCheckoutModal(true);
   };
 
+    const handleStartStk = async (phone) => {
+    // Build the sale payload identically to handleCompleteCheckout, but
+    // with useStk: true and no payments array. The server creates a pending
+    // sale and returns the saleId we need to poll.
+    if (!phone) {
+      setError("Enter the customer's M-Pesa phone number.");
+      return;
+    }
+
+    const bundleParentNames = {};
+    cart.forEach((item, index) => {
+      if (item.isBundleParent) bundleParentNames[index] = item.name;
+    });
+    const saleItems = cart.filter((item) => !item.isBundleParent);
+    const formattedItems = saleItems.map((item) => {
+      const isChild =
+        item.parentItemIndex !== null &&
+        item.parentItemIndex !== undefined &&
+        !item.isBundleParent &&
+        !item.isBundleChild;
+
+      const baseItem = {
+        type: item.type,
+        quantity: item.quantity,
+        unitPrice: isChild ? 0 : item.price,
+        discount: item.discount || 0,
+        parentItemIndex: isChild ? item.parentItemIndex : null,
+      };
+
+      if (isChild && item.originalPrice !== undefined) {
+        baseItem.originalPrice = item.originalPrice;
+      }
+
+      if (item.type === "service") {
+        let displayName = item.name || item.productName;
+        if (item.isBundleChild && bundleParentNames[item.parentItemIndex]) {
+          displayName = `${bundleParentNames[item.parentItemIndex]} – ${displayName}`;
+        }
+        return {
+          ...baseItem,
+          productId: item.variant,
+          productName: displayName,
+          sku: item.sku || "",
+          assignedUser: item.assignedUser || saleAssignedUser || null,
+          parentItemIndex: null,
+          laborCost: item.laborCost || 0,
+          productCost: 0,
+          commissionType: item.commissionType,
+          commissionValue: item.commissionValue,
+          commissionAmount: item.commissionAmount,
+          isBundleChild: item.isBundleChild || false,
+        };
+      } else if (item.type === "shopify") {
+        return {
+          ...baseItem,
+          shopifyVariantId: item.variant,
+          sku: item.sku || undefined,
+          productName: item.name,
+          assignedUser: null,
+        };
+      } else if (item.type === "flexi") {
+        return {
+          ...baseItem,
+          productId: item.productId || item.variant,
+          variantId: item.variantId || item.variant,
+          variantTitle: item.variantTitle || item.selectedOptions || [],
+          productName: item.name,
+          sku: item.sku || "",
+          assignedUser: null,
+        };
+      }
+      return { ...baseItem, productId: item.variant, assignedUser: null };
+    });
+
+    const finalDeliveryFee = calculateDeliveryFee();
+    const payload = {
+      locationId,
+      items: formattedItems,
+      notes: notes || undefined,
+      idempotencyKey: buildSaleIdempotencyKey({
+        organizationId:
+          activeOrganization?._id || activeOrganization?.organizationId,
+        locationId,
+      }),
+      assignedUser: saleAssignedUser || undefined,
+      customerId: selectedCustomer?._id || undefined,
+      customerName: selectedCustomer?.fullname || undefined,
+      customerEmail: selectedCustomer?.email || undefined,
+      customerPhone: selectedCustomer?.phone || undefined,
+      useStk: true,
+    };
+
+    if (deliveryEnabled) {
+      payload.requiresDelivery = true;
+      payload.deliveryInfo = {
+        requiresDelivery: true,
+        recipientName: deliveryInfo.recipientName,
+        recipientPhone: deliveryInfo.recipientPhone,
+        recipientEmail: deliveryInfo.recipientEmail,
+        deliveryAddress: deliveryInfo.deliveryAddress,
+        deliveryCategory: deliveryInfo.deliveryCategory,
+        deliveryOption: deliveryInfo.deliveryOption,
+        deliveryFee: finalDeliveryFee || 0,
+        notes: deliveryInfo.notes,
+      };
+    }
+
+    setStatus("Creating pending sale…");
+    setError("");
+
+    try {
+      const res = await apiFetch("/sales", { method: "POST", body: payload });
+      const saleData = res?.data || res;
+      const saleId = saleData?.saleId || saleData?._id;
+      if (!saleId) throw new Error("Server did not return a saleId");
+
+      setShowCompleteCheckoutModal(false);
+
+      const amount = cartTotal + (deliveryEnabled ? finalDeliveryFee || 0 : 0);
+
+      const stkRes = await apiFetch(`/sales/${saleId}/mpesa-stk`, {
+        method: "POST",
+        body: { phone },
+      });
+
+      setStkState({
+        saleId,
+        phone: stkRes?.customerMessage ? phone : phone,
+        amount,
+      });
+      setStatus("");
+    } catch (err) {
+      const msg = err?.message || "Failed to start STK";
+      setError(msg);
+      setStatus("");
+      // If the sale was created but STK failed, clean it up
+      // (best-effort; ignore errors)
+      try {
+        const maybeSaleId =
+          err?.details?.saleId || err?.saleId || err?.data?.saleId;
+        if (maybeSaleId) {
+          await apiFetch(`/sales/${maybeSaleId}/pending`, { method: "DELETE" });
+        }
+      } catch {}
+    }
+  };
+
+  const handleStkSuccess = (receiptNumber) => {
+    setStkState(null);
+
+    // Cache decrement
+    const flexiItems = cart.filter((it) => it.type === "flexi" && it.variantId);
+    Promise.all(
+      flexiItems.map((it) =>
+        decrementFlexiCache(locationId, it.variantId, it.quantity).catch(() => {}),
+      ),
+    );
+
+    // Build a receipt from cart state
+    const groupedReceiptItems = cart
+      .filter((item) => !item.isBundleParent)
+      .map((item) => ({
+        name: item.name,
+        quantity: item.quantity,
+        price: item.price,
+        type: item.type,
+        discount: item.discount || 0,
+      }));
+
+    const amount = cartTotal + (deliveryEnabled ? calculateDeliveryFee() : 0);
+
+    setReceipt({
+      receiptNumber: receiptNumber || "STK-PENDING",
+      items: groupedReceiptItems,
+      payments: [
+        {
+          method: "mpesa",
+          amount,
+          source: "stk",
+          reference: receiptNumber || null,
+        },
+      ],
+      subtotal: cartTotal,
+      deliveryFee: deliveryEnabled ? calculateDeliveryFee() : 0,
+      deliveryInfo: deliveryEnabled ? deliveryInfo : undefined,
+      totalDiscount: cartLineItemDiscounts + transactionDiscount,
+      notes,
+      amountPaid: amount,
+      balanceDue: 0,
+      paymentStatus: "completed",
+      timestamp: new Date().toISOString(),
+    });
+    setShowReceipt(true);
+    setStatus("✓ M-Pesa payment received.");
+    clearCart();
+    scheduleProductRefresh();
+    setTimeout(() => setStatus(""), 3000);
+  };
+
+  const handleStkCancel = () => {
+    setStkState(null);
+    setStatus("STK cancelled. Cart preserved.");
+    setTimeout(() => setStatus(""), 3000);
+    // Cart was never cleared — no action needed
+  };
+
+  const handleStkManualPaid = (reference) => {
+    setStkState(null);
+
+    const flexiItems = cart.filter((it) => it.type === "flexi" && it.variantId);
+    Promise.all(
+      flexiItems.map((it) =>
+        decrementFlexiCache(locationId, it.variantId, it.quantity).catch(() => {}),
+      ),
+    );
+
+    const groupedReceiptItems = cart
+      .filter((item) => !item.isBundleParent)
+      .map((item) => ({
+        name: item.name,
+        quantity: item.quantity,
+        price: item.price,
+        type: item.type,
+        discount: item.discount || 0,
+      }));
+
+    const amount = cartTotal + (deliveryEnabled ? calculateDeliveryFee() : 0);
+
+    setReceipt({
+      receiptNumber: "STK-MANUAL",
+      items: groupedReceiptItems,
+      payments: [
+        {
+          method: "mpesa",
+          amount,
+          source: "manual",
+          reference: reference || null,
+        },
+      ],
+      subtotal: cartTotal,
+      deliveryFee: deliveryEnabled ? calculateDeliveryFee() : 0,
+      deliveryInfo: deliveryEnabled ? deliveryInfo : undefined,
+      totalDiscount: cartLineItemDiscounts + transactionDiscount,
+      notes,
+      amountPaid: amount,
+      balanceDue: 0,
+      paymentStatus: "completed",
+      timestamp: new Date().toISOString(),
+    });
+    setShowReceipt(true);
+    setStatus("✓ Marked as paid (manual M-Pesa).");
+    clearCart();
+    scheduleProductRefresh();
+    setTimeout(() => setStatus(""), 3000);
+  };
+
   const handleCompleteCheckout = async (checkoutData) => {
 
   const {
@@ -3268,7 +3596,7 @@ const addToCart = (product) => {
         }}
       />
 
-      <CompleteCheckoutModal
+            <CompleteCheckoutModal
         isOpen={showCompleteCheckoutModal}
         cart={cart}
         cartTotal={cartTotal}
@@ -3278,7 +3606,8 @@ const addToCart = (product) => {
         splitPayments={splitPayments}
         useSplitPayment={useSplitPayment}
         locationId={locationId}
-        paymentMethods={paymentMethods}
+        paymentMethods={effectivePaymentMethods}
+        mpesaStkAvailable={mpesaStkAvailable}
         onNoteChange={setNotes}
         onPaymentMethodChange={setSelectedPaymentMethod}
         onSplitPaymentChange={(index, field, value) => {
@@ -3300,6 +3629,7 @@ const addToCart = (product) => {
           }
         }}
         onComplete={handleCompleteCheckout}
+        onStartStk={handleStartStk}
         onClose={() => setShowCompleteCheckoutModal(false)}
         status={status}
         error={error}
@@ -3308,6 +3638,18 @@ const addToCart = (product) => {
         deliveryFee={calculateDeliveryFee()}
         deliveryEnabled={deliveryEnabled}
       />
+
+      {stkState && (
+        <MpesaStkWaitingModal
+          open={Boolean(stkState)}
+          saleId={stkState.saleId}
+          phone={stkState.phone}
+          amount={stkState.amount}
+          onSuccess={handleStkSuccess}
+          onCancel={handleStkCancel}
+          onManualPaid={handleStkManualPaid}
+        />
+      )}
 
       {showDeliveryModal && (
         <DeliveryCheckoutModal
@@ -4116,7 +4458,7 @@ const addToCart = (product) => {
                                 };
 
                                 printReceiptInBrowser({
-                                  receipt: proformaReceipt,
+                                  receipt: profosales-channels/pos/pagermaReceipt,
                                   organizationName: activeOrganization?.name,
                                   locationLabel: getLocationLabel(locationId),
                                   location: locationSettings,

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter, useParams } from "next/navigation";
+import Link from "next/link";
 import { apiFetch } from "@/lib/api-client";
 import { useDrivers } from "@/hooks/useDrivers";
 import { PERMISSIONS } from "@/lib/permissions";
@@ -464,6 +465,69 @@ export default function DeliveryDetailPage() {
           </div>
         </div>
       </div>
+
+            {/* Linked Sale */}
+      {delivery?.saleId && (
+        <div className="rounded-lg border border-zinc-200 bg-white p-6 shadow-sm">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-zinc-900">
+              Linked sale
+            </h2>
+            <Link
+              href={`/dashboard/sales/${
+                typeof delivery.saleId === "object"
+                  ? delivery.saleId._id || delivery.saleId.id
+                  : delivery.saleId
+              }`}
+              className="rounded bg-zinc-100 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-200"
+            >
+              Open sale →
+            </Link>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-3">
+            <div>
+              <p className="text-xs font-medium text-zinc-600">Receipt number</p>
+              <p className="mt-1 font-mono text-sm text-zinc-900">
+                {typeof delivery.saleId === "object"
+                  ? delivery.saleId.receiptNumber || "—"
+                  : "—"}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-medium text-zinc-600">Sale total</p>
+              <p className="mt-1 text-sm text-zinc-900">
+                {typeof delivery.saleId === "object" && delivery.saleId.totalAmount != null
+                  ? formatCurrency(delivery.saleId.totalAmount)
+                  : "—"}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-medium text-zinc-600">Payment status</p>
+              <p className="mt-1 text-sm capitalize text-zinc-900">
+                {typeof delivery.saleId === "object"
+                  ? delivery.saleId.paymentStatus || "—"
+                  : "—"}
+              </p>
+            </div>
+          </div>
+          {receivable && (
+            <div className="mt-4 grid gap-4 border-t border-zinc-100 pt-4 sm:grid-cols-2">
+              <div>
+                <p className="text-xs font-medium text-zinc-600">Amount paid</p>
+                <p className="mt-1 text-sm text-emerald-700">
+                  {formatCurrency(receivable.totalPaid || 0)}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs font-medium text-zinc-600">Balance due</p>
+                <p className="mt-1 text-sm font-medium text-amber-700">
+                  {formatCurrency(receivable.balanceDue || 0)}
+                </p>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Driver Assignment */}
       <div className="rounded-lg border border-zinc-200 bg-white p-6 shadow-sm">

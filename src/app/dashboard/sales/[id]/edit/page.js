@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import Link from "next/link";
 import { apiFetch } from "@/lib/api-client";
 import { PERMISSIONS } from "@/lib/permissions";
 import { searchShopifyProducts } from "@/lib/indexeddb";
@@ -907,6 +908,40 @@ export default function EditReservationPage() {
         </form>
 
         <aside className="space-y-6 rounded-3xl border border-zinc-200 bg-zinc-50/80 p-5 shadow-sm sm:p-6">
+                  {sale?.deliveryFeeId && (
+            <div className="rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm">
+              <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+                Linked delivery
+              </p>
+              <div className="mt-3 space-y-2 text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-zinc-600">Tracking</span>
+                  <Link
+                    href={`/dashboard/deliveries/${sale.deliveryFeeId}`}
+                    className="font-mono text-xs font-semibold text-indigo-600 hover:text-indigo-800"
+                  >
+                    {delivery?.trackingNumber || sale.deliveryFeeId}
+                  </Link>
+                </div>
+                {delivery?.categoryStatus && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-zinc-600">Status</span>
+                    <span className="text-xs font-medium capitalize text-zinc-900">
+                      {delivery.categoryStatus.replace(/_/g, " ")}
+                    </span>
+                  </div>
+                )}
+                {delivery?.recipientName && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-zinc-600">Recipient</span>
+                    <span className="text-xs text-zinc-900">
+                      {delivery.recipientName}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
           <div className="rounded-3xl border border-zinc-200 bg-white p-5 shadow-sm">
             <p className="text-xs font-medium uppercase tracking-wide text-zinc-500">Summary</p>
             <div className="mt-4 space-y-4">
