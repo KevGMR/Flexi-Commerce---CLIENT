@@ -306,6 +306,7 @@ export default function PosPage() {
   const [heldSalesSearchQuery, setHeldSalesSearchQuery] = useState("");
 
   const [manageBundleIndex, setManageBundleIndex] = useState(null);
+  const [expandedServices, setExpandedServices] = useState(new Set());
 
 
   const cartContainerRef = useRef(null);
@@ -1139,6 +1140,15 @@ const assignUserToServiceItem = (index, userId) => {
     setCart(newCart);
   };
 
+  const toggleServiceExpand = (index) => {
+    setExpandedServices((prev) => {
+      const next = new Set(prev);
+      const key = String(index);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
   // Add a bundle to cart – all children start with their own laborCost
   const addBundleToCart = (product) => {
     const parentIndex = cart.length;
@@ -3596,7 +3606,8 @@ const addToCart = (product) => {
         }}
       />
 
-            <CompleteCheckoutModal
+      <CompleteCheckoutModal
+        users={users}
         isOpen={showCompleteCheckoutModal}
         cart={cart}
         cartTotal={cartTotal}
@@ -3752,7 +3763,9 @@ const addToCart = (product) => {
                           index={index}
                           cart={cart}
                           users={users}
+                          expandedServices={expandedServices}
                           onOpenManage={setManageBundleIndex}
+                          onToggleServiceExpand={toggleServiceExpand}
                           onRemove={removeFromCart}
                           onPriceEdit={handlePriceEdit}
                           onPriceSave={savePriceEdit}

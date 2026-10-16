@@ -29,7 +29,8 @@ export default function CompleteCheckoutModal({
   deliveryInfo,
   deliveryFee,
   deliveryEnabled,
-  onStartStk
+  onStartStk,
+  users = [],
 }) {
   const [isProductsExpanded, setIsProductsExpanded] = useState(true);
   const [isServicesExpanded, setIsServicesExpanded] = useState(true);
@@ -59,7 +60,8 @@ export default function CompleteCheckoutModal({
 
   const getUserFullName = (userId) => {
     if (!userId) return 'Unassigned';
-    return userId;
+    const u = users.find((x) => String(x._id) === String(userId));
+    return u?.fullname || u?.email || userId;
   };
 
   const normalizeCartBreakdown = () => {
@@ -307,7 +309,7 @@ export default function CompleteCheckoutModal({
     <>
       {/* Main Complete Sale Modal */}
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-        <div className="bg-white rounded-lg shadow-xl max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+        <div className="bg-white rounded-lg shadow-xl w-full max-w-[1400px] max-h-[95vh] overflow-hidden flex flex-col">
           {/* Header */}
           <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between flex-shrink-0">
             <div>
@@ -457,7 +459,7 @@ export default function CompleteCheckoutModal({
             </div>
 
             {/* RIGHT COLUMN - Payment & Summary */}
-            <div className="w-full md:w-[420px] bg-gray-50 border-l border-gray-200 flex flex-col flex-shrink-0">
+            <div className="w-full md:w-[480px] bg-gray-50 border-l border-gray-200 flex flex-col flex-shrink-0">
               <div className="flex-1 overflow-y-auto p-6 space-y-6">
                 {/* Order Summary */}
                 <div className="bg-white rounded-lg p-4 border border-gray-200">

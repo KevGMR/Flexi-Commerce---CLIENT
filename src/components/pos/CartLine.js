@@ -12,6 +12,10 @@ import { PERMISSIONS } from "@/lib/permissions";
  * Bundle children are never rendered inline — they only appear inside
  * BundleManageModal. See pos/page.js patch for the skip logic.
  *
+ * Services render as a compact summary by default:
+ *   $300.00 · Dorcas Wanjiru Kimani · Commission 0% ($0.00) [Default] ▸
+ * Clicking the summary expands labor cost, user picker, and discount.
+ *
  * All mutation is delegated to callbacks owned by pos/page.js.
  */
 export default function CartLine({
@@ -19,6 +23,8 @@ export default function CartLine({
   index,
   cart,
   users,
+  expandedServices,
+  onToggleServiceExpand,
   onOpenManage,
   onRemove,
   onPriceEdit,
@@ -68,6 +74,32 @@ export default function CartLine({
           i.assignedUser,
       ).length
     : 0;
+
+  // Expanded state for service detail panel
+  const isServiceExpanded =
+    expandedServices instanceof Set
+      ? expandedServices.has(String(index))
+      : Array.isArray(expandedServices)
+        ? expandedServices.includes(index)
+        : false;
+
+  // Resolve the assigned user's display name
+  const assignedUserObj = item.assignedUser
+    ? users.find((u) => String(u._id) === String(item.assignedUser))
+    : null;
+  const assignedUserName =
+    assignedUserObj?.fullname || assignedUserObj?.email || "";
+
+  // Compact commission label for the summary line
+  const commissionLabel = (() => {
+    if (!item.commissionType) return "No commission";
+    if (item.commissionType === "percentage") {
+      return `${item.commissionValue || 0}% ($${Number(
+        item.commissionAmount || 0,
+      ).toFixed(2)})`;
+    }
+    return `$${Number(item.commissionValue || 0).toFixed(2)}`;
+  })();
 
   return (
     <div className="bg-gray-50 rounded-lg p-3">
@@ -135,25 +167,154 @@ export default function CartLine({
             </div>
           )}
 
-          {/* Service labor cost (non-bundle services only) */}
+          {/* Service: compact summary + inline expand */}
           {isService && !isBundleParent && (
             <div className="mt-1 space-y-1">
-              <div className="flex items-center gap-1">
-                <label className="text-[10px] text-gray-500">Labor:</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={item.laborCost || 0}
-                  onChange={(e) =>
-                    onUpdateServiceCosts(index, "laborCost", e.target.value)
-                  }
-                  className="w-16 px-1 py-0.5 text-xs border border-gray-300 rounded"
-                />
-                <span className="text-[10px] text-gray-500">
-                  = ${Number(item.price || 0).toFixed(2)}
+              {/* Summary line — always shown */}
+              <button
+                type="button"
+                onClick={() => onToggleServiceExpand(index)}
+                className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-800 text-left flex-wrap"
+                title={isServiceExpanded ? "Hide details" : "Edit details"}
+              >
+                <span className="text-gray-700 font-medium">
+                  ${Number(item.price || 0).toFixed(2)}
                 </span>
-              </div>
+                <span className="text-gray-300">·</span>
+                <span
+                  className={
+                    assignedUserName ? "text-gray-700" : "text-amber-600"
+                  }
+                >
+                  {assignedUserName || "Unassigned"}
+                </span>
+                <span className="text-gray-300">·</span>
+                <span>Commission {commissionLabel}</span>
+                {item.commissionIsOverride ? (
+                  <span className="text-[10px] bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded font-medium">
+                    Override
+                  </span>
+                ) : (
+                  <span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">
+                    Default
+                  </span>
+                )}
+                <span className="text-[10px] text-blue-600 ml-1">
+                  {isServiceExpanded ? "▾" : "▸"}
+                </span>
+              </button>
+
+              {/* Expanded details */}
+              {isServiceExpanded && (
+                <div className="mt-2 space-y-2 border-l-2 border-blue-200 pl-3">
+                  {/* Labor cost */}
+                  <div className="flex items-center gap-1">
+                    <label className="text-[10px] text-gray-500 w-12">
+                      Labor:
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={item.laborCost || 0}
+                      onChange={(e) =>
+                        onUpdateServiceCosts(
+                          index,
+                          "laborCost",
+                          e.target.value,
+                        )
+                      }
+                      className="w-20 px-1 py-0.5 text-xs border border-gray-300 rounded"
+                    />
+                    <span className="text-[10px] text-gray-500">
+                      = ${Number(item.price || 0).toFixed(2)}
+                    </span>
+                  </div>
+
+                  {/* Assigned user */}
+                  <div className="flex items-center gap-1">
+                    <label className="text-[10px] text-gray-500 w-12">
+                      User:
+                    </label>
+                    <select
+                      value={item.assignedUser || ""}
+                      onChange={(e) =>
+                        onAssignUser(index, e.target.value || null)
+                      }
+                      className="text-xs border border-gray-300 rounded px-1 py-0.5 flex-1 max-w-[180px]"
+                    >
+                      <option value="">Assign user</option>
+                      {users.map((user) => (
+                        <option key={user._id} value={user._id}>
+                          {user.fullname || user.email}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Discount */}
+                  {canApplyDiscount && (
+                    <div className="flex items-center gap-2">
+                      {editingDiscountIndex === index ? (
+                        <>
+                          <select
+                            value={discountType}
+                            onChange={(e) =>
+                              setDiscountType(e.target.value)
+                            }
+                            className="px-2 py-1 border border-green-300 rounded text-xs"
+                          >
+                            <option value="fixed">$</option>
+                            <option value="percentage">%</option>
+                          </select>
+                          <input
+                            autoFocus
+                            type="number"
+                            step="0.01"
+                            placeholder="0"
+                            value={discountValue}
+                            onChange={(e) => setDiscountValue(e.target.value)}
+                            onBlur={() => onDiscountSave(index)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") onDiscountSave(index);
+                              if (e.key === "Escape") onDiscountCancel();
+                            }}
+                            className="w-20 px-2 py-1 border border-green-300 rounded text-xs"
+                          />
+                          <button
+                            onClick={onDiscountCancel}
+                            className="text-xs text-gray-500"
+                          >
+                            ✕
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          onClick={() => onDiscountEdit(index)}
+                          className="text-xs text-green-600 hover:text-green-700 flex items-center gap-1"
+                          title="Click to apply discount"
+                        >
+                          {item.discount > 0 ? (
+                            <>
+                              <span className="line-through text-gray-400">
+                                $
+                                {(
+                                  Number(item.price) * item.quantity
+                                ).toFixed(2)}
+                              </span>
+                              <span className="font-medium">
+                                -${Number(item.discount).toFixed(2)} 🏷️
+                              </span>
+                            </>
+                          ) : (
+                            <span>+ Add Discount</span>
+                          )}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -187,8 +348,8 @@ export default function CartLine({
             </div>
           )}
 
-          {/* Discount controls */}
-          {canApplyDiscount && !isChild && !isBundleParent && (
+          {/* Discount controls for non-service, non-child items */}
+          {canApplyDiscount && !isChild && !isBundleParent && !isService && (
             <div className="mt-1">
               {editingDiscountIndex === index ? (
                 <div className="flex items-center gap-2">
@@ -240,49 +401,6 @@ export default function CartLine({
                     <span>+ Add Discount</span>
                   )}
                 </button>
-              )}
-            </div>
-          )}
-
-          {/* Service: assigned user */}
-          {isService && !isBundleParent && (
-            <div className="mt-1">
-              <select
-                value={item.assignedUser || ""}
-                onChange={(e) => onAssignUser(index, e.target.value || null)}
-                className="text-xs border border-gray-300 rounded px-1 py-0.5 w-full max-w-[120px]"
-              >
-                <option value="">Assign user</option>
-                {users.map((user) => (
-                  <option key={user._id} value={user._id}>
-                    {user.fullname || user.email}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          {/* Service: commission display */}
-          {isService && !isBundleParent && (
-            <div className="text-xs mt-1 flex items-center gap-2">
-              <span className="text-gray-500">
-                Commission:{" "}
-                <span className="font-medium text-gray-700">
-                  {item.commissionType === "percentage"
-                    ? `${item.commissionValue}% ($${
-                        item.commissionAmount?.toFixed(2) || "0.00"
-                      })`
-                    : `$${Number(item.commissionValue || 0).toFixed(2)}`}
-                </span>
-              </span>
-              {item.commissionIsOverride ? (
-                <span className="text-[10px] bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded font-medium">
-                  Override
-                </span>
-              ) : (
-                <span className="text-[10px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded">
-                  Default
-                </span>
               )}
             </div>
           )}
