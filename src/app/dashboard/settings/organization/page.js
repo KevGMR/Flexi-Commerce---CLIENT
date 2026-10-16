@@ -55,7 +55,9 @@ export default function OrganizationSettingsPage() {
             taxRate: org.settings?.taxRate || 0,
           });
           setWebsite(org.website || null);
-          setPaymentMethods(Array.isArray(org.paymentMethods) ? org.paymentMethods : []);
+          setPaymentMethods(
+  Array.isArray(org.website?.paymentMethods) ? org.website.paymentMethods : [],
+);
           setDaraja(org.daraja || null);
         }
       } catch (err) {

@@ -1,3 +1,4 @@
+// client/src/app/dashboard/settings/locations/[id]/payment-methods/page.js
 "use client";
 
 import { useEffect, useState } from "react";

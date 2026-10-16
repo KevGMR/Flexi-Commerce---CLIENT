@@ -136,7 +136,7 @@ export default function LocationsPage() {
                       {loc.locationType}
                     </div>
                   </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
+                  <div className="flex items-center gap-3 flex-shrink-0">
                     {loc.isDefault && (
                       <span className="text-xs px-2 py-1 rounded bg-green-50 text-green-700">
                         Default
@@ -144,12 +144,12 @@ export default function LocationsPage() {
                     )}
                     <Link
                       href={`/dashboard/settings/locations/${loc._id}/receipt`}
-                      className="text-xs px-2.5 py-1 rounded border border-zinc-300 text-zinc-700 hover:bg-zinc-50"
+                      className="text-sm text-indigo-600 hover:text-indigo-800"
                     >
                       Receipt settings
                     </Link>
                     <Link
-                      href={`/dashboard/settings/locations/${location._id}/payment-methods`}
+                      href={`/dashboard/settings/locations/${loc._id}/payment-methods`}
                       className="text-sm text-indigo-600 hover:text-indigo-800"
                     >
                       Payment methods
