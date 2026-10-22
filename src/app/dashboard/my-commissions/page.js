@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { apiFetch } from "@/lib/api-client";
 import { useSessionStore } from "@/store/session";
 import { PERMISSIONS } from "@/lib/permissions";
+import { exportCSV } from "@/lib/csv";
 
 const getDefaultDateRange = () => {
   const now = new Date();
@@ -17,6 +18,33 @@ const getDefaultDateRange = () => {
     endDate: `${end.getFullYear()}-${pad(end.getMonth() + 1)}-${pad(end.getDate())}`,
   };
 };
+
+  const handleExport = () => {
+    if (salesData.length === 0) return;
+    const rows = [];
+    for (const sale of salesData) {
+      for (const svc of sale.serviceItems || []) {
+        rows.push([
+          sale.receiptNumber,
+          new Date(sale.saleDate).toISOString(),
+          svc.serviceName,
+          Number(svc.commissionAmount || 0).toFixed(2),
+          svc.quantityRefunded ?? 0,
+        ]);
+      }
+    }
+    exportCSV({
+      filename: `my-commissions-${startDate}_to_${endDate}.csv`,
+      headers: [
+        "Receipt",
+        "Sale date",
+        "Service",
+        "Commission",
+        "Quantity refunded",
+      ],
+      rows,
+    });
+  };
 
 export default function MyCommissionsPage() {
   const can = useSessionStore((s) => s.can);
@@ -89,11 +117,24 @@ export default function MyCommissionsPage() {
 
   return (
     <div className="space-y-6 p-6 max-w-4xl mx-auto">
-      <div>
-        <h1 className="text-2xl font-semibold text-zinc-900">My commissions</h1>
-        <p className="mt-1 text-sm text-zinc-600">
-          Earnings from services you were assigned.
-        </p>
+            {/* Header */}
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold text-zinc-900">
+            My commissions
+          </h1>
+          <p className="mt-1 text-sm text-zinc-600">
+            Earnings from services you were assigned.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={handleExport}
+          disabled={loading || salesData.length === 0}
+          className="shrink-0 rounded border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          ⬇ Download CSV
+        </button>
       </div>
 
       {/* Filters */}

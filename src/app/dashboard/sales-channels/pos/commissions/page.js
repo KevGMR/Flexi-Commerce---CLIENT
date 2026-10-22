@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { apiFetch } from "@/lib/api-client";
 import { useSessionStore } from "@/store/session";
 import { PERMISSIONS } from "@/lib/permissions";
+import { exportCSV } from "@/lib/csv";
 
 const getDefaultDateRange = () => {
   const now = new Date();
@@ -93,6 +94,60 @@ export default function ManagerCommissionsPage() {
     [startDate, endDate],
   );
 
+    const handleExportSummary = () => {
+    if (summaryRows.length === 0) return;
+    exportCSV({
+      filename: `commissions-summary-${startDate}_to_${endDate}.csv`,
+      headers: [
+        "Attendant name",
+        "Email",
+        "Sales count",
+        "Total commission",
+      ],
+      rows: summaryRows.map((row) => {
+        const name =
+          row.user?.fullname || row.user?.email || String(row.user?._id || row.userId);
+        const email = row.user?.email || "";
+        return [
+          name,
+          email,
+          row.salesCount ?? 0,
+          Number(row.totalCommission || 0).toFixed(2),
+        ];
+      }),
+    });
+  };
+
+    const handleExportDrill = () => {
+    if (drillSales.length === 0) return;
+    const rows = [];
+    for (const sale of drillSales) {
+      for (const svc of sale.serviceItems || []) {
+        rows.push([
+          drillUserName,
+          sale.receiptNumber,
+          new Date(sale.saleDate).toISOString(),
+          svc.serviceName,
+          Number(svc.commissionAmount || 0).toFixed(2),
+        ]);
+      }
+    }
+    exportCSV({
+      filename: `commissions-${drillUserName.replace(
+        /[^a-z0-9]+/gi,
+        "-",
+      )}-${startDate}_to_${endDate}.csv`,
+      headers: [
+        "Attendant",
+        "Receipt",
+        "Sale date",
+        "Service",
+        "Commission",
+      ],
+      rows,
+    });
+  };
+
   useEffect(() => {
     if (hydrated && canView && !drillUserId) loadSummary();
   }, [hydrated, canView, drillUserId, loadSummary]);
@@ -163,6 +218,17 @@ export default function ManagerCommissionsPage() {
               : "Commissions earned by every attendant in the selected period."}
           </p>
         </div>
+        <button
+          type="button"
+          onClick={drillUserId ? handleExportDrill : handleExportSummary}
+          disabled={
+            loading ||
+            (drillUserId ? drillSales.length === 0 : summaryRows.length === 0)
+          }
+          className="shrink-0 rounded border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          ⬇ Download CSV
+        </button>
       </div>
 
       {/* Filters */}
