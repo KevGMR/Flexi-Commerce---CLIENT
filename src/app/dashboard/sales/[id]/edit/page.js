@@ -575,7 +575,12 @@ export default function EditReservationPage() {
     );
   }
 
-  if (sale.status !== "completed") {
+  const isReservation =
+    sale.status === "completed" &&
+    (sale.paymentStatus === "partial" ||
+      (Array.isArray(sale.tags) && sale.tags.includes("reservation")));
+
+  if (!isReservation) {
     return (
       <div className="space-y-6">
         <button
@@ -585,7 +590,17 @@ export default function EditReservationPage() {
           ← Back to sale
         </button>
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-6 shadow-sm">
-          <p className="text-sm text-amber-800">Reservation edits are only available for completed sales.</p>
+          <p className="text-sm text-amber-800">
+            Only reservations can be edited. This sale is{" "}
+            {sale.status === "voided"
+              ? "voided"
+              : sale.status === "partial_refund"
+                ? "partially refunded"
+                : sale.paymentStatus === "completed"
+                  ? "fully paid"
+                  : "not a reservation"}
+            . Corrections to a completed sale should go through the refund flow.
+          </p>
         </div>
       </div>
     );
