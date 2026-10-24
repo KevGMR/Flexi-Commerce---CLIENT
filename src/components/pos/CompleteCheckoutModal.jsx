@@ -3,6 +3,22 @@
 import { useState } from 'react';
 import DeliveryCheckoutModal from './DeliveryCheckoutModal';
 
+// Normalise any payment-method entry (string, {key,label,icon} from the new
+// config, or legacy {value,label,icon}) into a consistent shape.
+function normalizeMethod(m) {
+  if (typeof m === 'string') {
+    return { key: m, label: m, icon: '' };
+  }
+  if (!m || typeof m !== 'object') {
+    return { key: '', label: '', icon: '' };
+  }
+  return {
+    key: m.key || m.value || '',
+    label: m.label || m.value || m.key || '',
+    icon: m.icon || '',
+  };
+}
+
 export default function CompleteCheckoutModal({
   isOpen,
   cart,
@@ -30,20 +46,36 @@ export default function CompleteCheckoutModal({
   deliveryFee,
   deliveryEnabled,
   onStartStk,
-  users = [],
+  users,
 }) {
   const [isProductsExpanded, setIsProductsExpanded] = useState(true);
   const [isServicesExpanded, setIsServicesExpanded] = useState(true);
   const [showDeliveryModal, setShowDeliveryModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const [stkPhone, setStkPhone] = useState("");
+  const [stkPhone, setStkPhone] = useState('');
   const [stkStarting, setStkStarting] = useState(false);
 
   if (!isOpen) return null;
 
+  const normalizedMethods = (Array.isArray(paymentMethods) ? paymentMethods : [])
+    .map(normalizeMethod)
+    .filter((m) => m.key);
+
+  const getUserName = (userId) => {
+    if (!userId) return 'Unassigned';
+    if (Array.isArray(users)) {
+      const u = users.find((x) => String(x._id) === String(userId));
+      if (u) return u.fullname || u.email || userId;
+    }
+    return userId;
+  };
+
   const getItemName = (item) =>
-    item?.name || item?.productName || item?.title || item?.product?.name || 'Unknown Item';
+    item?.name ||
+    item?.productName ||
+    item?.title ||
+    item?.product?.name ||
+    'Unknown Item';
 
   const getItemUnitPrice = (item) => Number(item?.price || item?.unitPrice || 0);
 
@@ -58,19 +90,14 @@ export default function CompleteCheckoutModal({
 
   const formatMoney = (value) => `$${Number(value || 0).toFixed(2)}`;
 
-  const getUserFullName = (userId) => {
-    if (!userId) return 'Unassigned';
-    const u = users.find((x) => String(x._id) === String(userId));
-    return u?.fullname || u?.email || userId;
-  };
-
   const normalizeCartBreakdown = () => {
     const products = [];
     const services = [];
 
     cart.forEach((item, index) => {
       const isService = item?.type === 'service';
-      const isChild = item?.parentItemIndex !== null && item?.parentItemIndex !== undefined;
+      const isChild =
+        item?.parentItemIndex !== null && item?.parentItemIndex !== undefined;
       const bundleComponents = getBundleComponents(item);
       const quantity = Number(item?.quantity || 0);
       const unitPrice = getItemUnitPrice(item);
@@ -122,11 +149,7 @@ export default function CompleteCheckoutModal({
     if (service.assignedUser && service.commissionAmount > 0) {
       const userId = service.assignedUser;
       if (!acc[userId]) {
-        acc[userId] = {
-          userId,
-          totalCommission: 0,
-          services: [],
-        };
+        acc[userId] = { userId, totalCommission: 0, services: [] };
       }
       acc[userId].totalCommission += service.commissionAmount;
       acc[userId].services.push({
@@ -151,11 +174,19 @@ export default function CompleteCheckoutModal({
 
   const renderBundleComponent = (component, parentQuantity, componentIndex) => {
     const componentQuantity = Number(component?.quantity || 0);
-    const componentUnitPrice = Number(component?.priceSnapshot || component?.price || 0);
+    const componentUnitPrice = Number(
+      component?.priceSnapshot || component?.price || 0,
+    );
     const componentTotalQuantity = componentQuantity * parentQuantity;
-    const componentLineTotal = Math.max(0, componentUnitPrice * componentTotalQuantity);
+    const componentLineTotal = Math.max(
+      0,
+      componentUnitPrice * componentTotalQuantity,
+    );
     const componentName =
-      component?.nameSnapshot || component?.name || component?.serviceName || 'Bundle Component';
+      component?.nameSnapshot ||
+      component?.name ||
+      component?.serviceName ||
+      'Bundle Component';
 
     return (
       <div
@@ -167,15 +198,22 @@ export default function CompleteCheckoutModal({
             <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">
               Component
             </div>
-            <div className="font-medium text-gray-800 truncate">{componentName}</div>
+            <div className="font-medium text-gray-800 truncate">
+              {componentName}
+            </div>
             <div className="mt-1 text-xs text-gray-500">
               {component?.skuSnapshot ? `SKU ${component.skuSnapshot} · ` : ''}
-              {componentQuantity} per bundle · {formatMoney(componentUnitPrice)} each
+              {componentQuantity} per bundle ·{' '}
+              {formatMoney(componentUnitPrice)} each
             </div>
           </div>
           <div className="text-right text-sm">
-            <div className="font-semibold text-gray-900">{formatMoney(componentLineTotal)}</div>
-            <div className="text-xs text-gray-500">{componentTotalQuantity} total units</div>
+            <div className="font-semibold text-gray-900">
+              {formatMoney(componentLineTotal)}
+            </div>
+            <div className="text-xs text-gray-500">
+              {componentTotalQuantity} total units
+            </div>
           </div>
         </div>
       </div>
@@ -189,13 +227,23 @@ export default function CompleteCheckoutModal({
     return (
       <div
         key={entry.key}
-        className={`rounded-lg border border-gray-200 bg-white px-3 py-3 ${entry.isChild ? 'ml-6 border-l-2 border-blue-200' : ''}`}
+        className={`rounded-lg border border-gray-200 bg-white px-3 py-3 ${
+          entry.isChild ? 'ml-6 border-l-2 border-blue-200' : ''
+        }`}
       >
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <h4 className="font-medium text-gray-900 truncate">{entry.name}</h4>
-              <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${itemType === 'service' ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>
+              <h4 className="font-medium text-gray-900 truncate">
+                {entry.name}
+              </h4>
+              <span
+                className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                  itemType === 'service'
+                    ? 'bg-blue-100 text-blue-700'
+                    : 'bg-amber-100 text-amber-700'
+                }`}
+              >
                 {itemType === 'service' ? 'Service' : 'Product'}
               </span>
               {entry.isChild && (
@@ -214,8 +262,10 @@ export default function CompleteCheckoutModal({
               {!entry.isChild && ` · ${formatMoney(entry.unitPrice)} each`}
               {entry.isChild && entry.originalPrice && (
                 <span className="ml-2">
-                  <span className="line-through text-gray-400">{formatMoney(entry.originalPrice)}</span>
-                  {' '}<span className="text-green-600">Included</span>
+                  <span className="line-through text-gray-400">
+                    {formatMoney(entry.originalPrice)}
+                  </span>{' '}
+                  <span className="text-green-600">Included</span>
                 </span>
               )}
               {entry.item?.sku ? ` · SKU ${entry.item.sku}` : ''}
@@ -227,11 +277,15 @@ export default function CompleteCheckoutModal({
             )}
             {itemType === 'service' && entry.assignedUser && (
               <div className="mt-1 text-xs text-gray-500">
-                Assigned to: <span className="font-medium text-gray-700">{getUserFullName(entry.assignedUser)}</span>
+                Assigned to:{' '}
+                <span className="font-medium text-gray-700">
+                  {getUserName(entry.assignedUser)}
+                </span>
                 {entry.commissionAmount > 0 && (
                   <span className="ml-2 text-blue-600">
                     Commission: {formatMoney(entry.commissionAmount)}
-                    {entry.commissionType === 'percentage' && ` (${entry.commissionValue}%)`}
+                    {entry.commissionType === 'percentage' &&
+                      ` (${entry.commissionValue}%)`}
                   </span>
                 )}
               </div>
@@ -242,7 +296,9 @@ export default function CompleteCheckoutModal({
               {entry.isChild ? formatMoney(0) : formatMoney(entry.lineTotal)}
             </div>
             {!entry.isChild && entry.discount > 0 && (
-              <div className="text-xs text-gray-500">Before discount {formatMoney(entry.unitPrice * entry.quantity)}</div>
+              <div className="text-xs text-gray-500">
+                Before discount {formatMoney(entry.unitPrice * entry.quantity)}
+              </div>
             )}
           </div>
         </div>
@@ -307,62 +363,87 @@ export default function CompleteCheckoutModal({
 
   return (
     <>
-      {/* Main Complete Sale Modal */}
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-        <div className="bg-white rounded-lg shadow-xl w-full max-w-[1400px] max-h-[95vh] overflow-hidden flex flex-col">
-          {/* Header */}
+        <div className="bg-white rounded-lg shadow-xl max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col">
           <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between flex-shrink-0">
             <div>
-              <h2 className="text-2xl font-bold text-gray-900">Complete Sale</h2>
-              <p className="text-sm text-gray-500 mt-1">Review order and complete payment</p>
+              <h2 className="text-2xl font-bold text-gray-900">
+                Complete Sale
+              </h2>
+              <p className="text-sm text-gray-500 mt-1">
+                Review order and complete payment
+              </p>
             </div>
             <button
               onClick={onClose}
               disabled={isSubmitting}
               className="text-gray-400 hover:text-gray-600 transition-colors"
             >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              <svg
+                className="w-6 h-6"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M6 18L18 6M6 6l12 12"
+                />
               </svg>
             </button>
           </div>
 
-          {/* Body - Two Column Layout */}
           <div className="flex-1 overflow-hidden flex flex-col md:flex-row">
-            {/* LEFT COLUMN - Cart Breakdown & Info */}
             <div className="flex-1 overflow-y-auto p-6 space-y-6 min-h-0">
-              {/* Customer Info */}
               {selectedCustomer && (
                 <div className="bg-blue-50 rounded-lg p-4 border border-blue-200">
                   <h3 className="font-semibold text-gray-900 mb-2">Customer</h3>
                   <div className="space-y-1 text-sm">
-                    <p className="font-medium text-gray-900">{selectedCustomer.fullname}</p>
-                    {selectedCustomer.email && <p className="text-gray-600">{selectedCustomer.email}</p>}
-                    {selectedCustomer.phone && <p className="text-gray-600">{selectedCustomer.phone}</p>}
-                    {selectedCustomer.loyaltyPoints > 0 && (
-                      <p className="text-xs text-blue-600 font-medium">{selectedCustomer.loyaltyPoints} loyalty points</p>
+                    <p className="font-medium text-gray-900">
+                      {selectedCustomer.fullname}
+                    </p>
+                    {selectedCustomer.email && (
+                      <p className="text-gray-600">
+                        {selectedCustomer.email}
+                      </p>
+                    )}
+                    {selectedCustomer.phone && (
+                      <p className="text-gray-600">
+                        {selectedCustomer.phone}
+                      </p>
                     )}
                   </div>
                 </div>
               )}
 
-              {/* Delivery Summary */}
               {deliveryEnabled && deliveryInfo && (
                 <div className="bg-green-50 rounded-lg p-4 border border-green-200">
-                  <h3 className="font-semibold text-gray-900 mb-2">🚚 Delivery Details</h3>
+                  <h3 className="font-semibold text-gray-900 mb-2">
+                    🚚 Delivery Details
+                  </h3>
                   <div className="space-y-1 text-sm">
-                    <p><span className="font-medium">Recipient:</span> {deliveryInfo.recipientName}</p>
-                    <p><span className="font-medium">Phone:</span> {deliveryInfo.recipientPhone}</p>
-                    {deliveryInfo.recipientEmail && <p><span className="font-medium">Email:</span> {deliveryInfo.recipientEmail}</p>}
-                    <p><span className="font-medium">Category:</span> {deliveryInfo.deliveryCategory}</p>
-                    <p><span className="font-medium">Option:</span> {deliveryInfo.deliveryOption}</p>
-                    <p><span className="font-medium">Address:</span> {deliveryInfo.deliveryAddress?.street}, {deliveryInfo.deliveryAddress?.city}, {deliveryInfo.deliveryAddress?.state} {deliveryInfo.deliveryAddress?.postalCode}</p>
-                    {deliveryInfo.notes && <p><span className="font-medium">Notes:</span> {deliveryInfo.notes}</p>}
+                    <p>
+                      <span className="font-medium">Recipient:</span>{' '}
+                      {deliveryInfo.recipientName}
+                    </p>
+                    <p>
+                      <span className="font-medium">Phone:</span>{' '}
+                      {deliveryInfo.recipientPhone}
+                    </p>
+                    <p>
+                      <span className="font-medium">Category:</span>{' '}
+                      {deliveryInfo.deliveryCategory}
+                    </p>
+                    <p>
+                      <span className="font-medium">Option:</span>{' '}
+                      {deliveryInfo.deliveryOption}
+                    </p>
                   </div>
                 </div>
               )}
 
-              {/* Cart Breakdown */}
               {hasItems && (
                 <div className="bg-gray-50 rounded-lg p-4 space-y-4">
                   <h3 className="font-semibold text-gray-900">Order Items</h3>
@@ -371,18 +452,27 @@ export default function CompleteCheckoutModal({
                     <div className="border border-amber-200 rounded-lg bg-white overflow-hidden">
                       <button
                         type="button"
-                        onClick={() => setIsProductsExpanded((prev) => !prev)}
+                        onClick={() => setIsProductsExpanded((p) => !p)}
                         className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-amber-50 transition-colors"
                       >
                         <div className="flex items-center gap-2">
-                          <span className="font-semibold text-gray-900">Products</span>
-                          <span className="text-xs text-gray-500">{products.length} item{products.length === 1 ? '' : 's'}</span>
+                          <span className="font-semibold text-gray-900">
+                            Products
+                          </span>
+                          <span className="text-xs text-gray-500">
+                            {products.length} item
+                            {products.length === 1 ? '' : 's'}
+                          </span>
                         </div>
-                        <span className="text-gray-600">{isProductsExpanded ? '−' : '+'}</span>
+                        <span className="text-gray-600">
+                          {isProductsExpanded ? '−' : '+'}
+                        </span>
                       </button>
                       {isProductsExpanded && (
                         <div className="space-y-2 border-t border-amber-100 p-3 max-h-60 overflow-y-auto">
-                          {products.map((entry) => renderItemRow(entry, 'product'))}
+                          {products.map((entry) =>
+                            renderItemRow(entry, 'product'),
+                          )}
                         </div>
                       )}
                     </div>
@@ -392,18 +482,27 @@ export default function CompleteCheckoutModal({
                     <div className="border border-blue-200 rounded-lg bg-white overflow-hidden">
                       <button
                         type="button"
-                        onClick={() => setIsServicesExpanded((prev) => !prev)}
+                        onClick={() => setIsServicesExpanded((p) => !p)}
                         className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-blue-50 transition-colors"
                       >
                         <div className="flex items-center gap-2">
-                          <span className="font-semibold text-gray-900">Services</span>
-                          <span className="text-xs text-gray-500">{services.length} item{services.length === 1 ? '' : 's'}</span>
+                          <span className="font-semibold text-gray-900">
+                            Services
+                          </span>
+                          <span className="text-xs text-gray-500">
+                            {services.length} item
+                            {services.length === 1 ? '' : 's'}
+                          </span>
                         </div>
-                        <span className="text-gray-600">{isServicesExpanded ? '−' : '+'}</span>
+                        <span className="text-gray-600">
+                          {isServicesExpanded ? '−' : '+'}
+                        </span>
                       </button>
                       {isServicesExpanded && (
                         <div className="space-y-2 border-t border-blue-100 p-3 max-h-60 overflow-y-auto">
-                          {services.map((entry) => renderItemRow(entry, 'service'))}
+                          {services.map((entry) =>
+                            renderItemRow(entry, 'service'),
+                          )}
                         </div>
                       )}
                     </div>
@@ -411,31 +510,24 @@ export default function CompleteCheckoutModal({
                 </div>
               )}
 
-              {/* Commission Summary */}
               {hasCommissionSummary && (
                 <div className="bg-indigo-50 rounded-lg p-4 border border-indigo-200">
-                  <h3 className="font-semibold text-gray-900 mb-2">Commission Summary</h3>
+                  <h3 className="font-semibold text-gray-900 mb-2">
+                    Commission Summary
+                  </h3>
                   <div className="space-y-2">
                     {Object.values(commissionSummary).map((summary) => (
-                      <div key={summary.userId} className="bg-white rounded p-3 border border-indigo-100">
+                      <div
+                        key={summary.userId}
+                        className="bg-white rounded p-3 border border-indigo-100"
+                      >
                         <div className="flex items-center justify-between">
                           <span className="font-medium text-gray-900">
-                            {getUserFullName(summary.userId)}
+                            {getUserName(summary.userId)}
                           </span>
                           <span className="font-semibold text-indigo-600">
                             {formatMoney(summary.totalCommission)}
                           </span>
-                        </div>
-                        <div className="mt-1 flex flex-wrap gap-2">
-                          {summary.services.map((svc, idx) => (
-                            <span
-                              key={idx}
-                              className="text-xs bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded"
-                            >
-                              {svc.name}: {formatMoney(svc.commissionAmount)}
-                              {svc.commissionType === 'percentage' && ` (${svc.commissionValue}%)`}
-                            </span>
-                          ))}
                         </div>
                       </div>
                     ))}
@@ -443,7 +535,6 @@ export default function CompleteCheckoutModal({
                 </div>
               )}
 
-              {/* Notes */}
               <div>
                 <label className="block text-sm font-medium text-gray-900 mb-2">
                   Add Note (Optional)
@@ -458,16 +549,18 @@ export default function CompleteCheckoutModal({
               </div>
             </div>
 
-            {/* RIGHT COLUMN - Payment & Summary */}
-            <div className="w-full md:w-[480px] bg-gray-50 border-l border-gray-200 flex flex-col flex-shrink-0">
+            <div className="w-full md:w-[420px] bg-gray-50 border-l border-gray-200 flex flex-col flex-shrink-0">
               <div className="flex-1 overflow-y-auto p-6 space-y-6">
-                {/* Order Summary */}
                 <div className="bg-white rounded-lg p-4 border border-gray-200">
-                  <h3 className="font-semibold text-gray-900 mb-3">Order Summary</h3>
+                  <h3 className="font-semibold text-gray-900 mb-3">
+                    Order Summary
+                  </h3>
                   <div className="space-y-2 text-sm">
                     <div className="flex justify-between">
                       <span className="text-gray-600">Subtotal</span>
-                      <span className="font-medium">{formatMoney(cartTotal)}</span>
+                      <span className="font-medium">
+                        {formatMoney(cartTotal)}
+                      </span>
                     </div>
                     {cartDiscount > 0 && (
                       <div className="flex justify-between text-green-600">
@@ -483,22 +576,23 @@ export default function CompleteCheckoutModal({
                     )}
                     <div className="border-t pt-2 flex justify-between font-bold text-lg">
                       <span>Total</span>
-                      <span className="text-blue-600">{formatMoney(total)}</span>
+                      <span className="text-blue-600">
+                        {formatMoney(total)}
+                      </span>
                     </div>
                   </div>
                 </div>
 
-                {/* Reservation Indicator */}
                 {isReservation && (
                   <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
                     <p className="text-sm text-amber-800">
-                      ⚡ This will create a <strong>reservation</strong> with balance due of <strong>{formatMoney(remainingAmount)}</strong>.
-                      The sale will be marked as partial payment.
+                      ⚡ This will create a <strong>reservation</strong> with
+                      balance due of{' '}
+                      <strong>{formatMoney(remainingAmount)}</strong>.
                     </p>
                   </div>
                 )}
 
-                {/* Payment Methods */}
                 <div className="bg-white rounded-lg p-4 border border-gray-200">
                   <div className="flex items-center justify-between mb-3">
                     <h3 className="font-semibold text-gray-900">Payment</h3>
@@ -522,25 +616,27 @@ export default function CompleteCheckoutModal({
                   {!useSplitPayment ? (
                     <div className="space-y-3">
                       <div className="grid grid-cols-3 gap-2">
-                        {paymentMethods.map((method, idx) => {
-                          const value = typeof method === 'string' ? method : method.key || method.value || method;
-                          const label = typeof method === 'string' ? method : method.label || method.value || method;
-                          const icon = typeof method === 'object' && method.icon ? method.icon : '';
-                          const isSelected = selectedPaymentMethod === value;
+                        {normalizedMethods.map((method, idx) => {
+                          const isSelected =
+                            selectedPaymentMethod === method.key;
 
                           return (
                             <button
-                              key={`method-${idx}`}
+                              key={`method-${method.key}-${idx}`}
                               type="button"
-                              onClick={() => onPaymentMethodChange(value)}
+                              onClick={() => onPaymentMethodChange(method.key)}
                               className={`p-3 rounded-lg border-2 transition-all flex flex-col items-center justify-center gap-1 ${
                                 isSelected
                                   ? 'border-blue-500 bg-blue-50'
                                   : 'border-gray-200 bg-white hover:border-gray-300'
                               }`}
                             >
-                              {icon && <span className="text-2xl">{icon}</span>}
-                              <span className="text-xs font-medium">{label}</span>
+                              {method.icon && (
+                                <span className="text-2xl">{method.icon}</span>
+                              )}
+                              <span className="text-xs font-medium">
+                                {method.label}
+                              </span>
                             </button>
                           );
                         })}
@@ -557,7 +653,9 @@ export default function CompleteCheckoutModal({
                             }`}
                           >
                             <span className="text-2xl">⚡</span>
-                            <span className="text-xs font-medium">M-Pesa Prompt</span>
+                            <span className="text-xs font-medium">
+                              M-Pesa Prompt
+                            </span>
                           </button>
                         )}
                       </div>
@@ -587,23 +685,32 @@ export default function CompleteCheckoutModal({
                     <div className="space-y-3">
                       <div className="space-y-2">
                         {splitPayments.map((payment, index) => {
-                          const availableMethods = paymentMethods.filter(
+                          const availableMethods = normalizedMethods.filter(
                             (m) =>
-                              m.value === payment.method ||
+                              m.key === payment.method ||
                               !splitPayments.some(
-                                (p, i) => i !== index && p.method === m.value
-                              )
+                                (p, i) => i !== index && p.method === m.key,
+                              ),
                           );
 
                           return (
-                            <div key={`split-${index}`} className="flex items-center gap-2">
+                            <div
+                              key={`split-${index}`}
+                              className="flex items-center gap-2"
+                            >
                               <select
                                 value={payment.method}
-                                onChange={(e) => onSplitPaymentChange(index, 'method', e.target.value)}
+                                onChange={(e) =>
+                                  onSplitPaymentChange(
+                                    index,
+                                    'method',
+                                    e.target.value,
+                                  )
+                                }
                                 className="flex-1 px-2 py-2 border border-gray-300 rounded-lg text-sm"
                               >
                                 {availableMethods.map((m) => (
-                                  <option key={m.value} value={m.value}>
+                                  <option key={m.key} value={m.key}>
                                     {m.label}
                                   </option>
                                 ))}
@@ -616,7 +723,8 @@ export default function CompleteCheckoutModal({
                                   onSplitPaymentChange(
                                     index,
                                     'amount',
-                                    Number.isFinite(parsedAmount) && parsedAmount >= 0
+                                    Number.isFinite(parsedAmount) &&
+                                      parsedAmount >= 0
                                       ? parsedAmount
                                       : 0,
                                   );
@@ -644,14 +752,17 @@ export default function CompleteCheckoutModal({
                           {(() => {
                             const splitTotal = splitPayments.reduce(
                               (sum, p) => sum + parseFloat(p.amount || 0),
-                              0
+                              0,
                             );
                             const remaining = total - splitTotal;
-                            
+
                             return (
                               <div className="space-y-1">
                                 <div className="font-medium">
-                                  Split Total: <span className="text-gray-900">{formatMoney(splitTotal)}</span>
+                                  Split Total:{' '}
+                                  <span className="text-gray-900">
+                                    {formatMoney(splitTotal)}
+                                  </span>
                                 </div>
                                 {remaining > 0.01 && (
                                   <div className="text-orange-600 font-medium">
@@ -660,21 +771,25 @@ export default function CompleteCheckoutModal({
                                 )}
                                 {remaining < -0.01 && (
                                   <div className="text-red-600 font-medium">
-                                    Over by: {formatMoney(Math.abs(remaining))}
+                                    Over by:{' '}
+                                    {formatMoney(Math.abs(remaining))}
                                   </div>
                                 )}
-                                {Math.abs(remaining) <= 0.01 && splitTotal > 0 && (
-                                  <div className="text-green-600 font-medium">
-                                    ✓ Balanced
-                                  </div>
-                                )}
+                                {Math.abs(remaining) <= 0.01 &&
+                                  splitTotal > 0 && (
+                                    <div className="text-green-600 font-medium">
+                                      ✓ Balanced
+                                    </div>
+                                  )}
                               </div>
                             );
                           })()}
                         </div>
                         <button
                           onClick={onAddSplitPayment}
-                          disabled={splitPayments.length >= paymentMethods.length}
+                          disabled={
+                            splitPayments.length >= normalizedMethods.length
+                          }
                           className="text-blue-600 hover:text-blue-700 disabled:text-gray-400 text-xs font-medium transition-colors"
                         >
                           + Add Payment
@@ -684,7 +799,6 @@ export default function CompleteCheckoutModal({
                   )}
                 </div>
 
-                {/* Status/Error */}
                 {status && (
                   <div className="text-sm text-green-700 bg-green-50 px-3 py-2 rounded border border-green-200">
                     {status}
@@ -697,7 +811,6 @@ export default function CompleteCheckoutModal({
                 )}
               </div>
 
-              {/* Footer - Action Buttons */}
               <div className="border-t border-gray-200 p-4 bg-white flex-shrink-0">
                 <div className="flex gap-3">
                   <button
@@ -716,7 +829,9 @@ export default function CompleteCheckoutModal({
                         : 'bg-blue-600 hover:bg-blue-700 text-white'
                     }`}
                   >
-                    {isSubmitting && <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>}
+                    {(isSubmitting || stkStarting) && (
+                      <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                    )}
                     {isSubmitting || stkStarting
                       ? 'Processing...'
                       : selectedPaymentMethod === 'mpesa_stk'
@@ -735,7 +850,6 @@ export default function CompleteCheckoutModal({
         </div>
       </div>
 
-      {/* Delivery Checkout Modal - shown as sub-modal */}
       {showDeliveryModal && (
         <DeliveryCheckoutModal
           isOpen={showDeliveryModal}
