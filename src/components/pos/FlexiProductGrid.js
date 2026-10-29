@@ -127,6 +127,11 @@ export default function FlexiProductGrid({
     } catch (err) {
       if (fetchId !== fetchIdRef.current) return;
       setIsOffline(true);
+      if (searchQuery.trim()) {
+        // Search failed — clear the stale list so the UI doesn't show
+        // ghost-filtered results from a previous fetch.
+        setProducts([]);
+      }
       if (products.length === 0) {
         setError(err.message || "Failed to load products");
       }
@@ -156,8 +161,12 @@ export default function FlexiProductGrid({
   }, [load]);
 
   const displayed = useMemo(() => {
-    if (!searchQuery.trim()) return products;
-    const q = searchQuery.toLowerCase().trim();
+    const q = searchQuery.trim().toLowerCase();
+    if (!q || !isOffline) return products;
+
+    // Offline mode only: filter the cached list locally. Online, the server
+    // already filtered by `search`, so re-filtering here can hide results
+    // when the cache is stale.
     return products.filter((p) => {
       if ((p.name || "").toLowerCase().includes(q)) return true;
       for (const t of p.tags || []) {
@@ -168,7 +177,7 @@ export default function FlexiProductGrid({
       }
       return false;
     });
-  }, [products, searchQuery]);
+  }, [products, searchQuery, isOffline]);
 
   const tiles = useMemo(() => {
     return displayed.map((p) => {
