@@ -3,17 +3,23 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { productsApi } from "@/lib/api-client";
+import { usePagination } from "@/lib/usePagination";
+import { PaginationFooter } from "@/components/ui/PaginationFooter";
 
 const STATUS_STYLES = {
-  active:   "bg-green-100 text-green-800",
-  draft:    "bg-gray-100 text-gray-800",
+  active: "bg-green-100 text-green-800",
+  draft: "bg-gray-100 text-gray-800",
   archived: "bg-yellow-100 text-yellow-800",
   unlisted: "bg-purple-100 text-purple-800",
 };
 
 function StatusPill({ status }) {
   return (
-    <span className={`px-2 py-0.5 rounded-full text-xs font-medium capitalize ${STATUS_STYLES[status] || ""}`}>
+    <span
+      className={`px-2 py-0.5 rounded-full text-xs font-medium capitalize ${
+        STATUS_STYLES[status] || ""
+      }`}
+    >
       {status}
     </span>
   );
@@ -27,7 +33,6 @@ function PriceRange({ min, max }) {
 
 export default function ProductsPage() {
   const [products, setProducts] = useState([]);
-  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
@@ -35,28 +40,35 @@ export default function ProductsPage() {
   const [pendingArchive, setPendingArchive] = useState(null);
   const [archiving, setArchiving] = useState(false);
 
-  const load = () => {
-    setLoading(true);
-    const params = { limit: 50 };
-    if (search) params.search = search;
-    if (status) params.status = status;
+  const pag = usePagination({
+    initialPageSize: 50,
+    resetKey: [search, status],
+  });
 
-    productsApi
-      .list(params)
-      .then((data) => {
-        setProducts(data.products || []);
-        setTotal(data.total || 0);
-        setError(null);
-      })
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
-  };
+  const { page, skip, limit, setTotal } = pag;
 
   useEffect(() => {
-    const handle = setTimeout(load, search ? 200 : 0);
+    const doLoad = () => {
+      setLoading(true);
+      const params = { limit, skip };
+      if (search) params.search = search;
+      if (status) params.status = status;
+
+      productsApi
+        .list(params)
+        .then((data) => {
+          setProducts(data.products || []);
+          setTotal(data.total || 0);
+          setError(null);
+        })
+        .catch((e) => setError(e.message))
+        .finally(() => setLoading(false));
+    };
+
+    const handle = setTimeout(doLoad, search ? 200 : 0);
     return () => clearTimeout(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, status]);
+  }, [search, status, page, limit, skip]);
 
   const confirmArchive = async () => {
     if (!pendingArchive) return;
@@ -64,7 +76,27 @@ export default function ProductsPage() {
     try {
       await productsApi.update(pendingArchive._id, { status: "archived" });
       setPendingArchive(null);
-      load();
+      // If we archived the last row on a page > 1, go back one page first.
+      if (products.length === 1 && page > 1) {
+        pag.prev();
+      } else {
+        // Force a refetch on the same page by nudging pagination state.
+        pag.setPage(page);
+        // setPage with the same value won't trigger the effect, so re-fetch
+        // by hand:
+        setLoading(true);
+        const params = { limit, skip };
+        if (search) params.search = search;
+        if (status) params.status = status;
+        productsApi
+          .list(params)
+          .then((data) => {
+            setProducts(data.products || []);
+            setTotal(data.total || 0);
+          })
+          .catch((e) => setError(e.message))
+          .finally(() => setLoading(false));
+      }
     } catch (e) {
       setError(e.message);
     } finally {
@@ -75,9 +107,17 @@ export default function ProductsPage() {
   const unarchive = async (product) => {
     try {
       await productsApi.update(product._id, { status: "active" });
-      load();
+      setLoading(true);
+      const params = { limit, skip };
+      if (search) params.search = search;
+      if (status) params.status = status;
+      const data = await productsApi.list(params);
+      setProducts(data.products || []);
+      setTotal(data.total || 0);
     } catch (e) {
       setError(e.message);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -86,7 +126,7 @@ export default function ProductsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold">Products</h1>
-          <p className="text-sm text-gray-500">{total} total</p>
+          <p className="text-sm text-gray-500">{pag.total} total</p>
         </div>
         <Link
           href="/dashboard/products/new"
@@ -96,13 +136,13 @@ export default function ProductsPage() {
         </Link>
       </div>
 
-      <div className="flex gap-3">
+      <div className="flex flex-wrap gap-3">
         <input
           type="text"
           placeholder="Search products…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="flex-1 px-3 py-2 border rounded-md text-sm"
+          className="flex-1 min-w-[200px] px-3 py-2 border rounded-md text-sm"
         />
         <select
           value={status}
@@ -139,76 +179,111 @@ export default function ProductsPage() {
           </thead>
           <tbody>
             {loading && (
-              <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-500">Loading…</td></tr>
+              <tr>
+                <td colSpan={8} className="px-4 py-8 text-center text-gray-500">
+                  Loading…
+                </td>
+              </tr>
             )}
             {!loading && products.length === 0 && (
-              <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-500">No products yet</td></tr>
+              <tr>
+                <td colSpan={8} className="px-4 py-8 text-center text-gray-500">
+                  No products yet
+                </td>
+              </tr>
             )}
-            {products.map((p) => {
-              const img = p.images?.find((i) => i.isDefault) || p.images?.[0];
-              const isArchived = p.status === "archived";
-              return (
-                <tr key={p._id} className="border-b last:border-b-0 hover:bg-gray-50">
-                  <td className="px-4 py-3">
-                    {img?.url ? (
-                      <img src={img.url} alt="" className="w-10 h-10 rounded object-cover border" />
-                    ) : (
-                      <div className="w-10 h-10 rounded border bg-gray-100" />
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    <Link href={`/dashboard/products/${p._id}`} className="font-medium hover:underline">
-                      {p.name}
-                    </Link>
-                    {p.migrationFlags?.length > 0 && (
-                      <div className="mt-1 flex gap-1 flex-wrap">
-                        {p.migrationFlags.map((f) => (
-                          <span key={f} className="px-1.5 py-0.5 text-[10px] rounded bg-amber-100 text-amber-800">
-                            {f}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </td>
-                  <td className="px-4 py-3"><StatusPill status={p.status} /></td>
-                  <td className="px-4 py-3 text-gray-600">{p.productType || "—"}</td>
-                  <td className="px-4 py-3 text-gray-600">{p.vendor || "—"}</td>
-                  <td className="px-4 py-3 text-right">
-                    <PriceRange min={p.priceMin} max={p.priceMax} />
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    {p.totalStock == null ? (
-                      <span className="text-gray-400">—</span>
-                    ) : (
-                      <span className={p.totalStock <= 0 ? "text-red-600 font-medium" : ""}>
-                        {p.totalStock}
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    {isArchived ? (
-                      <button
-                        type="button"
-                        onClick={() => unarchive(p)}
-                        className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+            {!loading &&
+              products.map((p) => {
+                const img = p.images?.find((i) => i.isDefault) || p.images?.[0];
+                const isArchived = p.status === "archived";
+                return (
+                  <tr
+                    key={p._id}
+                    className="border-b last:border-b-0 hover:bg-gray-50"
+                  >
+                    <td className="px-4 py-3">
+                      {img?.url ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={img.url}
+                          alt=""
+                          className="w-10 h-10 rounded object-cover border"
+                        />
+                      ) : (
+                        <div className="w-10 h-10 rounded border bg-gray-100" />
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <Link
+                        href={`/dashboard/products/${p._id}`}
+                        className="font-medium hover:underline"
                       >
-                        Restore
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => setPendingArchive(p)}
-                        className="text-xs text-red-600 hover:text-red-800 font-medium"
-                      >
-                        Archive
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
+                        {p.name}
+                      </Link>
+                      {p.migrationFlags?.length > 0 && (
+                        <div className="mt-1 flex gap-1 flex-wrap">
+                          {p.migrationFlags.map((f) => (
+                            <span
+                              key={f}
+                              className="px-1.5 py-0.5 text-[10px] rounded bg-amber-100 text-amber-800"
+                            >
+                              {f}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <StatusPill status={p.status} />
+                    </td>
+                    <td className="px-4 py-3 text-gray-600">
+                      {p.productType || "—"}
+                    </td>
+                    <td className="px-4 py-3 text-gray-600">
+                      {p.vendor || "—"}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <PriceRange min={p.priceMin} max={p.priceMax} />
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      {p.totalStock == null ? (
+                        <span className="text-gray-400">—</span>
+                      ) : (
+                        <span
+                          className={
+                            p.totalStock <= 0 ? "text-red-600 font-medium" : ""
+                          }
+                        >
+                          {p.totalStock}
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      {isArchived ? (
+                        <button
+                          type="button"
+                          onClick={() => unarchive(p)}
+                          className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+                        >
+                          Restore
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setPendingArchive(p)}
+                          className="text-xs text-red-600 hover:text-red-800 font-medium"
+                        >
+                          Archive
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
           </tbody>
         </table>
+
+        <PaginationFooter pagination={pag} loading={loading} noun="product" />
       </div>
 
       {pendingArchive && (
