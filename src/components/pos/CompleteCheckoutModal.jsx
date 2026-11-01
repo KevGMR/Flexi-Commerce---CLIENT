@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import DeliveryCheckoutModal from './DeliveryCheckoutModal';
+import { formatCurrency } from "@/lib/format-currency";
 
 // Normalise any payment-method entry (string, {key,label,icon} from the new
 // config, or legacy {value,label,icon}) into a consistent shape.
@@ -47,6 +48,7 @@ export default function CompleteCheckoutModal({
   deliveryEnabled,
   onStartStk,
   users,
+  currency
 }) {
   const [isProductsExpanded, setIsProductsExpanded] = useState(true);
   const [isServicesExpanded, setIsServicesExpanded] = useState(true);
@@ -88,7 +90,7 @@ export default function CompleteCheckoutModal({
         ? item.bundleComponents
         : [];
 
-  const formatMoney = (value) => `$${Number(value || 0).toFixed(2)}`;
+  const formatMoney = (value) => formatCurrency(value, currency);
 
   const normalizeCartBreakdown = () => {
     const products = [];

@@ -5,6 +5,8 @@
   import { useSessionStore } from "@/store/session";
   import { PERMISSIONS } from "@/lib/permissions";
   import { useSyncManager } from "@/hooks/useSyncManager";
+  import { useCurrency } from "@/hooks/useCurrency";
+import { formatCurrency } from "@/lib/format-currency";
 
   function KPICard({ title, value, subtitle, icon, trend, trendValue }) {
     return (
@@ -47,6 +49,8 @@
 
     const canViewReports = permissions?.includes(PERMISSIONS.VIEW_REPORTS);
     const canViewExpenses = permissions?.includes(PERMISSIONS.VIEW_EXPENSES);
+
+    const currency = useCurrency();
 
     useEffect(() => {
       if (!canViewReports) {
@@ -92,12 +96,7 @@
       );
     }
 
-    const formatCurrency = (value) => {
-      return new Intl.NumberFormat("en-US", {
-        style: "currency",
-        currency: "USD",
-      }).format(value || 0);
-    };
+    
 
     return (
       <div className="space-y-6">

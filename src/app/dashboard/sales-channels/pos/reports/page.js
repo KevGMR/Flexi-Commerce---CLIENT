@@ -7,6 +7,8 @@ import { useRouter } from "next/navigation";
 import { apiFetch } from "@/lib/api-client";
 import { PERMISSIONS } from "@/lib/permissions";
 import { useSessionStore } from "@/store/session";
+import { useCurrency } from "@/hooks/useCurrency";
+import { formatCurrency } from "@/lib/format-currency";
 
 function StatCard({ label, value, change, icon, tooltip, color = "gray" }) {
   const colorMap = {
@@ -76,12 +78,7 @@ function getDateRangeParams(startDate, endDate) {
   return buildDayBoundaries(startDate, endDate);
 }
 
-function currency(value) {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-  }).format(Number(value) || 0);
-}
+
 
 function toArrayResponse(response) {
   if (Array.isArray(response?.data)) return response.data;
@@ -177,6 +174,9 @@ export default function SalesReportsPage() {
 
   const currentOpenShiftId = currentOpenShift?._id;
   const currentOpenShiftExpectedClosingCash = currentOpenShift?.expectedClosingCash;
+
+  const currencyCode = useCurrency(effectiveLocationId);
+  const money = (v) => formatCurrency(v, currencyCode);
 
   useEffect(() => {
     if (currentOpenShift) {

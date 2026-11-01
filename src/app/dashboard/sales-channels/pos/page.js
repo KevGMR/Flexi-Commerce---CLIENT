@@ -34,6 +34,8 @@ import VariantPickerModal from "@/components/pos/VariantPickerModal";
 
 import CartLine from "@/components/pos/CartLine";
 import BundleManageModal from "@/components/pos/BundleManageModal";
+import { useCurrency } from "@/hooks/useCurrency";
+import { formatCurrency } from "@/lib/format-currency";
 
 const paymentMethods = [
   { value: "cash", label: "Cash", icon: "💵" },
@@ -149,6 +151,7 @@ export default function PosPage() {
     setSelectedLocationId,
     user,
   } = useSessionStore();
+  
   const {
     isOnline,
     pendingSalesCount,
@@ -163,6 +166,8 @@ export default function PosPage() {
   const [stkState, setStkState] = useState(null);
   // stkState shape: { saleId, phone, amount } | null
   const [locationId, setLocationId] = useState(() => selectedLocationId || "");
+  const currency = useCurrency(locationId);
+  const money = (v) => formatCurrency(v, currency);
   const [cart, setCart] = useState([]);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState("cash");
   const [searchQuery, setSearchQuery] = useState("");
@@ -1977,6 +1982,7 @@ const addToCart = (product) => {
       locationLabel: getLocationLabel(locationId),
       location: locationSettings,
       receiptConfig: locationSettings?.receipt || {},
+      currency, // ← add this line
     });
   };
 
@@ -3648,6 +3654,7 @@ const addToCart = (product) => {
         deliveryInfo={deliveryInfo}
         deliveryFee={calculateDeliveryFee()}
         deliveryEnabled={deliveryEnabled}
+        currency={currency}
       />
 
       {stkState && (
@@ -4471,7 +4478,7 @@ const addToCart = (product) => {
                                 };
 
                                 printReceiptInBrowser({
-                                  receipt: profosales-channels/pos/pagermaReceipt,
+                                  receipt: proformaReceipt,
                                   organizationName: activeOrganization?.name,
                                   locationLabel: getLocationLabel(locationId),
                                   location: locationSettings,

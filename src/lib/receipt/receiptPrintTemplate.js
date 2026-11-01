@@ -1,3 +1,5 @@
+import { formatCurrency } from "@/lib/format-currency";
+
 export const toNonNegativeAmount = (value) => {
   const amount = Number(value);
   return Number.isFinite(amount) && amount >= 0 ? amount : 0;
@@ -55,22 +57,13 @@ const clampWords = (text, maxWords) => {
   return words.slice(0, n).join(" ") + "…";
 };
 
-/**
- * Build receipt HTML.
- *
- * @param {Object} params
- * @param {Object} params.receipt         — the receipt data (items, totals, etc.)
- * @param {String} params.organizationName
- * @param {String} params.locationLabel   — display label for the location (name)
- * @param {Object} params.location        — the full location document (for address, phone, taxId)
- * @param {Object} params.receiptConfig   — the customization config (logo, toggles, footer, etc.)
- */
 export const buildReceiptPrintHtml = ({
   receipt,
   organizationName,
   locationLabel,
   location = null,
   receiptConfig = {},
+  currency,
 }) => {
   const cfg = {
     logoUrl: "",
@@ -93,6 +86,11 @@ export const buildReceiptPrintHtml = ({
     locationAddressMaxWords: 0,
     ...receiptConfig,
   };
+
+  // Resolve currency once: explicit param > location.currency > "KES"
+  const resolvedCurrency =
+    currency || (location && location.currency) || "KES";
+  const fmt = (v) => formatCurrency(toNonNegativeAmount(v), resolvedCurrency);
 
   const isReturn = receipt.isReturn || false;
   const isExchange = receipt.isExchange || false;
@@ -117,7 +115,7 @@ export const buildReceiptPrintHtml = ({
           (p) =>
             `<div style="display: flex; justify-content: space-between; margin: 3px 0; font-size: 12px;">
               <span style="text-transform: capitalize;">${p.method}</span>
-              <span>$${toNonNegativeAmount(p.amount).toFixed(2)}</span>
+              <span>${fmt(p.amount)}</span>
             </div>`,
         )
         .join("")
@@ -130,9 +128,9 @@ export const buildReceiptPrintHtml = ({
             `<div style="margin-bottom: 8px; font-size: 12px;">
               <div style="display: flex; justify-content: space-between;">
                 <span>${buildItemDisplayName(item)}</span>
-                <span style="color: #f97316;">$${(item.price * item.quantity).toFixed(2)}</span>
+                <span style="color: #f97316;">${fmt(item.price * item.quantity)}</span>
               </div>
-              <div style="font-size: 11px; color: #666;">Qty: ${item.quantity} × $${item.price.toFixed(2)}</div>
+              <div style="font-size: 11px; color: #666;">Qty: ${item.quantity} × ${fmt(item.price)}</div>
             </div>`,
         )
         .join("")
@@ -145,9 +143,9 @@ export const buildReceiptPrintHtml = ({
             `<div style="margin-bottom: 8px; font-size: 12px;">
               <div style="display: flex; justify-content: space-between;">
                 <span>${buildItemDisplayName(item)}</span>
-                <span style="color: #4f46e5;">$${(item.price * item.quantity).toFixed(2)}</span>
+                <span style="color: #4f46e5;">${fmt(item.price * item.quantity)}</span>
               </div>
-              <div style="font-size: 11px; color: #666;">Qty: ${item.quantity} × $${item.price.toFixed(2)}</div>
+              <div style="font-size: 11px; color: #666;">Qty: ${item.quantity} × ${fmt(item.price)}</div>
             </div>`,
         )
         .join("")
@@ -161,9 +159,9 @@ export const buildReceiptPrintHtml = ({
             `<div style="margin-bottom: 8px; font-size: 12px;">
               <div style="display: flex; justify-content: space-between;">
                 <span>${buildItemDisplayName(item)}</span>
-                <span ${isReturn ? 'style="color: #f97316;"' : ""}>$${(item.price * item.quantity).toFixed(2)}</span>
+                <span ${isReturn ? 'style="color: #f97316;"' : ""}>${fmt(item.price * item.quantity)}</span>
               </div>
-              <div style="font-size: 11px; color: #666;">Qty: ${item.quantity} × $${item.price.toFixed(2)}</div>
+              <div style="font-size: 11px; color: #666;">Qty: ${item.quantity} × ${fmt(item.price)}</div>
             </div>`,
         )
         .join("");
@@ -172,11 +170,11 @@ export const buildReceiptPrintHtml = ({
     ? `<div style="margin-top: 10px; font-size: 12px;">
         <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
           <span>Return Total:</span>
-          <span style="color: #f97316;">$${toNonNegativeAmount(receipt.returnTotal).toFixed(2)}</span>
+          <span style="color: #f97316;">${fmt(receipt.returnTotal)}</span>
         </div>
         <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
           <span>Exchange Total:</span>
-          <span style="color: #4f46e5;">$${toNonNegativeAmount(receipt.exchangeTotal).toFixed(2)}</span>
+          <span style="color: #4f46e5;">${fmt(receipt.exchangeTotal)}</span>
         </div>
         <div style="display: flex; justify-content: space-between; font-weight: bold; font-size: 14px;">
           <span>${
@@ -186,12 +184,11 @@ export const buildReceiptPrintHtml = ({
                 ? "REFUND DUE:"
                 : "BALANCED:"
           }</span>
-          <span>$${Math.abs(Number(receipt.netBalance) || 0).toFixed(2)}</span>
+          <span>${fmt(Math.abs(Number(receipt.netBalance) || 0))}</span>
         </div>
       </div>`
     : "";
 
-  // Configurable header components
   const logoHtml = cfg.logoUrl
     ? `<div style="text-align: center; margin-bottom: 8px;"><img src="${cfg.logoUrl}" alt="" style="max-width: 150px; max-height: 150px; object-fit: contain;" /></div>`
     : "";
@@ -260,7 +257,6 @@ export const buildReceiptPrintHtml = ({
     ? `<p>${cfg.thankYouLine}</p>`
     : "";
 
-  // Delivery block respects toggle
   const showDelivery =
     cfg.showDeliveryBlock &&
     !isReturn &&
@@ -284,7 +280,7 @@ export const buildReceiptPrintHtml = ({
         }
         ${
           toNonNegativeAmount(receipt.deliveryFee) > 0
-            ? `<div style="display: flex; justify-content: space-between; font-size: 12px; margin-top: 4px;"><span>Delivery Fee:</span><span>$${toNonNegativeAmount(receipt.deliveryFee).toFixed(2)}</span></div>`
+            ? `<div style="display: flex; justify-content: space-between; font-size: 12px; margin-top: 4px;"><span>Delivery Fee:</span><span>${fmt(receipt.deliveryFee)}</span></div>`
             : ""
         }
       </div>`
@@ -362,18 +358,22 @@ export const buildReceiptPrintHtml = ({
               : isReturn
                 ? `<div class="total">
                     <span>REFUND TOTAL:</span>
-                    <span>$${toNonNegativeAmount(receipt.subtotal).toFixed(2)}</span>
+                    <span>${fmt(receipt.subtotal)}</span>
                   </div>`
                 : `<div class="section" style="margin-top: 10px; font-size: 12px;">
-                    ${toNonNegativeAmount(receipt.deliveryFee) > 0 ? `<div style="display: flex; justify-content: space-between; margin-bottom: 4px;"><span>Subtotal:</span><span>$${toNonNegativeAmount(receipt.subtotal).toFixed(2)}</span></div><div style="display: flex; justify-content: space-between; margin-bottom: 4px;"><span>Delivery Fee:</span><span>$${toNonNegativeAmount(receipt.deliveryFee).toFixed(2)}</span></div>` : ""}
+                    ${
+                      toNonNegativeAmount(receipt.deliveryFee) > 0
+                        ? `<div style="display: flex; justify-content: space-between; margin-bottom: 4px;"><span>Subtotal:</span><span>${fmt(receipt.subtotal)}</span></div><div style="display: flex; justify-content: space-between; margin-bottom: 4px;"><span>Delivery Fee:</span><span>${fmt(receipt.deliveryFee)}</span></div>`
+                        : ""
+                    }
                     <div style="display: flex; justify-content: space-between; margin-bottom: 4px; font-weight: bold; font-size: 14px;">
                       <span>TOTAL:</span>
-                      <span>$${(toNonNegativeAmount(receipt.subtotal) + toNonNegativeAmount(receipt.deliveryFee)).toFixed(2)}</span>
+                      <span>${fmt(toNonNegativeAmount(receipt.subtotal) + toNonNegativeAmount(receipt.deliveryFee))}</span>
                     </div>
                     ${
                       isPartialReceipt
-                        ? `<div style="display: flex; justify-content: space-between; margin-bottom: 4px;"><span>AMOUNT PAID:</span><span>$${receiptAmountPaid.toFixed(2)}</span></div>
-                          <div style="display: flex; justify-content: space-between;"><span>BALANCE DUE:</span><span>$${receiptBalanceDue.toFixed(2)}</span></div>`
+                        ? `<div style="display: flex; justify-content: space-between; margin-bottom: 4px;"><span>AMOUNT PAID:</span><span>${fmt(receiptAmountPaid)}</span></div>
+                          <div style="display: flex; justify-content: space-between;"><span>BALANCE DUE:</span><span>${fmt(receiptBalanceDue)}</span></div>`
                         : ""
                     }
                   </div>`
