@@ -784,15 +784,15 @@ export default function SalesReportsPage() {
                     <div className="mt-4 grid gap-3 sm:grid-cols-3">
                       <div className="rounded-lg border border-white bg-white p-3 shadow-sm">
                         <p className="text-xs text-zinc-500">Opening cash</p>
-                        <p className="mt-1 text-lg font-semibold text-zinc-900">{currency(currentOpenShift.openingCash)}</p>
+                        <p className="mt-1 text-lg font-semibold text-zinc-900">{money(currentOpenShift.openingCash)}</p>
                       </div>
                       <div className="rounded-lg border border-white bg-white p-3 shadow-sm">
                         <p className="text-xs text-zinc-500">Expected cash sales</p>
-                        <p className="mt-1 text-lg font-semibold text-zinc-900">{currency(currentOpenShift.expectedCashSales)}</p>
+                        <p className="mt-1 text-lg font-semibold text-zinc-900">{money(currentOpenShift.expectedCashSales)}</p>
                       </div>
                       <div className="rounded-lg border border-white bg-white p-3 shadow-sm">
                         <p className="text-xs text-zinc-500">Cash expenses</p>
-                        <p className="mt-1 text-lg font-semibold text-zinc-900">{currency(currentOpenShift.cashExpenseTotal)}</p>
+                        <p className="mt-1 text-lg font-semibold text-zinc-900">{money(currentOpenShift.cashExpenseTotal)}</p>
                       </div>
                       {/* ✅ Removed: "Expected closing till" and "Counted till / variance" */}
                       <div className="rounded-lg border border-white bg-white p-3 shadow-sm sm:col-span-3">
@@ -862,7 +862,7 @@ export default function SalesReportsPage() {
                             {session.status === "closed" ? (
                                 <div>
                                   <span className="block text-xs text-zinc-500">Expected closing</span>
-                                  <span className="font-medium text-zinc-900">{currency(session.expectedClosingCash)}</span>
+                                  <span className="font-medium text-zinc-900">{money(session.expectedClosingCash)}</span>
                                 </div>
                               ) : (
                                 <div>
@@ -872,11 +872,11 @@ export default function SalesReportsPage() {
                               )}
                             <div>
                               <span className="block text-xs text-zinc-500">Cash expenses</span>
-                              <span className="font-medium text-zinc-900">{currency(session.cashExpenseTotal)}</span>
+                              <span className="font-medium text-zinc-900">{money(session.cashExpenseTotal)}</span>
                             </div>
                             <div>
                               <span className="block text-xs text-zinc-500">Variance</span>
-                              <span className="font-medium text-zinc-900">{currency(session.cashVariance)}</span>
+                              <span className="font-medium text-zinc-900">{money(session.cashVariance)}</span>
                             </div>
                           </div>
                         </div>
@@ -897,13 +897,13 @@ export default function SalesReportsPage() {
               <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-6">
                 <StatCard
                   label="Net Collected"
-                  value={currency(reportData.totalRevenue)}
+                  value={money(reportData.totalRevenue)}
                   icon="💰"
                   tooltip="Total money received after exchange credits are deducted"
                 />
                 <StatCard
                   label="Gross Sales"
-                  value={currency(reportData.grossRevenue || reportData.totalRevenue || 0)}
+                  value={money(reportData.grossRevenue || reportData.totalRevenue || 0)}
                   icon="🧾"
                   tooltip="Sum of item totals + tax + delivery − discounts (before exchange credits)"
                 />
@@ -921,13 +921,13 @@ export default function SalesReportsPage() {
                 />
                 <StatCard
                   label="Avg Transaction"
-                  value={currency(reportData.averageTransactionValue || 0)}
+                  value={money(reportData.averageTransactionValue || 0)}
                   icon="📊"
                   tooltip="Average value collected per transaction"
                 />
                 <StatCard
                   label="Exchange Credit"
-                  value={currency(reportData.exchangeCreditApplied || 0)}
+                  value={money(reportData.exchangeCreditApplied || 0)}
                   icon="🔁"
                   tooltip="Amount paid using store/account credit (reduces net collected)"
                 />
@@ -998,7 +998,7 @@ export default function SalesReportsPage() {
                       >
                         Subtotal (Excl. Exchange Credit)
                       </span>
-                      <span className="font-semibold text-zinc-900">{currency(getSubtotalExcludingExchangeCredit())}</span>
+                      <span className="font-semibold text-zinc-900">{money(getSubtotalExcludingExchangeCredit())}</span>
                     </div>
                     <div className="flex items-center justify-between">
                       <span
@@ -1011,25 +1011,25 @@ export default function SalesReportsPage() {
                             ? "Tax (Mixed Modes)"
                             : "Tax (Inclusive)"}
                       </span>
-                      <span className="font-semibold text-zinc-900">{currency(reportData.totalTax || 0)}</span>
+                      <span className="font-semibold text-zinc-900">{money(reportData.totalTax || 0)}</span>
                     </div>
                     <div className="flex items-center justify-between">
                       <span className="text-zinc-600" title="Sum of all discounts applied across items/transactions">
                         Total Discount
                       </span>
-                      <span className="font-semibold text-red-600">-{currency(reportData.totalDiscount || 0)}</span>
+                      <span className="font-semibold text-red-600">-{money(reportData.totalDiscount || 0)}</span>
                     </div>
                     <div className="flex items-center justify-between">
                       <span className="text-zinc-600" title="Total exchange-credit used to pay sales">
                         Exchange Credit Applied
                       </span>
-                      <span className="font-semibold text-indigo-600">{currency(reportData.exchangeCreditApplied || 0)}</span>
+                      <span className="font-semibold text-indigo-600">{money(reportData.exchangeCreditApplied || 0)}</span>
                     </div>
                     <div className="flex items-center justify-between">
                       <span className="text-zinc-600" title="Total delivery fees collected">
                         Delivery Collected
                       </span>
-                      <span className="font-semibold text-zinc-900">{currency(reportData.deliveryAmountCollected || 0)}</span>
+                      <span className="font-semibold text-zinc-900">{money(reportData.deliveryAmountCollected || 0)}</span>
                     </div>
                   </div>
                 </div>
@@ -1043,7 +1043,7 @@ export default function SalesReportsPage() {
                           Approved Expenses
                         </span>
                         <span className="font-semibold text-red-600">
-                          -{currency(expenseSummary?.approvedExpenses || 0)}
+                          -{money(expenseSummary?.approvedExpenses || 0)}
                         </span>
                       </div>
                       <div className="flex items-center justify-between">
@@ -1051,7 +1051,7 @@ export default function SalesReportsPage() {
                           Unapproved Expenses
                         </span>
                         <span className="font-semibold text-amber-600">
-                          -{currency(expenseSummary?.unapprovedExpenses || 0)}
+                          -{money(expenseSummary?.unapprovedExpenses || 0)}
                         </span>
                       </div>
                       <div className="flex items-center justify-between">
@@ -1059,7 +1059,7 @@ export default function SalesReportsPage() {
                           Net Profit (after approved expenses)
                         </span>
                         <span className="font-semibold text-green-600">
-                          {currency(
+                          {money(
                             Number(reportData.netSalesExcludingTax || 0) - Number(expenseSummary?.approvedExpenses || 0),
                           )}
                         </span>
@@ -1106,7 +1106,7 @@ export default function SalesReportsPage() {
                           <span className="ml-2 text-xs text-zinc-500">({data.count} transactions)</span>
                         </div>
                         <span className="font-semibold text-zinc-900">
-                          {currency(data.total)} ({percentage.toFixed(1)}%)
+                          {money(data.total)} ({percentage.toFixed(1)}%)
                         </span>
                       </div>
                       <div className="h-2 overflow-hidden rounded-full bg-zinc-200">
@@ -1143,7 +1143,7 @@ export default function SalesReportsPage() {
           {deliveryStats ? (
             <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-4">
               <StatCard label="Total Deliveries" value={deliveryStats.assignedCount + deliveryStats.unassignedCount || 0} icon="🚚" />
-              <StatCard label="Revenue" value={currency(deliveryStats.totalRevenue || 0)} icon="💵" />
+              <StatCard label="Revenue" value={money(deliveryStats.totalRevenue || 0)} icon="💵" />
               <StatCard label="Assigned" value={deliveryStats.assignedCount || 0} icon="👤" />
               <StatCard label="Unassigned" value={deliveryStats.unassignedCount || 0} icon="📍" />
             </div>
@@ -1182,7 +1182,7 @@ export default function SalesReportsPage() {
                         <td className="px-6 py-4 text-sm text-zinc-600 capitalize">{delivery.categoryStatus || "N/A"}</td>
                         <td className="px-6 py-4 text-sm text-zinc-600">{delivery.driverId?.name || "Unassigned"}</td>
                         <td className="px-6 py-4 text-right text-sm font-semibold text-zinc-900">
-                          {currency(delivery.totalAmount || 0)}
+                          {money(delivery.totalAmount || 0)}
                         </td>
                       </tr>
                     ))}
@@ -1212,19 +1212,19 @@ export default function SalesReportsPage() {
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
             <StatCard 
               label="Total Expenses" 
-              value={currency(expenseSummary?.totalExpenses || 0)} 
+              value={money(expenseSummary?.totalExpenses || 0)} 
               icon="🧾" 
               color="gray"
             />
             <StatCard 
               label="Approved" 
-              value={currency(expenseSummary?.approvedExpenses || 0)} 
+              value={money(expenseSummary?.approvedExpenses || 0)} 
               icon="✅" 
               color="green"
             />
             <StatCard 
               label="Unapproved" 
-              value={currency(expenseSummary?.unapprovedExpenses || 0)} 
+              value={money(expenseSummary?.unapprovedExpenses || 0)} 
               icon="⏳" 
               color="yellow"
             />
@@ -1277,7 +1277,7 @@ export default function SalesReportsPage() {
                           </span>
                         </td>
                         <td className="px-6 py-4 text-right text-sm font-semibold text-zinc-900">
-                          {currency(expense.amount || 0)}
+                          {money(expense.amount || 0)}
                         </td>
                       </tr>
                     ))}
@@ -1345,7 +1345,7 @@ export default function SalesReportsPage() {
                           {sale.items?.length || 0} item{sale.items?.length !== 1 ? "s" : ""}
                         </td>
                         <td className="px-6 py-4 text-right text-sm font-semibold text-zinc-900">
-                          {currency(
+                          {money(
                             typeof sale.amountPaidInRange === "number" ? sale.amountPaidInRange : sale.totalAmount,
                           )}
                         </td>

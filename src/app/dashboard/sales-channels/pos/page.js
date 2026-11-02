@@ -3909,33 +3909,33 @@ const addToCart = (product) => {
               <div className="space-y-1 text-sm">
                 <div className="flex justify-between">
                   <span className="text-gray-600">Subtotal</span>
-                  <span className="font-medium">${cartSubtotal.toFixed(2)}</span>
+                  <span className="font-medium">${money(cartSubtotal)}</span>
                 </div>
                 {cartLineItemDiscounts > 0 && (
                   <div className="flex justify-between text-green-600">
                     <span>Item Discounts</span>
-                    <span>-${cartLineItemDiscounts.toFixed(2)}</span>
+                    <span>-${money(cartLineItemDiscounts)}</span>
                   </div>
                 )}
                 {deliveryEnabled && (
                   <div className="flex justify-between">
                     <span className="text-gray-600">Delivery Fee</span>
                     <span className="font-medium">
-                      ${calculateDeliveryFee().toFixed(2)}
+                      ${money(calculateDeliveryFee())}
                     </span>
                   </div>
                 )}
                 {transactionDiscount > 0 && (
                   <div className="flex justify-between text-green-600">
                     <span>Transaction Discount</span>
-                    <span>-${transactionDiscount.toFixed(2)}</span>
+                    <span>-${money(transactionDiscount)}</span>
                   </div>
                 )}
                 <div className="border-t pt-2 mt-2">
                   <div className="flex justify-between text-lg font-bold">
                     <span>Total</span>
                     <span className="text-blue-600">
-                      ${(cartTotal + (deliveryEnabled ? calculateDeliveryFee() : 0)).toFixed(2)}
+                      ${money(cartTotal + (deliveryEnabled ? calculateDeliveryFee() : 0))}
                     </span>
                   </div>
                 </div>
@@ -4158,7 +4158,7 @@ const addToCart = (product) => {
                   <button key={variant.id} onClick={() => handleVariantSelect(variant)} className="bg-white border-2 border-gray-200 hover:border-blue-500 rounded-lg p-4 text-left transition-all hover:shadow-md">
                     <h3 className="font-semibold text-gray-900 mb-2">{variant.title}</h3>
                     {variant.sku && <p className="text-sm text-gray-600 mb-2">SKU: <span className="font-mono">{variant.sku}</span></p>}
-                    <p className="text-xl font-bold text-blue-600 mb-2">${parseFloat(variant.price).toFixed(2)}</p>
+                    <p className="text-xl font-bold text-blue-600 mb-2">${money(parseFloat(variant.price) || 0)}</p>
                     <div className="flex items-center gap-2">
                       {variant.inventoryQuantity > 0 ? (
                         <><div className="w-2 h-2 bg-green-500 rounded-full"></div><span className="text-sm text-gray-600">{variant.inventoryQuantity} in stock</span></>
@@ -4348,34 +4348,34 @@ const addToCart = (product) => {
               </div>
               {receipt.isExchange ? (
                 <>
-                  <div className="border-b pb-4"><h3 className="text-sm font-semibold text-gray-900 mb-3">Returned Items</h3><div className="space-y-2">{receipt.returnItems.map((item, idx) => (<div key={idx} className="flex justify-between items-start"><div className="flex-1"><p className="text-sm font-medium text-gray-900">{item.name}</p><p className="text-xs text-gray-600">{item.quantity} × ${item.price.toFixed(2)}</p></div><p className="text-sm font-semibold text-gray-900 text-right">${(item.price * item.quantity).toFixed(2)}</p></div>))}</div></div>
-                  <div className="border-b pb-4"><h3 className="text-sm font-semibold text-gray-900 mb-3">Exchange Items</h3><div className="space-y-2">{receipt.exchangeItems.map((item, idx) => (<div key={idx} className="flex justify-between items-start"><div className="flex-1"><p className="text-sm font-medium text-gray-900">{item.name}</p><p className="text-xs text-gray-600">{item.quantity} × ${item.price.toFixed(2)}</p></div><p className="text-sm font-semibold text-gray-900 text-right">${(item.price * item.quantity).toFixed(2)}</p></div>))}</div></div>
+                  <div className="border-b pb-4"><h3 className="text-sm font-semibold text-gray-900 mb-3">Returned Items</h3><div className="space-y-2">{receipt.returnItems.map((item, idx) => (<div key={idx} className="flex justify-between items-start"><div className="flex-1"><p className="text-sm font-medium text-gray-900">{item.name}</p><p className="text-xs text-gray-600">{item.quantity} × ${money(item.price)}</p></div><p className="text-sm font-semibold text-gray-900 text-right">${money(item.price * item.quantity)}</p></div>))}</div></div>
+                  <div className="border-b pb-4"><h3 className="text-sm font-semibold text-gray-900 mb-3">Exchange Items</h3><div className="space-y-2">{receipt.exchangeItems.map((item, idx) => (<div key={idx} className="flex justify-between items-start"><div className="flex-1"><p className="text-sm font-medium text-gray-900">{item.name}</p><p className="text-xs text-gray-600">{item.quantity} × ${money(item.price)}</p></div><p className="text-sm font-semibold text-gray-900 text-right">${money(item.price * item.quantity)}</p></div>))}</div></div>
                 </>
               ) : (
-                <div className="border-b pb-4"><h3 className="text-sm font-semibold text-gray-900 mb-3">Items</h3><div className="space-y-2">{receipt.items.map((item, idx) => (<div key={idx} className="flex justify-between items-start"><div className="flex-1"><p className="text-sm font-medium text-gray-900">{item.name}</p><p className="text-xs text-gray-600">{item.quantity} × ${item.price.toFixed(2)}</p></div><p className="text-sm font-semibold text-gray-900 text-right">${(item.price * item.quantity).toFixed(2)}</p></div>))}</div></div>
+                <div className="border-b pb-4"><h3 className="text-sm font-semibold text-gray-900 mb-3">Items</h3><div className="space-y-2">{receipt.items.map((item, idx) => (<div key={idx} className="flex justify-between items-start"><div className="flex-1"><p className="text-sm font-medium text-gray-900">{item.name}</p><p className="text-xs text-gray-600">{item.quantity} × ${money(item.price)}</p></div><p className="text-sm font-semibold text-gray-900 text-right">${money(item.price * item.quantity)}</p></div>))}</div></div>
               )}
               {receipt.payments && receipt.payments.length > 0 && (
-                <div className="border-b pb-4"><h3 className="text-sm font-semibold text-gray-900 mb-3">{receipt.isExchange ? "Payment Due" : "Payment"}</h3><div className="space-y-2">{receipt.payments.map((payment, idx) => (<div key={idx} className="flex justify-between"><p className="text-sm text-gray-700 capitalize">{payment.method}</p><p className="text-sm font-semibold text-gray-900">${toNonNegativeAmount(payment.amount).toFixed(2)}</p></div>))}</div></div>
+                <div className="border-b pb-4"><h3 className="text-sm font-semibold text-gray-900 mb-3">{receipt.isExchange ? "Payment Due" : "Payment"}</h3><div className="space-y-2">{receipt.payments.map((payment, idx) => (<div key={idx} className="flex justify-between"><p className="text-sm text-gray-700 capitalize">{payment.method}</p><p className="text-sm font-semibold text-gray-900">${money(payment.amount)}</p></div>))}</div></div>
               )}
               {receipt.deliveryInfo && (
-                <div className="border-b pb-4"><h3 className="text-sm font-semibold text-gray-900 mb-3">Delivery Information</h3><div className="space-y-2">{receipt.trackingNumber && <div className="flex justify-between"><p className="text-xs text-gray-600">Tracking #</p><p className="text-sm font-mono font-semibold text-blue-600">{receipt.trackingNumber}</p></div>}<div className="flex justify-between"><p className="text-xs text-gray-600">Recipient</p><p className="text-sm font-medium text-gray-900">{receipt.deliveryInfo.recipientName}</p></div><div className="flex justify-between"><p className="text-xs text-gray-600">Phone</p><p className="text-sm font-medium text-gray-900">{receipt.deliveryInfo.recipientPhone}</p></div>{receipt.deliveryInfo.deliveryAddress && <div className="flex justify-between"><p className="text-xs text-gray-600">Address</p><p className="text-sm font-medium text-gray-900 text-right">{receipt.deliveryInfo.deliveryAddress.street}<br />{receipt.deliveryInfo.deliveryAddress.city}{receipt.deliveryInfo.deliveryAddress.country && `, ${receipt.deliveryInfo.deliveryAddress.country}`}</p></div>}{receipt.deliveryInfo.deliveryCategory && <div className="flex justify-between"><p className="text-xs text-gray-600">Delivery Type</p><p className="text-sm font-medium text-gray-900">{receipt.deliveryInfo.deliveryCategory} - {receipt.deliveryInfo.deliveryOption}</p></div>}{receipt.deliveryFee > 0 && <div className="flex justify-between"><p className="text-xs text-gray-600">Delivery Fee</p><p className="text-sm font-semibold text-gray-900">${receipt.deliveryFee.toFixed(2)}</p></div>}</div></div>
+                <div className="border-b pb-4"><h3 className="text-sm font-semibold text-gray-900 mb-3">Delivery Information</h3><div className="space-y-2">{receipt.trackingNumber && <div className="flex justify-between"><p className="text-xs text-gray-600">Tracking #</p><p className="text-sm font-mono font-semibold text-blue-600">{receipt.trackingNumber}</p></div>}<div className="flex justify-between"><p className="text-xs text-gray-600">Recipient</p><p className="text-sm font-medium text-gray-900">{receipt.deliveryInfo.recipientName}</p></div><div className="flex justify-between"><p className="text-xs text-gray-600">Phone</p><p className="text-sm font-medium text-gray-900">{receipt.deliveryInfo.recipientPhone}</p></div>{receipt.deliveryInfo.deliveryAddress && <div className="flex justify-between"><p className="text-xs text-gray-600">Address</p><p className="text-sm font-medium text-gray-900 text-right">{receipt.deliveryInfo.deliveryAddress.street}<br />{receipt.deliveryInfo.deliveryAddress.city}{receipt.deliveryInfo.deliveryAddress.country && `, ${receipt.deliveryInfo.deliveryAddress.country}`}</p></div>}{receipt.deliveryInfo.deliveryCategory && <div className="flex justify-between"><p className="text-xs text-gray-600">Delivery Type</p><p className="text-sm font-medium text-gray-900">{receipt.deliveryInfo.deliveryCategory} - {receipt.deliveryInfo.deliveryOption}</p></div>}{receipt.deliveryFee > 0 && <div className="flex justify-between"><p className="text-xs text-gray-600">Delivery Fee</p><p className="text-sm font-semibold text-gray-900">${money(receipt.deliveryFee)}</p></div>}</div></div>
               )}
               {(receipt.isReturn || receipt.isExchange) && receipt.returnReason && (
                 <div className="border-b pb-4"><h3 className="text-sm font-semibold text-gray-900 mb-2">Return Reason</h3><p className="text-sm text-gray-700">{receipt.returnReason.replace(/-/g, " ").replace(/\b\w/g, (l) => l.toUpperCase())}</p></div>
               )}
               {receipt.isExchange ? (
                 <div className="bg-indigo-50 rounded-lg p-4 space-y-2">
-                  <div className="flex justify-between items-center text-sm font-semibold"><span>Return Total</span><span className="text-orange-600">${receipt.returnTotal.toFixed(2)}</span></div>
-                  <div className="flex justify-between items-center text-sm font-semibold"><span>Exchange Total</span><span className="text-indigo-600">${receipt.exchangeTotal.toFixed(2)}</span></div>
-                  <div className="flex justify-between items-center"><p className="text-lg font-bold text-gray-900">{receipt.netBalance > 0 ? "Customer Pays" : receipt.netBalance < 0 ? "Refund Due" : "Balanced"}</p><p className="text-2xl font-bold text-gray-900">${Math.abs(receipt.netBalance).toFixed(2)}</p></div>
+                  <div className="flex justify-between items-center text-sm font-semibold"><span>Return Total</span><span className="text-orange-600">${money(receipt.returnTotal)}</span></div>
+                  <div className="flex justify-between items-center text-sm font-semibold"><span>Exchange Total</span><span className="text-indigo-600">${money(receipt.exchangeTotal)}</span></div>
+                  <div className="flex justify-between items-center"><p className="text-lg font-bold text-gray-900">{receipt.netBalance > 0 ? "Customer Pays" : receipt.netBalance < 0 ? "Refund Due" : "Balanced"}</p><p className="text-2xl font-bold text-gray-900">${money(Math.abs(receipt.netBalance))}</p></div>
                 </div>
               ) : (
                 <div className={`${receipt.isReturn ? "bg-orange-50" : "bg-blue-50"} rounded-lg p-4`}>
-                  <div className="flex justify-between items-center"><p className="text-lg font-bold text-gray-900">{receipt.isReturn ? "Refund Total" : "Total"}</p><p className={`text-2xl font-bold ${receipt.isReturn ? "text-orange-600" : "text-blue-600"}`}>${(receipt.subtotal + (receipt.deliveryFee || 0)).toFixed(2)}</p></div>
+                  <div className="flex justify-between items-center"><p className="text-lg font-bold text-gray-900">{receipt.isReturn ? "Refund Total" : "Total"}</p><p className={`text-2xl font-bold ${receipt.isReturn ? "text-orange-600" : "text-blue-600"}`}>${money((receipt.subtotal || 0) + (receipt.deliveryFee || 0))}</p></div>
                   {receipt.isReservation && !receipt.isReturn && !receipt.isExchange && (
                     <div className="mt-3 pt-3 border-t border-blue-100 space-y-1">
-                      <div className="flex justify-between items-center text-sm"><p className="text-gray-700">Amount Paid</p><p className="font-semibold text-gray-900">${receipt.amountPaid.toFixed(2)}</p></div>
-                      <div className="flex justify-between items-center text-sm"><p className="text-gray-700">Balance Due</p><p className="font-semibold text-amber-700">${receipt.balanceDue.toFixed(2)}</p></div>
+                      <div className="flex justify-between items-center text-sm"><p className="text-gray-700">Amount Paid</p><p className="font-semibold text-gray-900">${money(receipt.amountPaid)}</p></div>
+                      <div className="flex justify-between items-center text-sm"><p className="text-gray-700">Balance Due</p><p className="font-semibold text-amber-700">${money(receipt.balanceDue)}</p></div>
                     </div>
                   )}
                 </div>
@@ -4439,7 +4439,7 @@ const addToCart = (product) => {
                           <div className="flex-1">
                             <p className="text-sm font-medium text-gray-900">
                               {draft.cart.length} items &nbsp;|&nbsp;
-                              Total: ${(draft.cartTotal || 0).toFixed(2)}
+                              Total: ${money(draft.cartTotal || 0)}
                             </p>
                             <p className="text-xs text-gray-600">PROF: {draft.idempotencyKey}</p>
                             {draft.selectedCustomer && (

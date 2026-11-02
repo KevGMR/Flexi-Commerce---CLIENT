@@ -152,9 +152,9 @@ import { formatCurrency } from "@/lib/format-currency";
             <div className={`grid gap-4 md:grid-cols-2 ${canViewExpenses ? "lg:grid-cols-5" : "lg:grid-cols-4"}`}>
               <KPICard
                 title="Net Collected"
-                value={formatCurrency(salesData.totalRevenue)}
+                value={formatCurrency(salesData.totalRevenue, currency)}
                 icon="💰"
-                subtitle={`Gross ${formatCurrency(salesData.grossRevenue || salesData.totalRevenue)} • ${salesData.totalSales || 0} transactions`}
+                subtitle={`Gross ${formatCurrency(salesData.grossRevenue || salesData.totalRevenue, currency)} • ${salesData.totalSales || 0} transactions`}
               />
               <KPICard
                 title="Transactions"
@@ -170,14 +170,14 @@ import { formatCurrency } from "@/lib/format-currency";
               />
               <KPICard
                 title="Avg Transaction"
-                value={formatCurrency(salesData.averageTransactionValue || 0)}
+                value={formatCurrency(salesData.averageTransactionValue || 0, currency)}
                 icon="📊"
                 subtitle="Average order value"
               />
               {canViewExpenses && (
                 <KPICard
                   title="Total Expenses"
-                  value={formatCurrency(salesData.totalExpenses || 0)}
+                  value={formatCurrency(salesData.totalExpenses || 0, currency)}
                   icon="💸"
                   subtitle={`${salesData.totalExpenses ? "Approved expenses" : "No approved expenses"}`}
                 />
@@ -195,7 +195,7 @@ import { formatCurrency } from "@/lib/format-currency";
           <div className="rounded-lg border border-zinc-200 bg-white p-6 shadow-sm">
             <h3 className="text-lg font-semibold text-zinc-900">Payment Methods</h3>
             <p className="mt-1 text-xs text-zinc-500">
-              Exchange credit applied: {formatCurrency(salesData.exchangeCreditApplied || 0)}
+              Exchange credit applied: {formatCurrency(salesData.exchangeCreditApplied || 0, currency)}
             </p>
             <div className="mt-4 space-y-2">
               {Object.entries(salesData.paymentMethodBreakdown).map(([method, data]) => (
@@ -204,7 +204,7 @@ import { formatCurrency } from "@/lib/format-currency";
                     <span className="text-sm font-medium text-zinc-700 capitalize">{method}</span>
                     <span className="text-xs text-zinc-500">({data.count} txns)</span>
                   </div>
-                  <span className="text-sm font-semibold text-zinc-900">{formatCurrency(data.total)}</span>
+                  <span className="text-sm font-semibold text-zinc-900">{formatCurrency(data.total, currency)}</span>
                 </div>
               ))}
             </div>

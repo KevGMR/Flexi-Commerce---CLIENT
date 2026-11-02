@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { apiFetch } from "@/lib/api-client";
+import { formatCurrency } from "@/lib/format-currency";
 
 export default function DeliveryCheckoutModal({
   isOpen,
@@ -11,6 +12,7 @@ export default function DeliveryCheckoutModal({
   onConfirm,
   onSkip,
   onClose,
+  currency = "KES",
 }) {
   const [deliveryCategories, setDeliveryCategories] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState("");
@@ -24,6 +26,8 @@ export default function DeliveryCheckoutModal({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [formError, setFormError] = useState("");
+
+  const money = (v) => formatCurrency(v, currency);
 
   // Calculate totals
   const cartTotal = Math.max(0, cartSubtotal - cartDiscount);
@@ -258,7 +262,7 @@ export default function DeliveryCheckoutModal({
                       <option value="">Select an option</option>
                       {currentCategory.childOptions?.map((opt) => (
                         <option key={opt.optionName} value={opt.optionName}>
-                          {opt.optionName} - ${opt.price?.toFixed(2) || "0.00"}
+                          {opt.optionName} - {money(opt.price || 0)}
                         </option>
                       ))}
                     </select>
@@ -270,17 +274,17 @@ export default function DeliveryCheckoutModal({
               <div className="bg-gray-50 rounded-lg p-4 space-y-2">
                 <div className="flex justify-between text-gray-700">
                   <span>Subtotal:</span>
-                  <span>${cartTotal.toFixed(2)}</span>
+                  <span>{money(cartTotal)}</span>
                 </div>
                 {deliveryFee > 0 && (
                   <div className="flex justify-between text-blue-700 font-semibold border-t pt-2">
                     <span>Delivery Fee:</span>
-                    <span>${deliveryFee.toFixed(2)}</span>
+                    <span>{money(deliveryFee)}</span>
                   </div>
                 )}
                 <div className="flex justify-between text-lg font-bold text-gray-900 border-t pt-2">
                   <span>Total with Delivery:</span>
-                  <span>${totalWithDelivery.toFixed(2)}</span>
+                  <span>{money(totalWithDelivery)}</span>
                 </div>
               </div>
             </>

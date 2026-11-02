@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { formatCurrency } from "@/lib/format-currency";
 
 function variantLabel(v) {
   if (!v.selectedOptions || v.selectedOptions.length === 0) {
@@ -13,8 +14,11 @@ export default function VariantPickerModal({
   product,
   onPick,
   onClose,
+  currency = "KES",
 }) {
   const [search, setSearch] = useState("");
+
+  const money = (v) => formatCurrency(v, currency);
 
   const variants = useMemo(() => {
     const vs = product?.variants || [];
@@ -148,11 +152,11 @@ export default function VariantPickerModal({
                       </div>
                       <div className="text-right flex-shrink-0">
                         <p className="text-sm font-bold text-blue-600">
-                          ${Number(v.price).toFixed(2)}
+                          {money(v.price)}
                         </p>
                         {v.compareAtPrice && (
                           <p className="text-xs text-gray-400 line-through">
-                            ${Number(v.compareAtPrice).toFixed(2)}
+                            {money(v.compareAtPrice)}
                           </p>
                         )}
                       </div>

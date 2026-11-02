@@ -1,7 +1,10 @@
+// client/src/components/pos/CartLine.js
 "use client";
 
 import { useSessionStore } from "@/store/session";
 import { PERMISSIONS } from "@/lib/permissions";
+import { useCurrency } from "@/hooks/useCurrency";
+import { formatCurrency } from "@/lib/format-currency";
 
 /**
  * One cart row. Handles three shapes:
@@ -13,7 +16,7 @@ import { PERMISSIONS } from "@/lib/permissions";
  * BundleManageModal. See pos/page.js patch for the skip logic.
  *
  * Services render as a compact summary by default:
- *   $300.00 · Dorcas Wanjiru Kimani · Commission 0% ($0.00) [Default] ▸
+ *   Ksh 300.00 · Dorcas Wanjiru Kimani · Commission 0% (Ksh 0.00) [Default] ▸
  * Clicking the summary expands labor cost, user picker, and discount.
  *
  * All mutation is delegated to callbacks owned by pos/page.js.
@@ -51,6 +54,9 @@ export default function CartLine({
   onDetach,
   onOpenAttachQuantity,
 }) {
+  const currency = useCurrency();
+  const money = (v) => formatCurrency(v, currency);
+
   const isService = item.type === "service";
   const isBundleParent = item.isBundleParent === true;
   const isChild =
@@ -94,11 +100,11 @@ export default function CartLine({
   const commissionLabel = (() => {
     if (!item.commissionType) return "No commission";
     if (item.commissionType === "percentage") {
-      return `${item.commissionValue || 0}% ($${Number(
+      return `${item.commissionValue || 0}% (${money(
         item.commissionAmount || 0,
-      ).toFixed(2)})`;
+      )})`;
     }
-    return `$${Number(item.commissionValue || 0).toFixed(2)}`;
+    return money(item.commissionValue || 0);
   })();
 
   return (
@@ -178,7 +184,7 @@ export default function CartLine({
                 title={isServiceExpanded ? "Hide details" : "Edit details"}
               >
                 <span className="text-gray-700 font-medium">
-                  ${Number(item.price || 0).toFixed(2)}
+                  {money(item.price || 0)}
                 </span>
                 <span className="text-gray-300">·</span>
                 <span
@@ -227,7 +233,7 @@ export default function CartLine({
                       className="w-20 px-1 py-0.5 text-xs border border-gray-300 rounded"
                     />
                     <span className="text-[10px] text-gray-500">
-                      = ${Number(item.price || 0).toFixed(2)}
+                      = {money(item.price || 0)}
                     </span>
                   </div>
 
@@ -297,13 +303,12 @@ export default function CartLine({
                           {item.discount > 0 ? (
                             <>
                               <span className="line-through text-gray-400">
-                                $
-                                {(
-                                  Number(item.price) * item.quantity
-                                ).toFixed(2)}
+                                {money(
+                                  Number(item.price) * item.quantity,
+                                )}
                               </span>
                               <span className="font-medium">
-                                -${Number(item.discount).toFixed(2)} 🏷️
+                                -{money(item.discount)} 🏷️
                               </span>
                             </>
                           ) : (
@@ -341,7 +346,7 @@ export default function CartLine({
                   className="text-sm text-gray-500 hover:text-blue-600 flex items-center gap-1"
                   title="Click to edit price"
                 >
-                  ${Number(item.price || 0).toFixed(2)}{" "}
+                  {money(item.price || 0)}{" "}
                   <span className="text-xs">✎</span>
                 </button>
               )}
@@ -391,10 +396,10 @@ export default function CartLine({
                   {item.discount > 0 ? (
                     <>
                       <span className="line-through text-gray-400">
-                        ${(Number(item.price) * item.quantity).toFixed(2)}
+                        {money(Number(item.price) * item.quantity)}
                       </span>
                       <span className="font-medium">
-                        -${Number(item.discount).toFixed(2)} 🏷️
+                        -{money(item.discount)} 🏷️
                       </span>
                     </>
                   ) : (
@@ -496,28 +501,28 @@ export default function CartLine({
               </span>
               <button
                 onClick={() => onUpdateQuantity(index, item.quantity + 1)}
-                className="w-8 h-8 bg-white border border-gray-300 rounded hover:bg-gray-100 font-bold"
-              >
-                +
-              </button>
-            </>
-          )}
-        </div>
-        <div className="text-right">
-          <p className="font-bold text-gray-900">
-            $
-            {(
-              Number(item.price || 0) * item.quantity -
-              Number(item.discount || 0)
-            ).toFixed(2)}
-          </p>
-          {item.discount > 0 && (
-            <p className="text-xs text-green-600">
-              Saved ${Number(item.discount).toFixed(2)}
-            </p>
-          )}
-        </div>
-      </div>
+                            className="w-8 h-8 bg-white border border-gray-300 rounded hover:bg-gray-100 font-bold"
+          >
+            +
+          </button>
+        </>
+      )}
     </div>
+
+    <div className="text-right">
+      <p className="text-sm font-semibold text-gray-900">
+        {money(
+          (Number(item.price) || 0) * item.quantity -
+            (Number(item.discount) || 0),
+        )}
+      </p>
+      {item.discount > 0 && (
+        <p className="text-[10px] text-green-600">
+          −{money(item.discount)} discount
+        </p>
+      )}
+    </div>
+  </div>
+</div>
   );
 }
