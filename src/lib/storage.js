@@ -32,12 +32,12 @@ export function clearSessionStorage() {
 }
 
 function expireCookie(name, domain) {
+  // Best-effort client-side expire for non-httpOnly cookies.
+  // The httpOnly refreshToken is cleared server-side via
+  // Set-Cookie: refreshToken=; Max-Age=0 in POST /users/logout —
+  // this function cannot delete it from JS.
   const parts = [`${name}=`, "Max-Age=0", "expires=Thu, 01 Jan 1970 00:00:00 GMT", "path=/"];
-
-  if (domain) {
-    parts.push(`domain=${domain}`);
-  }
-
+  if (domain) parts.push(`domain=${domain}`);
   document.cookie = parts.join("; ");
 }
 

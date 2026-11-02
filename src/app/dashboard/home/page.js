@@ -1,4 +1,5 @@
-  "use client";
+// client/src/app/dashboard/home/page.js
+"use client";
 
   import { useState, useEffect } from "react";
   import { apiFetch } from "@/lib/api-client";

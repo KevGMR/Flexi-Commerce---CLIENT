@@ -29,22 +29,43 @@ function isDefinitiveAuthFailure(status) {
   return status === 400 || status === 401 || status === 403;
 }
 
-function handleUnauthorizedSession() {
-  useSessionStore.getState().clearSession();
+async function handleUnauthorizedSession() {
+  if (typeof window === "undefined") return;
 
-  if (typeof window === "undefined" || redirectingToLogin) return;
+  // Mark as redirecting BEFORE the await, so concurrent 401s don't
+  // double-fire. Reset in a finally so a later session in the same
+  // page lifetime can still redirect.
+  if (redirectingToLogin) return;
+  redirectingToLogin = true;
 
-  const currentPath = window.location.pathname || "";
-  const currentSearch = window.location.search || "";
-  const currentHash = window.location.hash || "";
-  const isAuthRoute = currentPath.startsWith("/auth/");
+  try {
+    // clearSession() is async (IndexedDB delete). Await it fully so
+    // we don't abort the transaction by navigating away.
+    await useSessionStore.getState().clearSession();
+  } catch (err) {
+    console.warn("clearSession failed during unauthorized redirect", err);
+  } finally {
+    const currentPath = window.location.pathname || "";
+    const isAuthRoute = currentPath.startsWith("/auth/");
+    if (!isAuthRoute) {
+      const nextPath = sanitizeNextPath(
+        `${currentPath}${window.location.search || ""}${window.location.hash || ""}`,
+      );
+      const loginUrl = buildLoginRedirect(nextPath);
 
-  if (!isAuthRoute) {
-    redirectingToLogin = true;
-    const candidateNextPath = `${currentPath}${currentSearch}${currentHash}`;
-    const nextPath = sanitizeNextPath(candidateNextPath);
-    const loginUrl = buildLoginRedirect(nextPath);
-    window.location.assign(loginUrl);
+      // Reset the guard on the next microtask so a fresh login on
+      // the destination page can still redirect if it 401s again.
+      setTimeout(() => {
+        redirectingToLogin = false;
+      }, 0);
+
+      // Prefer a hard replace over assign so the back button cannot
+      // return to a half-cleared dashboard, and to force a fresh
+      // SessionInitializer.hydrate() on the login page.
+      window.location.replace(loginUrl);
+    } else {
+      redirectingToLogin = false;
+    }
   }
 }
 
@@ -107,6 +128,16 @@ export async function apiFetch(
   path,
   { method = "GET", headers = {}, body, retryOn401 = true } = {},
 ) {
+  // Hard stop: while logout is in progress, never auto-refresh and never
+  // retry. A pending refresh would re-issue the httpOnly cookie on the
+  // server and resurrect the session.
+  if (typeof window !== "undefined" && window.__LOGGING_OUT__) {
+    throw Object.assign(new Error("Session is ending"), {
+      status: 401,
+      code: "LOGGING_OUT",
+    });
+  }
+
   let shouldRouteToLogin = false;
 
   const {
@@ -165,13 +196,17 @@ export async function apiFetch(
   const isJson = contentType.includes("application/json");
   const data = isJson ? await response.json().catch(() => null) : null;
 
-  if (
-    response.status === 401 &&
-    (shouldRouteToLogin ||
-      isSessionEndedResponse(response.status, data?.code) ||
-      !getSessionState().accessToken)
-  ) {
-    handleUnauthorizedSession();
+  const code = data?.code;
+  const definitive =
+    shouldRouteToLogin ||
+    isSessionEndedResponse(response.status, code) ||
+    (typeof code === "string" &&
+      ["DEVICE_ID_MISMATCH", "ORG_ACCESS_REVOKED", "DEVICE_ID_REQUIRED"].includes(code)) ||
+    (response.status === 401 && !getSessionState().accessToken);
+
+  if (definitive) {
+    // Await so the throw below doesn't race the redirect.
+    await handleUnauthorizedSession();
   }
 
   if (!response.ok) {
@@ -179,6 +214,7 @@ export async function apiFetch(
       data?.error || data?.message || `Request failed with ${response.status}`,
     );
     error.status = response.status;
+    error.code = data?.code || null;
     error.details = data || { status: response.status };
     throw error;
   }

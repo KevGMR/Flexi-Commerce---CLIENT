@@ -59,14 +59,48 @@ function LoginPageContent() {
       }
 
       if (data.organizations && data.organizations.length > 0) {
-        setOrganizations(data.organizations);
-        // Store credentials temporarily for org selection
-        useSessionStore.getState().setAuthTempCredentials({ email, password });
-        const selectOrgPath = `/auth/select-organization?next=${encodeURIComponent(nextPath)}`;
-        router.push(selectOrgPath);
-      } else {
-        throw new Error("No organizations found for this user");
-      }
+  setOrganizations(data.organizations);
+
+  if (data.organizations.length === 1) {
+    // Single org: skip the picker and complete login in one round-trip.
+    const singleOrgId =
+      data.organizations[0].organizationId ||
+      data.organizations[0]._id ||
+      data.organizations[0].id;
+
+    const res2 = await fetch(`${API_BASE_URL}/users/login`, {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Device-ID": deviceId || "",
+        "X-Device-Name": deviceName || "",
+      },
+      body: JSON.stringify({ email, password, organizationId: singleOrgId }),
+    });
+    const data2 = await res2.json();
+    if (!res2.ok) throw new Error(data2.error || "Login failed");
+
+    useSessionStore.getState().setTokens({
+      accessToken: data2.accessToken,
+      refreshToken: null,
+    });
+    if (data2.user) {
+      useSessionStore.getState().setUser(data2.user);
+    }
+    useSessionStore.getState().setActiveOrganization(data2.organization);
+    useSessionStore.getState().setPermissions(data2.organization?.permissions || []);
+    if (Array.isArray(data2.organizations)) {
+      useSessionStore.getState().setOrganizations(data2.organizations);
+    }
+    router.push(nextPath);
+  } else {
+    // Multi-org: send to picker
+    useSessionStore.getState().setAuthTempCredentials({ email, password });
+    const selectOrgPath = `/auth/select-organization?next=${encodeURIComponent(nextPath)}`;
+    router.push(selectOrgPath);
+  }
+}
     } catch (err) {
       setError(err.message);
     } finally {

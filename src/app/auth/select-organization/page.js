@@ -28,6 +28,9 @@ function SelectOrganizationPageContent() {
     setLocationsMeta,
     deviceId,
     deviceName,
+    tempAuthCredentials, // FIX (Bug 2): destructure here — it was referenced in
+                         // the useEffect below without being in scope, which
+                         // threw a ReferenceError at mount.
   } = useSessionStore();
 
   const [loading, setLoading] = useState(false);
@@ -40,23 +43,37 @@ function SelectOrganizationPageContent() {
 
   useEffect(() => {
     if (hydrated) {
-      const { tempAuthCredentials } = useSessionStore.getState();
+      const { tempAuthCredentials: tempCreds } = useSessionStore.getState();
       // Redirect to login if no temp credentials and no existing session
-      if (!accessToken && !tempAuthCredentials) {
+      if (!accessToken && !tempCreds) {
         router.push(buildLoginRedirect(nextPath));
       }
     }
   }, [hydrated, accessToken, router, nextPath]);
+
+  useEffect(() => {
+    if (!hydrated || !accessToken || tempAuthCredentials) return;
+    (async () => {
+      try {
+        const res = await apiFetch("/organizations");
+        const list = res?.organizations || res?.data || [];
+        if (Array.isArray(list)) setOrganizations(list);
+      } catch {
+        /* ignore */
+      }
+    })();
+  }, [hydrated, accessToken, tempAuthCredentials, setOrganizations]);
 
   const handleSelectOrganization = async (orgId) => {
     setLoading(true);
     setError("");
 
     try {
-      const { tempAuthCredentials } = useSessionStore.getState();
+      const { tempAuthCredentials: tempCreds } =
+        useSessionStore.getState();
 
       // If temp credentials exist (from login flow), complete login step 2
-      if (tempAuthCredentials) {
+      if (tempCreds) {
         const loginRes = await fetch(`${API_BASE_URL}/users/login`, {
           method: "POST",
           credentials: "include",
@@ -66,15 +83,13 @@ function SelectOrganizationPageContent() {
             "X-Device-Name": deviceName || "",
           },
           body: JSON.stringify({
-            email: tempAuthCredentials.email,
-            password: tempAuthCredentials.password,
+            email: tempCreds.email,
+            password: tempCreds.password,
             organizationId: orgId,
           }),
         });
 
         const data = await loginRes.json();
-
-        console.log(data);
 
         if (!loginRes.ok) {
           throw new Error(data.error || "Login failed");
@@ -95,6 +110,11 @@ function SelectOrganizationPageContent() {
         }
 
         setActiveOrganization(data.organization);
+        // Login step 2 returns the full org list — persist it so
+        // OrgSwitcher works after a plain reload of the SPA.
+        if (Array.isArray(data.organizations)) {
+          setOrganizations(data.organizations);
+        }
         setPermissions(data.organization?.permissions || []);
 
         const allowedLocationIds = data.organization?.locations || [];
@@ -120,7 +140,9 @@ function SelectOrganizationPageContent() {
               .filter(Boolean);
             if (allowedLocationIds.length > 0) {
               locationsMeta = allLocations.filter((loc) =>
-                allowedLocationIds.includes(loc._id || loc.id || loc.locationId),
+                allowedLocationIds.includes(
+                  loc._id || loc.id || loc.locationId,
+                ),
               );
               setLocations(allowedLocationIds);
             } else {
@@ -137,7 +159,7 @@ function SelectOrganizationPageContent() {
         useSessionStore.getState().setAuthTempCredentials(null);
         router.push(nextPath);
       } else {
-        // Existing user switching org - use switch endpoint
+        // Existing user switching org
         const res = await fetch(`${API_BASE_URL}/users/switch-organization`, {
           method: "POST",
           credentials: "include",
@@ -165,6 +187,14 @@ function SelectOrganizationPageContent() {
         }
 
         setActiveOrganization(data.organization);
+        if (Array.isArray(data.organizations)) {
+          setOrganizations(data.organizations);
+        }
+        // FIX (Bug 6): the duplicate `setOrganizations(data.organizations || [])`
+        // that used to sit here has been removed. It was firing a second
+        // Zustand set + persistState() write per switch, and it would
+        // overwrite the Array.isArray-guarded call above with a possibly-
+        // undefined value.
         setPermissions(data.organization?.permissions || []);
 
         const allowedLocationIds = data.organization?.locations || [];
@@ -190,7 +220,9 @@ function SelectOrganizationPageContent() {
               .filter(Boolean);
             if (allowedLocationIds.length > 0) {
               locationsMeta = allLocations.filter((loc) =>
-                allowedLocationIds.includes(loc._id || loc.id || loc.locationId),
+                allowedLocationIds.includes(
+                  loc._id || loc.id || loc.locationId,
+                ),
               );
               setLocations(allowedLocationIds);
             } else {
@@ -228,8 +260,17 @@ function SelectOrganizationPageContent() {
 
       if (data?.data || data?.organization) {
         const newOrg = data.data || data.organization;
-        const updatedOrgs = [...organizations, newOrg];
-        setOrganizations(updatedOrgs);
+
+        // FIX (Bug 7): only one setOrganizations call. The previous
+        // version called setOrganizations twice — once with the
+        // server's list (guarded by Array.isArray) and once
+        // unconditionally with [...organizations, newOrg], which
+        // clobbered the server list with a stale local one.
+        if (Array.isArray(data.organizations) && data.organizations.length > 0) {
+          setOrganizations(data.organizations);
+        } else {
+          setOrganizations([...organizations, newOrg]);
+        }
 
         await handleSelectOrganization(
           newOrg._id || newOrg.organizationId || newOrg.id,

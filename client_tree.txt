@@ -1,0 +1,304 @@
+.
+├── .github
+│   └── copilot-instructions.md
+├── public
+│   ├── file.svg
+│   ├── globe.svg
+│   ├── next.svg
+│   ├── vercel.svg
+│   └── window.svg
+├── src
+│   ├── app
+│   │   ├── auth
+│   │   │   ├── login
+│   │   │   │   └── page.js
+│   │   │   ├── select-organization
+│   │   │   │   └── page.js
+│   │   │   ├── signup
+│   │   │   │   └── page.js
+│   │   │   └── verify-email
+│   │   │       └── [token]
+│   │   │           └── page.js
+│   │   ├── dashboard
+│   │   │   ├── abandoned-checkouts
+│   │   │   │   └── page.js
+│   │   │   ├── analytics
+│   │   │   │   ├── financial-statements
+│   │   │   │   └── page.js
+│   │   │   ├── collections
+│   │   │   │   └── page.js
+│   │   │   ├── customers
+│   │   │   │   └── page.js
+│   │   │   ├── deliveries
+│   │   │   │   ├── create
+│   │   │   │   │   └── page.js
+│   │   │   │   ├── drivers
+│   │   │   │   │   └── page.js
+│   │   │   │   ├── [id]
+│   │   │   │   │   ├── edit
+│   │   │   │   │   │   └── page.js
+│   │   │   │   │   └── page.js
+│   │   │   │   ├── reports
+│   │   │   │   │   └── page.js
+│   │   │   │   └── page.js
+│   │   │   ├── draft-orders
+│   │   │   │   └── page.js
+│   │   │   ├── expenses
+│   │   │   │   ├── create
+│   │   │   │   │   └── page.js
+│   │   │   │   └── page.js
+│   │   │   ├── gift-cards
+│   │   │   │   └── page.js
+│   │   │   ├── home
+│   │   │   │   └── page.js
+│   │   │   ├── inventory
+│   │   │   │   └── page.js
+│   │   │   ├── my-commissions
+│   │   │   │   └── page.js
+│   │   │   ├── orders
+│   │   │   │   ├── abandoned-checkouts
+│   │   │   │   │   └── page.js
+│   │   │   │   ├── draft-orders
+│   │   │   │   │   └── page.js
+│   │   │   │   └── page.js
+│   │   │   ├── organizations
+│   │   │   │   └── page.js
+│   │   │   ├── products
+│   │   │   │   ├── collections
+│   │   │   │   │   ├── [id]
+│   │   │   │   │   │   └── page.js
+│   │   │   │   │   ├── new
+│   │   │   │   │   │   └── page.js
+│   │   │   │   │   └── page.js
+│   │   │   │   ├── gift-cards
+│   │   │   │   │   └── page.js
+│   │   │   │   ├── [id]
+│   │   │   │   │   └── page.js
+│   │   │   │   ├── inventory
+│   │   │   │   │   └── page.js
+│   │   │   │   ├── new
+│   │   │   │   │   └── page.js
+│   │   │   │   ├── products
+│   │   │   │   │   └── page.js
+│   │   │   │   ├── purchase-orders
+│   │   │   │   │   └── page.js
+│   │   │   │   ├── services
+│   │   │   │   │   ├── new
+│   │   │   │   │   │   └── page.js
+│   │   │   │   │   └── page.js
+│   │   │   │   ├── transfers
+│   │   │   │   │   └── page.js
+│   │   │   │   └── page.js
+│   │   │   ├── purchase-orders
+│   │   │   │   └── page.js
+│   │   │   ├── sales
+│   │   │   │   └── [id]
+│   │   │   │       ├── edit
+│   │   │   │       │   └── page.js
+│   │   │   │       └── page.js
+│   │   │   ├── sales-channels
+│   │   │   │   ├── pos
+│   │   │   │   │   ├── commissions
+│   │   │   │   │   │   ├── [userId]
+│   │   │   │   │   │   │   └── page.js
+│   │   │   │   │   │   └── page.js
+│   │   │   │   │   ├── reconciliation
+│   │   │   │   │   │   ├── [id]
+│   │   │   │   │   │   │   └── page.js
+│   │   │   │   │   │   └── page.js
+│   │   │   │   │   ├── reports
+│   │   │   │   │   │   └── page.js
+│   │   │   │   │   ├── shift
+│   │   │   │   │   ├── shifts
+│   │   │   │   │   │   └── page.js
+│   │   │   │   │   ├── z-reports
+│   │   │   │   │   └── page.js
+│   │   │   │   └── storefront
+│   │   │   │       ├── orders
+│   │   │   │       │   └── page.js
+│   │   │   │       └── page.js
+│   │   │   ├── settings
+│   │   │   │   ├── backdate-history
+│   │   │   │   │   └── page.js
+│   │   │   │   ├── backdate-shifts
+│   │   │   │   │   ├── [id]
+│   │   │   │   │   │   └── page.js
+│   │   │   │   │   └── page.js
+│   │   │   │   ├── delivery-categories
+│   │   │   │   │   └── page.js
+│   │   │   │   ├── financial-controls
+│   │   │   │   ├── invitations
+│   │   │   │   │   └── page.js
+│   │   │   │   ├── locations
+│   │   │   │   │   ├── [id]
+│   │   │   │   │   │   ├── payment-methods
+│   │   │   │   │   │   │   └── page.js
+│   │   │   │   │   │   └── receipt
+│   │   │   │   │   │       └── page.js
+│   │   │   │   │   └── page.js
+│   │   │   │   ├── organization
+│   │   │   │   │   └── page.js
+│   │   │   │   ├── permissions
+│   │   │   │   │   └── page.js
+│   │   │   │   ├── shopify
+│   │   │   │   │   └── page.js
+│   │   │   │   ├── storefront
+│   │   │   │   │   ├── homepage
+│   │   │   │   │   │   └── page.js
+│   │   │   │   │   └── page.js
+│   │   │   │   ├── team
+│   │   │   │   │   └── page.js
+│   │   │   │   ├── user-info
+│   │   │   │   │   └── page.js
+│   │   │   │   ├── users
+│   │   │   │   │   ├── [id]
+│   │   │   │   │   │   └── page.js
+│   │   │   │   │   └── page.js
+│   │   │   │   ├── website
+│   │   │   │   │   └── page.js
+│   │   │   │   └── page.js
+│   │   │   ├── transfers
+│   │   │   │   └── page.js
+│   │   │   ├── layout.js
+│   │   │   └── page.js
+│   │   ├── favicon.ico
+│   │   ├── globals.css
+│   │   ├── layout.js
+│   │   └── page.js
+│   ├── components
+│   │   ├── collections
+│   │   │   ├── CollectionForm.js
+│   │   │   ├── CollectionPicker.js
+│   │   │   ├── CollectionProductsList.js
+│   │   │   ├── ProductPicker.js
+│   │   │   ├── RuleBuilder.js
+│   │   │   └── SingleImageUploader.js
+│   │   ├── deliveries
+│   │   │   ├── CategorySelector.js
+│   │   │   ├── DeliveryCard.js
+│   │   │   ├── DeliveryFilters.js
+│   │   │   ├── DeliveryStatusBadge.js
+│   │   │   ├── OfflineBanner.js
+│   │   │   ├── RecipientInfoCard.js
+│   │   │   ├── SyncStatusIndicator.js
+│   │   │   └── WorkflowProgress.js
+│   │   ├── homepage-editor
+│   │   │   ├── section-forms
+│   │   │   │   ├── announcement-form.js
+│   │   │   │   ├── banner-form.js
+│   │   │   │   ├── collection-form.js
+│   │   │   │   ├── featured-category-form.js
+│   │   │   │   ├── featured-products-form.js
+│   │   │   │   ├── hero-form.js
+│   │   │   │   ├── image-text-form.js
+│   │   │   │   ├── rich-text-form.js
+│   │   │   │   └── trust-strip-form.js
+│   │   │   ├── add-section-modal.js
+│   │   │   └── section-list.js
+│   │   ├── icons
+│   │   │   └── Icon.js
+│   │   ├── locations
+│   │   │   └── AddressAutocompleteInput.js
+│   │   ├── pos
+│   │   │   ├── BundleManageModal.js
+│   │   │   ├── BundleSubServiceRow.js
+│   │   │   ├── CartLine.js
+│   │   │   ├── CompleteCheckoutModal.jsx
+│   │   │   ├── CustomerSelector.js
+│   │   │   ├── DeliveryCheckoutModal.jsx
+│   │   │   ├── DeliveryForm.js
+│   │   │   ├── FlexiProductGrid.js
+│   │   │   ├── MpesaStkWaitingModal.jsx
+│   │   │   ├── PreviousShiftBlockModal.jsx
+│   │   │   ├── SearchOverlay.js
+│   │   │   └── VariantPickerModal.js
+│   │   ├── products
+│   │   │   ├── DiscardChangesModal.js
+│   │   │   ├── InventoryGrid.js
+│   │   │   ├── MediaUploader.js
+│   │   │   ├── NumberInput.js
+│   │   │   ├── ProductForm.js
+│   │   │   ├── VariantEditor.js
+│   │   │   └── VariantImagePicker.js
+│   │   ├── sales
+│   │   │   ├── AddToSaleModal.jsx
+│   │   │   ├── AddToSalePanel.jsx
+│   │   │   ├── LineActions.jsx
+│   │   │   ├── RefundModal.jsx
+│   │   │   └── VoidConfirmModal.jsx
+│   │   ├── settings
+│   │   │   ├── announcement-section.js
+│   │   │   ├── daraja-section.js
+│   │   │   ├── domain-panel.js
+│   │   │   └── payment-methods-section.js
+│   │   ├── topbar
+│   │   │   ├── Logo.js
+│   │   │   ├── NotificationBell.js
+│   │   │   ├── OrgSwitcher.js
+│   │   │   ├── StatusIndicator.js
+│   │   │   ├── TopbarNew.js
+│   │   │   └── UserMenu.js
+│   │   ├── ui
+│   │   │   ├── Avatar.js
+│   │   │   ├── Dropdown.js
+│   │   │   ├── Modal.jsx
+│   │   │   └── PaginationFooter.jsx
+│   │   ├── Placeholder.js
+│   │   ├── SessionInitializer.js
+│   │   ├── Sidebar.js
+│   │   └── Topbar.js
+│   ├── hooks
+│   │   ├── useAddressAutocomplete.js
+│   │   ├── useCurrency.js
+│   │   ├── useDeliveries.js
+│   │   ├── useDeliveryCategories.js
+│   │   ├── useDeliveryForm.js
+│   │   ├── useDrivers.js
+│   │   ├── useOfflineDelivery.js
+│   │   ├── useSyncManager.js
+│   │   └── useUnsavedChanges.js
+│   ├── lib
+│   │   ├── receipt
+│   │   │   ├── browserPrint.js
+│   │   │   ├── receiptMappers.js
+│   │   │   └── receiptPrintTemplate.js
+│   │   ├── api-client.js
+│   │   ├── auth-redirect.js
+│   │   ├── csv.js
+│   │   ├── deliverySync.js
+│   │   ├── device.js
+│   │   ├── format-currency.js
+│   │   ├── idempotency.js
+│   │   ├── indexeddb.js
+│   │   ├── logout.js
+│   │   ├── nav.js
+│   │   ├── orgs.js
+│   │   ├── permissions.js
+│   │   ├── storage.js
+│   │   ├── usePagination.js
+│   │   └── validation.js
+│   └── store
+│       └── session.js
+├── client_tree.txt
+├── COMPLETION_SUMMARY.md
+├── dddffsdfsdfsdfsdfsdf
+├── DELIVERABLES.md
+├── DOCUMENTATION_INDEX.md
+├── eslint.config.mjs
+├── FINAL_CHECKLIST.md
+├── FLEXI_POS_INTEGRATION_TESTING.md
+├── .gitignore
+├── IMPLEMENTATION_PROGRESS.md
+├── jsconfig.json
+├── next.config.mjs
+├── OFFLINE_SYNC_GUIDE.md
+├── package.json
+├── package-lock.json
+├── PHASE_3_COMPLETION.md
+├── PHASE_4_COMPLETION.md
+├── postcss.config.mjs
+├── README.md
+├── RETURNS_IMPLEMENTATION.md
+└── VISUAL_GUIDE.md
+
+102 directories, 200 files

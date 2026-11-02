@@ -5,6 +5,9 @@ import { switchOrganization } from "@/lib/orgs";
 import { Dropdown } from "@/components/ui/Dropdown";
 import { OrgAvatar } from "@/components/ui/Avatar";
 import { ChevronDown } from "@/components/icons/Icon";
+import { useSessionStore } from "@/store/session";
+
+const { resetOrgData } = useSessionStore();
 
 export function OrgSwitcher({
   activeOrganization,
@@ -58,7 +61,12 @@ export function OrgSwitcher({
 
         {/* Switch Organization */}
         <button
-          onClick={() => router.push("/auth/select-organization")}
+          onClick={() => {
+            // Clear org-scoped state so the selection page cannot act
+            // on the old org if a background request resolves late.
+            useSessionStore.getState().resetOrgData();
+            router.push("/auth/select-organization");
+          }}
           className="w-full text-left text-sm text-blue-600 hover:text-blue-700 font-medium py-2 px-2 rounded-md hover:bg-blue-50"
         >
           Switch Organization
