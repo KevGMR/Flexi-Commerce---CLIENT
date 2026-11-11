@@ -81,8 +81,18 @@ const DEFAULT_CONFIGS = {
       { title: "Easy returns", body: "" },
     ],
   },
-  banner: { imageUrl: "", href: "", alt: "" },
-    "featured-category": {
+  banner: {
+    heading: "",
+    subheading: "",
+    ctaLabel: "",
+    ctaHref: "",
+    imageUrl: "",
+    imageUrlMobile: "",
+    href: "",
+    alt: "",
+    align: "left",
+  },
+  "featured-category": {
     heading: "Shop by category",
     subheading: "",
     categorySlugs: [],
