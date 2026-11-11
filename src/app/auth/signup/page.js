@@ -255,9 +255,9 @@ function SignupContent() {
                 required
                 value={invitationToken}
                 onChange={(event) => setInvitationToken(event.target.value)}
-                className="mt-1 w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 placeholder:text-zinc-400 focus:border-zinc-500 focus:outline-none"
+                className="... "
                 placeholder="Paste invitation token"
-                disabled
+                disabled={Boolean(invitationFromQuery)}   // ← was: disabled
               />
             </div>
           )}
