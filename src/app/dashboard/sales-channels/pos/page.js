@@ -330,14 +330,36 @@ export default function PosPage() {
 
   const getLocationLabel = (id) => {
     if (!id) return "";
+
+    // 1) The currently-selected location's settings doc has a fresh name —
+    //    use it first. This is what makes the switcher show the right name
+    //    on first paint even if locationsMeta hasn't been populated yet.
+    if (
+      locationSettings &&
+      (locationSettings._id === id ||
+        locationSettings.id === id ||
+        locationSettings.locationId === id)
+    ) {
+      return locationSettings.name || locationSettings.shopifyLocationName || id;
+    }
+
+    // 2) Look up in the cached metadata list (works for all locations,
+    //    selected or not, once the fetch completes).
     const match = locationsMeta?.find((loc) => {
       if (typeof loc === "string") return loc === id;
       const locId = loc?._id || loc?.id || loc?.locationId;
       return locId === id;
     });
-    if (!match) return id;
-    if (typeof match === "string") return match;
-    return match.name || match.shopifyLocationName || id;
+    if (match) {
+      if (typeof match === "string") return match;
+      if (match.name) return match.name;
+      if (match.shopifyLocationName) return match.shopifyLocationName;
+    }
+
+    // 3) Last-ditch: if only the ID array is known, show a friendly stub
+    //    rather than an opaque ObjectId. The metadata fetch will replace
+    //    this as soon as it lands.
+    return "Loading location…";
   };
 
   // Load locations
@@ -345,31 +367,31 @@ export default function PosPage() {
     const loadLocations = async () => {
       try {
         const res = await apiFetch("/locations?limit=100");
-        if (res?.data || res?.locations) {
-          const allLocations = res.data || res.locations || [];
-          const allLocationIds = allLocations
-            .map((loc) => loc._id || loc.id || loc.locationId)
-            .filter(Boolean);
+        const allLocations = res?.data || res?.locations || [];
+        const allLocationIds = allLocations
+          .map((loc) => loc._id || loc.id || loc.locationId)
+          .filter(Boolean);
 
-          if (allLocationIds.length > 0) {
-            useSessionStore.getState().setLocations(allLocationIds);
-            useSessionStore.getState().setLocationsMeta(allLocations);
-          }
-
-          setLocationsLoading(false);
+        if (allLocationIds.length > 0) {
+          useSessionStore.getState().setLocations(allLocationIds);
+          useSessionStore.getState().setLocationsMeta(allLocations);
         }
+        setLocationsLoading(false);
       } catch (err) {
-        console.warn("Failed to load locations:", err);
+        console.warn("[POS] Failed to load locations:", err);
         setLocationsLoading(false);
       }
     };
 
-    if (!locations || locations.length === 0) {
+    // FIX: previously we skipped the fetch whenever `locations` was already
+    // populated. But `locations` (from session storage) can be just an array
+    // of IDs with `locationsMeta` still empty — in which case the location
+    // switcher fell back to rendering raw IDs. Always fetch on mount for the
+    // active org/access-token pair; the store setter is idempotent.
+    if (accessToken) {
       loadLocations();
-    } else {
-      setLocationsLoading(false);
     }
-  }, [activeOrganization?.id, accessToken, locations]);
+  }, [activeOrganization?.id, accessToken]);
 
   useEffect(() => {
     if (locations !== undefined) {
