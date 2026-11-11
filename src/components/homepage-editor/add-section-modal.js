@@ -50,12 +50,15 @@ const SECTION_TYPES = [
 
 const DEFAULT_CONFIGS = {
   hero: {
+    eyebrow: "",
     heading: "Welcome",
     subheading: "",
     ctaLabel: "",
     ctaHref: "",
     imageUrl: "",
+    imageUrlMobile: "",
     align: "left",
+    fullHeight: false,
   },
   "featured-products": {
     heading: "Featured products",

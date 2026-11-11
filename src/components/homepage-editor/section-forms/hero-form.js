@@ -21,6 +21,22 @@ export function HeroForm({ config, onChange }) {
     <div className="space-y-4">
       <div>
         <label className="block text-xs font-medium text-gray-700 mb-1">
+          Eyebrow (optional)
+        </label>
+        <input
+          type="text"
+          value={config.eyebrow || ""}
+          onChange={(e) => update("eyebrow", e.target.value)}
+          maxLength={40}
+          placeholder="New arrivals"
+          className="block w-full rounded border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
+        />
+        <p className="mt-1 text-xs text-gray-500">
+          Small uppercase text above the heading.
+        </p>
+      </div>
+      <div>
+        <label className="block text-xs font-medium text-gray-700 mb-1">
           Heading
         </label>
         <input
